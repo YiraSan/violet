@@ -13,7 +13,7 @@ CFLAGS = \
 	-fshort-wchar \
 	-g \
 	-nostdlib \
-	-pedantic
+	-pedantic-errors
 
 ASMFLAGS = \
 	-Iinclude \
@@ -46,8 +46,12 @@ lib/%_s.o: source/%.s
 	@ $(call cyan,"$(subst ../,,$^)")
 	@ $(CC) $(ASMFLAGS) -c $^ -o $@
 
-build/x86_64: \
-	$(eval CLAGS += \
+headers:
+	@ mkdir -p include/
+	@ cp $(HOME)/boot/limine/limine.h include/
+
+build/x86_64: headers \
+	$(eval CFLAGS += \
 	--target=x86_64-unknown-none-elf \
 	-mno-red-zone \
 	-mno-avx \

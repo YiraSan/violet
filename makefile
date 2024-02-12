@@ -40,15 +40,16 @@ build/x86_64: install/limine
 	@ cp boot/limine.cfg boot/init/
 	@ mkdir -p boot/init/limine/
 	@ cp boot/limine/limine-bios.sys boot/limine/limine-bios-cd.bin boot/limine/limine-uefi-cd.bin boot/init/limine/
-	xorriso -as mkisofs -b limine/limine-bios-cd.bin \
+	@ xorriso -as mkisofs -b limine/limine-bios-cd.bin \
         -no-emul-boot -boot-load-size 4 -boot-info-table \
         --efi-boot limine/limine-uefi-cd.bin \
         -efi-boot-part --efi-boot-image --protective-msdos-label \
         boot/init/ -o violet-x86_64.iso
-	boot/limine/limine bios-install violet-x86_64.iso
+	@ boot/limine/limine bios-install violet-x86_64.iso
 
 X86_64_QEMU_FLAGS = \
 	-bios boot/ovmf-x86_64/OVMF.fd \
+	-cdrom violet-x86_64.iso \
 	-machine q35 \
 	-m 2G \
 	-smp cores=4 \
