@@ -2,8 +2,8 @@ cyan = /bin/echo -e "\x1b[36m\#\# $1\x1b[0m"
 
 override HOME = ..
 
-CC = clang
-LD = ld.lld
+CC = clang-17
+LD = ld.lld-17
 
 CFLAGS = \
 	-Iinclude \
