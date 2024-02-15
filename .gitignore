@@ -1,1 +1,2 @@
-*.iso
+/zig-cache
+/zig-out
