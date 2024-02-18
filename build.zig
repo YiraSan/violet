@@ -9,8 +9,8 @@ const violet_version = std.SemanticVersion{
     .patch = 0,
 };
 
-pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
-    
+pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
+
     // dependencies
 
     const limine = b.dependency("limine", .{});
@@ -34,14 +34,16 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
             target.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
         },
         .aarch64 => {},
+        .riscv64 => {},
         else => return error.UnsupportedTarget,
     }
 
     const optimize = b.standardOptimizeOption(.{});
+    const exe_options = b.addOptions();
 
     const kernel = b.addExecutable(.{
         .name = "kernel",
-        .root_source_file = .{ .path = "kernel/main.zig" },
+        .root_source_file = .{ .path = "kernel/kernel_std.zig" },
         .target = b.resolveTargetQuery(target),
         .optimize = optimize,
         .code_model = switch (target.cpu_arch.?) {
@@ -56,13 +58,55 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
 
     kernel.setLinkerScriptPath(.{
         .path = switch (target.cpu_arch.?) {
-            .aarch64 => "kernel/aarch64/kernel.ld",
-            .x86_64 => "kernel/x86_64/kernel.ld",
-            .riscv64 => "kernel/riscv64/kernel.ld",
+            .aarch64 => "kernel/linker/aarch64.ld",
+            .x86_64 => "kernel/linker/x86_64.ld",
+            .riscv64 => "kernel/linker/riscv64.ld",
             else => return error.UnsupportedArchitecture,
         },
     });
 
+    // From https://github.com/zigtools/zls
+    const version = v: {
+        const version_string = b.fmt("{d}.{d}.{d}", .{ violet_version.major, violet_version.minor, violet_version.patch });
+        const build_root_path = b.build_root.path orelse ".";
+
+        var code: u8 = undefined;
+        const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
+            "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
+        }, &code, .Ignore) catch break :v version_string;
+
+        const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
+
+        switch (std.mem.count(u8, git_describe, "-")) {
+            0 => {
+                // Tagged release version (e.g. 0.10.0).
+                std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
+                break :v version_string;
+            },
+            2 => {
+                // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
+                var it = std.mem.split(u8, git_describe, "-");
+                const tagged_ancestor = it.first();
+                const commit_height = it.next().?;
+                const commit_id = it.next().?;
+
+                const ancestor_ver = try std.SemanticVersion.parse(tagged_ancestor);
+                std.debug.assert(violet_version.order(ancestor_ver) == .gt); // version must be greater than its previous version
+                std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
+
+                break :v b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
+            },
+            else => {
+                std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
+                std.process.exit(1);
+            },
+        }
+    };
+
+    exe_options.addOption([:0]const u8, "version", b.allocator.dupeZ(u8, version) catch "0.1.0-dev");
+    exe_options.addOption([:0]const u8, "board", try b.allocator.dupeZ(u8, @tagName(board)));
+
+    kernel.root_module.addOptions("build_options", exe_options);
     kernel.root_module.addImport("limine", limine.module("limine"));
 
     b.installArtifact(kernel);
@@ -185,6 +229,22 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "-no-shutdown",
             // zig fmt: on
         },
+        .riscv64 => &[_][]const u8{
+            // zig fmt: off
+            "sudo",
+            qemu_executable,
+            "-smp", "2",
+            "-M", "virt,accel=kvm:whpx:hvf:tcg",
+            "-m", "2G",
+            "-cdrom", "zig-out/iso/violet.iso",
+            "-bios", try edk2FileName(b, cpu_arch),
+            "-boot", "d",
+            "-device", "ramfb",
+            "-serial", "stdio",
+            "-no-reboot",
+            "-no-shutdown",
+            // zig fmt: on
+        },
         else => return error.UnsupportedArchitecture,
     };
 
@@ -197,12 +257,18 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
     return qemu_iso_cmd;
 }
 
+const Board = enum {
+    qemu,
+};
 
 pub fn build(b: *std.Build) !void {
 
-    const cpu_arch = b.option(Arch, "arch", "target architecture") orelse .x86_64;
+    const board = b.option(Board, "board", "target board") orelse .qemu;
+    const cpu_arch = switch (board) {
+        else => b.option(Arch, "arch", "target architecture") orelse .x86_64,
+    };
 
-    try buildKernel(b, cpu_arch);
+    try buildKernel(b, cpu_arch, board);
     _ = try runIsoQemu(b, try buildIso(b), cpu_arch);
 
 }

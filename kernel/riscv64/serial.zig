@@ -1,6 +1,3 @@
-const PL011 = @import("serial/pl011.zig");
-const NS16550 = @import("serial/ns16550.zig");
-
 pub fn init() !void {
     
 }

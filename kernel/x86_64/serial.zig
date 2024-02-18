@@ -35,3 +35,7 @@ pub fn print(text: []const u8) void {
         write(char);
     }
 }
+
+pub fn read() u8 {
+    return io.read(u8, COM1 + 0);
+}

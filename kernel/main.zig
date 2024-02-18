@@ -1,34 +1,24 @@
-const builtin = @import("builtin");
-const arch = @import("arch.zig");
+const std = @import("std");
+const build_options = @import("build_options");
 
-comptime {
-    @export(arch.main.start, .{ .name = "_start", .linkage = .Strong });
-}
-
-const limine = @import("limine");
-
-pub export var framebuffer_request: limine.FramebufferRequest = .{};
-pub export var base_revision: limine.BaseRevision = .{ .revision = 1 };
+const limine = @import("limine.zig");
+const pmm = @import("mm/pmm.zig");
 
 pub fn main() !void {
 
-    arch.serial.print("welcome to violet!\n");
+    std.log.debug("kernel/version {s}\n", .{build_options.version});
 
-    // check if limine is supported
-    if (!base_revision.is_supported()) {
-        arch.idle();
-    }
+    try limine.init();
+    try pmm.init();
 
-    // draw a line if there's a framebuffer
-    if (framebuffer_request.response) |framebuffer_response| {
-        if (framebuffer_response.framebuffer_count > 0) {
-            const framebuffer = framebuffer_response.framebuffers()[0];
+    // test: framebuffer
+    if (limine.framebuffer.framebuffer_count > 0) {
+        const framebuffer = limine.framebuffer.framebuffers()[0];
 
-            for (0..100) |i| {
-                const pixel_offset = i * framebuffer.pitch + i * 4;
+        for (0..100) |i| {
+            const pixel_offset = i * framebuffer.pitch + i * 4;
 
-                @as(*u32, @ptrCast(@alignCast(framebuffer.address + pixel_offset))).* = 0xFFFFFFFF;
-            }
+            @as(*u32, @ptrCast(@alignCast(framebuffer.address + pixel_offset))).* = 0xFFFFFFFF;
         }
     }
     

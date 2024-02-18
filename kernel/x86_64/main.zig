@@ -17,7 +17,8 @@ pub fn start() callconv(.C) noreturn {
     var cr4 = cr.read(4);
     cr4 |= @as(u64, 3) << 9;
     cr.write(4, cr4);
-
+    
+    // initialize serial and call main fn
     arch.serial.init() catch arch.idle();
     main() catch arch.idle();
     arch.idle();
