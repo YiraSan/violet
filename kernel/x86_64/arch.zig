@@ -10,4 +10,5 @@ pub fn idle() noreturn {
     while (true) {
         asm volatile ("hlt");
     }
+    unreachable;
 }

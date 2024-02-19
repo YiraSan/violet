@@ -234,6 +234,7 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "sudo",
             qemu_executable,
             "-smp", "2",
+            "-cpu", "rv64",
             "-M", "virt,accel=kvm:whpx:hvf:tcg",
             "-m", "2G",
             "-cdrom", "zig-out/iso/violet.iso",

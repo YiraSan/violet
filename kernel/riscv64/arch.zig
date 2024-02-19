@@ -5,4 +5,5 @@ pub const Spinlock = @import("spinlock.zig").Spinlock;
 
 pub fn idle() noreturn {
     while (true) {}
+    unreachable;
 }
