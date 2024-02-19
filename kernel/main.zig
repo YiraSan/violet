@@ -1,6 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
+const arch = @import("arch.zig");
 const limine = @import("limine.zig");
 const pmm = @import("mm/pmm.zig");
 
@@ -10,7 +11,9 @@ pub fn main() !void {
     // std.log.debug("boot time: {}", .{limine.boot_time.boot_time});
 
     try limine.init();
+    
     try pmm.init();
+    try arch.vmm.init();
 
     // test: framebuffer
     if (limine.framebuffer.framebuffer_count > 0) {

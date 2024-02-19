@@ -82,3 +82,72 @@ pub fn init() !void {
     }
 
 }
+
+
+fn inner_alloc(count: usize, limit: usize) ?[*]u8 {
+    var p: usize = 0;
+    while (last_used_index < limit) {
+        if (!bitmap.check(last_used_index)) {
+            last_used_index += 1;
+            p += 1;
+
+            if (p == count) {
+                const page = last_used_index - count;
+
+                var i: usize = 0;
+                while (i < last_used_index) : (i += 1)
+                    bitmap.set(i);
+
+                return @as([*]u8, @ptrFromInt(page * std.mem.page_size));
+            }
+        } else {
+            last_used_index += 1;
+            p = 0;
+        }
+    }
+
+    return null;
+}
+
+pub fn allocNz(count: usize) ?[*]u8 {
+    lock.lock();
+    defer lock.unlock();
+
+    const last = last_used_index;
+    var ret = inner_alloc(count, highest_page_index);
+
+    if (ret == null) {
+        last_used_index = 0;
+        ret = inner_alloc(count, last);
+        if (ret == null) {
+            @panic("allocated memory is null");
+        }
+    }
+
+    used_pages += count;
+    return ret;
+}
+
+pub fn alloc(count: usize) ?[*]u8 {
+    const ret = allocNz(count);
+    var ptr = @as([*]u8, @ptrFromInt(@intFromPtr(ret.?) + limine.hhdm.offset));
+
+    var i: usize = 0;
+    while (i < (count * std.mem.page_size) / 8) : (i += 1)
+        ptr[i] = 0;
+
+    return ret;
+}
+
+pub fn free(buf: ?[*]u8, count: usize) void {
+    lock.lock();
+    defer lock.unlock();
+
+    const page = @intFromPtr(buf.?) / std.mem.page_size;
+
+    var i: usize = 0;
+    while (i < page + count) : (i += 1)
+        bitmap.unset(i);
+
+    used_pages -= count;
+}
