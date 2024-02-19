@@ -6,8 +6,8 @@ const pmm = @import("mm/pmm.zig");
 
 pub fn main() !void {
 
-    std.log.debug("kernel/version {s}\n", .{build_options.version});
-    std.log.debug("boot time: {}", .{limine.boot_time.boot_time});
+    std.log.debug("violet v{s}\n", .{build_options.version});
+    // std.log.debug("boot time: {}", .{limine.boot_time.boot_time});
 
     try limine.init();
     try pmm.init();

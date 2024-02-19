@@ -55,6 +55,10 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
     });
 
     kernel.pie = true;
+    kernel.root_module.stack_protector = false;
+    kernel.root_module.stack_check = false;
+    kernel.root_module.red_zone = false;
+    kernel.want_lto = false;
 
     kernel.setLinkerScriptPath(.{
         .path = switch (target.cpu_arch.?) {
@@ -170,15 +174,34 @@ fn downloadEdk2(b: *std.Build, cpu_arch: Arch) !void {
     const link = switch (cpu_arch) {
         .x86_64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd",
         .aarch64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEAARCH64_QEMU_EFI.fd",
-        .riscv64 => "https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT.fd",
+        .riscv64 => "https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT_CODE.fd",
         else => return error.UnsupportedArchitecture,
     };
 
-    const cmd = &[_][]const u8{ "curl", link, "-Lo", try edk2FileName(b, cpu_arch) };
-    var child_proc = std.ChildProcess.init(cmd, b.allocator);
-    try child_proc.spawn();
-    const ret_val = try child_proc.wait();
-    try std.testing.expectEqual(ret_val, std.ChildProcess.Term{ .Exited = 0 });
+    {
+        const cmd = &[_][]const u8{ "curl", link, "-Lo", try edk2FileName(b, cpu_arch) };
+        var child_proc = std.ChildProcess.init(cmd, b.allocator);
+        try child_proc.spawn();
+        const ret_val = try child_proc.wait();
+        try std.testing.expectEqual(ret_val, std.ChildProcess.Term{ .Exited = 0 });
+    }
+
+    // dd if=/dev/zero of=OVMF.fd bs=1 count=0 seek=33554432
+    if (cpu_arch == .riscv64) {
+        const cmd = &[_][]const u8{ 
+            "dd", 
+            "if=/dev/zero", 
+            b.fmt("of={s}", .{try edk2FileName(b, cpu_arch)}),
+            "bs=1",
+            "count=0",
+            "seek=33554432",
+        };
+        var child_proc = std.ChildProcess.init(cmd, b.allocator);
+        try child_proc.spawn();
+        const ret_val = try child_proc.wait();
+        try std.testing.expectEqual(ret_val, std.ChildProcess.Term{ .Exited = 0 });
+    }
+
 }
 
 fn edk2FileName(b: *std.Build, cpu_arch: Arch) ![]const u8 {
@@ -224,6 +247,8 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "-bios", try edk2FileName(b, cpu_arch),
             "-boot", "d",
             "-device", "ramfb",
+            "-device", "qemu-xhci",
+            "-device", "usb-kbd",
             "-serial", "stdio",
             "-no-reboot",
             "-no-shutdown",
@@ -237,10 +262,14 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "-cpu", "rv64",
             "-M", "virt,accel=kvm:whpx:hvf:tcg",
             "-m", "2G",
-            "-cdrom", "zig-out/iso/violet.iso",
-            "-bios", try edk2FileName(b, cpu_arch),
             "-boot", "d",
             "-device", "ramfb",
+            "-device", "qemu-xhci",
+            "-device", "usb-kbd",
+            "-drive", b.fmt("if=pflash,unit=0,format=raw,file={s}", .{try edk2FileName(b, cpu_arch)}),
+            "-device", "virtio-scsi-pci,id=scsi",
+            "-device", "scsi-cd,drive=cd0",
+            "-drive", "id=cd0,format=raw,file=zig-out/iso/violet.iso",
             "-serial", "stdio",
             "-no-reboot",
             "-no-shutdown",

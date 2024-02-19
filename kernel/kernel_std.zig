@@ -16,7 +16,7 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) "main" else @tagName(scope);
-    const prefix = "\x1b[35m[violet:" ++ scope_prefix ++ "] " ++ switch (level) {
+    const prefix = "\x1b[35m[kernel:" ++ scope_prefix ++ "] " ++ switch (level) {
         .err => "\x1b[31merror",
         .warn => "\x1b[33mwarning",
         .info => "\x1b[36minfo",
