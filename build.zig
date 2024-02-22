@@ -9,7 +9,7 @@ const violet_version = std.SemanticVersion{
     .patch = 0,
 };
 
-pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
+pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
 
     // dependencies
 
@@ -108,7 +108,6 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
     };
 
     exe_options.addOption([:0]const u8, "version", b.allocator.dupeZ(u8, version) catch "0.1.0-dev");
-    exe_options.addOption([:0]const u8, "board", try b.allocator.dupeZ(u8, @tagName(board)));
     kernel.root_module.addOptions("build_options", exe_options);
     kernel.root_module.addImport("limine", limine.module("limine"));
 
@@ -292,12 +291,9 @@ const Board = enum {
 
 pub fn build(b: *std.Build) !void {
 
-    const board = b.option(Board, "board", "target board") orelse .qemu;
-    const cpu_arch = switch (board) {
-        else => b.option(Arch, "arch", "target architecture") orelse .x86_64,
-    };
+    const cpu_arch = b.option(Arch, "arch", "target architecture") orelse .x86_64;
 
-    try buildKernel(b, cpu_arch, board);
+    try buildKernel(b, cpu_arch);
     _ = try runIsoQemu(b, try buildIso(b), cpu_arch);
 
 }
