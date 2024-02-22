@@ -1,12 +1,10 @@
-const PL011 = @import("serial/pl011.zig");
-const NS16550 = @import("serial/ns16550.zig");
-
 pub fn init() !void {
     
 }
 
 pub fn write(char: u8) void {
-
+    // @fence(.SeqCst);
+    // @as(*volatile u8, @ptrFromInt(0x09000000)).* = char;
     if (char == '\n') write('\r');
 }
 

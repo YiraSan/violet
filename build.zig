@@ -34,7 +34,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
             target.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
         },
         .aarch64 => {},
-        .riscv64 => {},
+        // .riscv64 => {},
         else => return error.UnsupportedTarget,
     }
 
@@ -43,7 +43,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
 
     const kernel = b.addExecutable(.{
         .name = "kernel",
-        .root_source_file = .{ .path = "kernel/kernel_std.zig" },
+        .root_source_file = .{ .path = "kernel/kernel.zig" },
         .target = b.resolveTargetQuery(target),
         .optimize = optimize,
         .code_model = switch (target.cpu_arch.?) {
@@ -62,10 +62,10 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
 
     kernel.setLinkerScriptPath(.{
         .path = switch (target.cpu_arch.?) {
-            .aarch64 => "kernel/linker/aarch64.ld",
-            .x86_64 => "kernel/linker/x86_64.ld",
-            .riscv64 => "kernel/linker/riscv64.ld",
-            else => return error.UnsupportedArchitecture,
+            .aarch64 => "kernel/arch/linker-aarch64.ld",
+            .x86_64 => "kernel/arch/linker-x86_64.ld",
+            .riscv64 => "kernel/arch/linker-riscv64.ld",
+            else => unreachable,
         },
     });
 
@@ -109,7 +109,6 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch, board: Board) !void {
 
     exe_options.addOption([:0]const u8, "version", b.allocator.dupeZ(u8, version) catch "0.1.0-dev");
     exe_options.addOption([:0]const u8, "board", try b.allocator.dupeZ(u8, @tagName(board)));
-
     kernel.root_module.addOptions("build_options", exe_options);
     kernel.root_module.addImport("limine", limine.module("limine"));
 
