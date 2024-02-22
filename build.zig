@@ -34,7 +34,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
             target.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
         },
         .aarch64 => {},
-        // .riscv64 => {},
+        .riscv64 => {},
         else => return error.UnsupportedTarget,
     }
 
