@@ -1,7 +1,7 @@
 const boot = @import("boot/boot.zig");
 
 comptime {
-    @export(boot.entry.start, .{ .name = "_start", .linkage = .Strong });
+    @export(boot.entry.start, .{ .name = "_start", .linkage = .strong });
 }
 
 const std = @import("std");

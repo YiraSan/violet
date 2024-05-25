@@ -219,7 +219,6 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
     const qemu_iso_args = switch (cpu_arch) {
         .x86_64 => &[_][]const u8{
             // zig fmt: off
-            "sudo",
             qemu_executable,
             "-cpu", "max",
             "-smp", "2",
@@ -235,7 +234,6 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
         },
         .aarch64 => &[_][]const u8{
             // zig fmt: off
-            "sudo",
             qemu_executable,
             "-cpu", "max",
             "-smp", "2",
@@ -254,7 +252,6 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
         },
         .riscv64 => &[_][]const u8{
             // zig fmt: off
-            "sudo",
             qemu_executable,
             "-smp", "2",
             "-cpu", "rv64",
