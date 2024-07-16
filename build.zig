@@ -43,7 +43,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
 
     const kernel = b.addExecutable(.{
         .name = "kernel",
-        .root_source_file = .{ .path = "kernel/kernel.zig" },
+        .root_source_file = b.path("kernel/kernel.zig"),
         .target = b.resolveTargetQuery(target),
         .optimize = optimize,
         .code_model = switch (target.cpu_arch.?) {
@@ -60,13 +60,11 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
     kernel.root_module.red_zone = false;
     kernel.want_lto = false;
 
-    kernel.setLinkerScriptPath(.{
-        .path = switch (target.cpu_arch.?) {
-            .aarch64 => "kernel/arch/linker-aarch64.ld",
-            .x86_64 => "kernel/arch/linker-x86_64.ld",
-            .riscv64 => "kernel/arch/linker-riscv64.ld",
-            else => unreachable,
-        },
+    kernel.setLinkerScriptPath(switch (target.cpu_arch.?) {
+        .aarch64 => b.path("kernel/arch/linker-aarch64.ld"),
+        .x86_64 => b.path("kernel/arch/linker-x86_64.ld"),
+        .riscv64 => b.path("kernel/arch/linker-riscv64.ld"),
+        else => unreachable,
     });
 
     // From https://github.com/zigtools/zls
@@ -178,10 +176,11 @@ fn downloadEdk2(b: *std.Build, cpu_arch: Arch) !void {
 
     {
         const cmd = &[_][]const u8{ "curl", link, "-Lo", try edk2FileName(b, cpu_arch) };
-        var child_proc = std.ChildProcess.init(cmd, b.allocator);
+        var child_proc = std.process.Child.init(cmd, b.allocator);
         try child_proc.spawn();
         const ret_val = try child_proc.wait();
-        try std.testing.expectEqual(ret_val, std.ChildProcess.Term{ .Exited = 0 });
+        std.debug.print("{}", .{ret_val});
+        try std.testing.expectEqual(ret_val, std.process.Child.Term{ .Exited = 0 });
     }
 
     // dd if=/dev/zero of=OVMF.fd bs=1 count=0 seek=33554432
@@ -194,16 +193,16 @@ fn downloadEdk2(b: *std.Build, cpu_arch: Arch) !void {
             "count=0",
             "seek=33554432",
         };
-        var child_proc = std.ChildProcess.init(cmd, b.allocator);
+        var child_proc = std.process.Child.init(cmd, b.allocator);
         try child_proc.spawn();
         const ret_val = try child_proc.wait();
-        try std.testing.expectEqual(ret_val, std.ChildProcess.Term{ .Exited = 0 });
+        try std.testing.expectEqual(ret_val, std.process.Child.Term{ .Exited = 0 });
     }
 
 }
 
 fn edk2FileName(b: *std.Build, cpu_arch: Arch) ![]const u8 {
-    return std.mem.concat(b.allocator, u8, &[_][]const u8{ "zig-cache/edk2-", @tagName(cpu_arch), ".fd" });
+    return std.mem.concat(b.allocator, u8, &[_][]const u8{ ".zig-cache/edk2-", @tagName(cpu_arch), ".fd" });
 }
 
 fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Build.Step.Run {
