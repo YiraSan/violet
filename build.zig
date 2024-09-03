@@ -3,10 +3,14 @@ const std = @import("std");
 const Arch = std.Target.Cpu.Arch;
 
 // keep up to date with build.zig.zon !
-const violet_version = std.SemanticVersion{
+const violet_version = std.SemanticVersion {
     .major = 0,
     .minor = 1,
     .patch = 0,
+};
+
+const Device = enum {
+    qemu,
 };
 
 pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
@@ -34,7 +38,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
             target.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
         },
         .aarch64 => {},
-        .riscv64 => {},
+        // .riscv64 => {},
         else => return error.UnsupportedTarget,
     }
 
@@ -63,7 +67,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
     kernel.setLinkerScriptPath(switch (target.cpu_arch.?) {
         .aarch64 => b.path("kernel/arch/linker-aarch64.ld"),
         .x86_64 => b.path("kernel/arch/linker-x86_64.ld"),
-        .riscv64 => b.path("kernel/arch/linker-riscv64.ld"),
+        // .riscv64 => b.path("kernel/arch/linker-riscv64.ld"),
         else => unreachable,
     });
 
@@ -106,6 +110,7 @@ pub fn buildKernel(b: *std.Build, cpu_arch: Arch) !void {
     };
 
     exe_options.addOption([:0]const u8, "version", b.allocator.dupeZ(u8, version) catch "0.1.0-dev");
+    exe_options.addOption(Device, "device", .qemu);
     kernel.root_module.addOptions("build_options", exe_options);
     kernel.root_module.addImport("limine", limine.module("limine"));
 
@@ -135,7 +140,7 @@ pub fn buildIso(b: *std.Build) !*std.Build.Step.Run {
         try std.mem.concat(b.allocator, u8, &[_][]const u8{
             "mkdir -p zig-out/iso/root/EFI/BOOT && ",
             "cp zig-out/bin/kernel zig-out/iso/root && ",
-            "cp limine.cfg zig-out/iso/root && ",
+            "cp kernel/boot/limine.conf zig-out/iso/root && ",
             "cp ", limine_path.getPath(b), "/limine-bios.sys ",
                    limine_path.getPath(b), "/limine-bios-cd.bin ",
                    limine_path.getPath(b), "/limine-uefi-cd.bin ",
@@ -170,7 +175,7 @@ fn downloadEdk2(b: *std.Build, cpu_arch: Arch) !void {
     const link = switch (cpu_arch) {
         .x86_64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd",
         .aarch64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEAARCH64_QEMU_EFI.fd",
-        .riscv64 => "https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT_CODE.fd",
+        // .riscv64 => "https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT_CODE.fd",
         else => return error.UnsupportedArchitecture,
     };
 
@@ -211,16 +216,16 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
     const qemu_executable = switch (cpu_arch) {
         .x86_64 => "qemu-system-x86_64",
         .aarch64 => "qemu-system-aarch64",
-        .riscv64 => "qemu-system-riscv64",
+        // .riscv64 => "qemu-system-riscv64",
         else => return error.UnsupportedArchitecture,
     };
 
     const qemu_iso_args = switch (cpu_arch) {
-        .x86_64 => &[_][]const u8{
+        .x86_64 => &[_][]const u8 {
             // zig fmt: off
             qemu_executable,
             "-cpu", "max",
-            "-smp", "2",
+            "-smp", "4",
             "-M", "q35,accel=kvm:whpx:hvf:tcg",
             "-m", "2G",
             "-cdrom", "zig-out/iso/violet.iso",
@@ -228,14 +233,14 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "-boot", "d",
             "-serial", "stdio",
             "-no-reboot",
-            "-no-shutdown",
+            "-no-shutdown"
             // zig fmt: on
         },
-        .aarch64 => &[_][]const u8{
+        .aarch64 => &[_][]const u8 {
             // zig fmt: off
             qemu_executable,
             "-cpu", "max",
-            "-smp", "2",
+            "-smp", "4",
             "-M", "virt,accel=kvm:whpx:hvf:tcg",
             "-m", "2G",
             "-cdrom", "zig-out/iso/violet.iso",
@@ -249,26 +254,26 @@ fn runIsoQemu(b: *std.Build, iso: *std.Build.Step.Run, cpu_arch: Arch) !*std.Bui
             "-no-shutdown",
             // zig fmt: on
         },
-        .riscv64 => &[_][]const u8{
-            // zig fmt: off
-            qemu_executable,
-            "-smp", "2",
-            "-cpu", "rv64",
-            "-M", "virt,accel=kvm:whpx:hvf:tcg",
-            "-m", "2G",
-            "-boot", "d",
-            "-device", "ramfb",
-            "-device", "qemu-xhci",
-            "-device", "usb-kbd",
-            "-drive", b.fmt("if=pflash,unit=0,format=raw,file={s}", .{try edk2FileName(b, cpu_arch)}),
-            "-device", "virtio-scsi-pci,id=scsi",
-            "-device", "scsi-cd,drive=cd0",
-            "-drive", "id=cd0,format=raw,file=zig-out/iso/violet.iso",
-            "-serial", "stdio",
-            "-no-reboot",
-            "-no-shutdown",
-            // zig fmt: on
-        },
+        // .riscv64 => &[_][]const u8 {
+        //     // zig fmt: off
+        //     qemu_executable,
+        //     "-smp", "4",
+        //     "-cpu", "rv64",
+        //     "-M", "virt,accel=kvm:whpx:hvf:tcg",
+        //     "-m", "2G",
+        //     "-boot", "d",
+        //     "-device", "ramfb",
+        //     "-device", "qemu-xhci",
+        //     "-device", "usb-kbd",
+        //     "-drive", b.fmt("if=pflash,unit=0,format=raw,file={s}", .{try edk2FileName(b, cpu_arch)}),
+        //     "-device", "virtio-scsi-pci,id=scsi",
+        //     "-device", "scsi-cd,drive=cd0",
+        //     "-drive", "id=cd0,format=raw,file=zig-out/iso/violet.iso",
+        //     "-serial", "stdio",
+        //     "-no-reboot",
+        //     "-no-shutdown",
+        //     // zig fmt: on
+        // },
         else => return error.UnsupportedArchitecture,
     };
 

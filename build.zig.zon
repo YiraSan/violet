@@ -4,12 +4,12 @@
     .paths = .{"."},
     .dependencies = .{
         .limine = .{
-            .url = "https://github.com/limine-bootloader/limine-zig/archive/7b29b6e6f6d35052f01ed3831085a39aae131705.tar.gz",
+            .url = "https://github.com/48cf/limine-zig/archive/7b29b6e6f6d35052f01ed3831085a39aae131705.tar.gz",
             .hash = "1220f946f839eab2ec49dca1c805ce72ac3e3ef9c47b3afcdecd1c05a7b35f66d277",
         },
         .limine_bin = .{
-            .url = "git+https://github.com/limine-bootloader/limine#v7.10.3-binary",
-            .hash = "122005c1cbe5233178ebba5dac97d6bde7bfc8db17a612ac9ca4dc56f9cf42b27c00",
+            .url = "git+https://github.com/limine-bootloader/limine#v8.x-binary",
+            .hash = "12206d25a09028ba676894a31176fe9208f270db77cd99190f5983cec1427bdbec81",
         },
     },
 }
