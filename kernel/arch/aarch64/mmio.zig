@@ -1,4 +1,4 @@
-const boot = @import("../../../boot/boot.zig");
+const boot = @import("../../boot/boot.zig");
 
 pub fn read(comptime T: type, address: usize) T {
     @fence(.seq_cst);

@@ -1,5 +1,5 @@
 const std = @import("std");
-const mmio = @import("io/mmio.zig");
+const mmio = @import("mmio.zig");
 
 // this is qemu virt uart base address
 pub var base_address: usize = 0x09000000;
