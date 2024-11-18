@@ -1,8 +1,10 @@
 .{
     .name = "violet",
     .version = "0.0.0",
-    .minimum_zig_version = "0.14.0-dev.2238+1db8cade5",
+    .minimum_zig_version = "0.14.0-dev.2253+3a6a8b8aa",
     .paths = .{
+        "boot",
+        "kernel",
         "build.zig",
         "build.zig.zon",
     },
