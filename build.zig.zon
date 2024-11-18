@@ -7,5 +7,7 @@
         "kernel",
         "build.zig",
         "build.zig.zon",
+        "license",
+        "readme.md"
     },
 }
