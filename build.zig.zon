@@ -2,8 +2,14 @@
     .name = "violet",
     .version = "0.0.0",
     .minimum_zig_version = "0.14.0-dev.2253+3a6a8b8aa",
+    .dependencies = .{
+        .limine_bin = .{
+            .url = "git+https://github.com/limine-bootloader/limine#v8.4.0-binary",
+            .hash = "1220a1b1d2862c02333a8d6644ede7f0e80cdb64da2371b110803b4e05167de12727",
+        },
+        .kernel = .{ .path = "./kernel/" },
+    },
     .paths = .{
-        "boot",
         "kernel",
         "build.zig",
         "build.zig.zon",
