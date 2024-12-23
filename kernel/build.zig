@@ -56,6 +56,10 @@ pub fn build(b: *std.Build) void {
         else => unreachable,
     });
 
+    const build_options = b.addOptions();
+    build_options.addOption(Device, "device", device);
+    kernel.root_module.addOptions("build_options", build_options);
+
     b.installArtifact(kernel);
 
 }
