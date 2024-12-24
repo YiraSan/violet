@@ -66,11 +66,12 @@ pub fn build(b: *std.Build) void {
 
 const Device = enum(u8) {
     virt,
+    raspi4b,
     q35,
 
     pub fn arch(self: Device) std.Target.Cpu.Arch {
         return switch (self) {
-            .virt => .aarch64,
+            .virt, .raspi4b => .aarch64,
             .q35 => .x86_64,
         };
     }

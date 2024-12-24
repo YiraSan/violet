@@ -117,17 +117,10 @@ fn downloadEdk2(b: *std.Build, arch: std.Target.Cpu.Arch) !void {
 pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
     _ = std.fs.cwd().statFile(try edk2FileName(b, arch)) catch try downloadEdk2(b, arch);
 
-    const qemu_executable = switch (arch) {
-        .x86_64 => "qemu-system-x86_64",
-        .aarch64 => "qemu-system-aarch64",
-        .riscv64 => "qemu-system-riscv64",
-        else => return error.UnsupportedArchitecture,
-    };
-
     const qemu_iso_args = switch (arch) {
         .x86_64 => &[_][]const u8{
             // zig fmt: off
-            qemu_executable,
+            "qemu-system-x86_64",
             "-cpu", "max",
             "-smp", "2",
             "-M", "q35,accel=kvm:whpx:hvf:tcg",
@@ -142,7 +135,7 @@ pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
         },
         .aarch64 => &[_][]const u8{
             // zig fmt: off
-            qemu_executable,
+            "qemu-system-aarch64",
             "-cpu", "max",
             "-smp", "2",
             "-M", "virt,accel=kvm:whpx:hvf:tcg",
@@ -160,7 +153,7 @@ pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
         },
         .riscv64 => &[_][]const u8{
             // zig fmt: off
-            qemu_executable,
+            "qemu-system-riscv64",
             "-smp", "2",
             "-cpu", "rv64",
             "-M", "virt,accel=kvm:whpx:hvf:tcg",
@@ -187,11 +180,12 @@ pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
 
 const Device = enum(u8) {
     virt,
+    raspi4b,
     q35,
 
     pub fn arch(self: Device) std.Target.Cpu.Arch {
         return switch (self) {
-            .virt => .aarch64,
+            .virt, .raspi4b => .aarch64,
             .q35 => .x86_64,
         };
     }
