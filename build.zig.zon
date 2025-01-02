@@ -1,11 +1,11 @@
 .{
     .name = "violet",
     .version = "0.0.0",
-    .minimum_zig_version = "0.14.0-dev.2253+3a6a8b8aa",
+    .minimum_zig_version = "0.14.0-dev.2502+d12c0bf90",
     .dependencies = .{
         .limine_bin = .{
-            .url = "git+https://github.com/limine-bootloader/limine#v8.6.0-binary",
-            .hash = "122054121d23f9f11b12e7d3982d03ed34555c97fa8806d4c91bb9dd52ed0265da3c",
+            .url = "git+https://github.com/limine-bootloader/limine#v8.6.1-binary",
+            .hash = "1220533e700e69d712c0a656739b83a5aa50c1ad1ee7b05781ca1ee97e28457d0807",
         },
         .kernel = .{ .path = "./kernel/" },
     },
