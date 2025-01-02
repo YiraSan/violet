@@ -14,10 +14,10 @@ export var memory_map_request: limine.MemoryMapRequest = .{};
 export var framebuffer_request: limine.FramebufferRequest = .{};
 export var paging_mode_request: limine.PagingModeRequest = .{};
 
-pub var hhdm = std.mem.zeroes(limine.HhdmResponse);
-pub var memory_map = std.mem.zeroes(limine.MemoryMapResponse);
-pub var framebuffer = std.mem.zeroes(limine.FramebufferResponse);
-pub var paging_mode = std.mem.zeroes(limine.PagingModeResponse);
+pub var hhdm: limine.HhdmResponse = std.mem.zeroes(limine.HhdmResponse);
+pub var memory_map: limine.MemoryMapResponse = std.mem.zeroes(limine.MemoryMapResponse);
+pub var framebuffer: limine.FramebufferResponse = std.mem.zeroes(limine.FramebufferResponse);
+pub var paging_mode: limine.PagingModeResponse = std.mem.zeroes(limine.PagingModeResponse);
 
 pub const entry = struct {
     pub fn start() callconv(.C) noreturn {
