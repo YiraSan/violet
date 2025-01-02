@@ -117,7 +117,7 @@ fn downloadEdk2(b: *std.Build, arch: std.Target.Cpu.Arch) !void {
 pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
     _ = std.fs.cwd().statFile(try edk2FileName(b, arch)) catch try downloadEdk2(b, arch);
 
-    const qemu_iso_args = switch (arch) {
+    var qemu_iso_args = switch (arch) {
         .x86_64 => &[_][]const u8{
             // zig fmt: off
             "qemu-system-x86_64",
@@ -138,7 +138,7 @@ pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
             "qemu-system-aarch64",
             "-cpu", "max",
             "-smp", "2",
-            "-M", "virt,accel=kvm:whpx:hvf:tcg",
+            "-M", "virt,accel=kvm:tcg",
             "-m", "2G",
             "-cdrom", "zig-out/iso/violet.iso",
             "-bios", try edk2FileName(b, arch),
@@ -173,6 +173,15 @@ pub fn runIso(b: *std.Build, arch: std.Target.Cpu.Arch) !*std.Build.Step {
         },
         else => return error.UnsupportedArchitecture,
     };
+
+    const is_debug = b.option(bool, "debug", "activate debug mode") orelse false;
+
+    if (is_debug) {
+        qemu_iso_args = try std.mem.concat(b.allocator, []const u8, &[_][]const []const u8 {
+            qemu_iso_args,
+            &[_][]const u8 { "-s", "-S" }
+        });
+    }
 
     const qemu_iso_cmd = b.addSystemCommand(qemu_iso_args);
     return &qemu_iso_cmd.step;
