@@ -249,9 +249,9 @@ pub const PagingModeRequest = extern struct {
     id: [4]u64 = magic(0x95c1a0edab0944cb, 0xa4e5cb3842f7488a),
     revision: u64 = 0,
     response: ?*PagingModeResponse = null,
-    mode: PagingMode,
-    max_mode: PagingMode,
-    min_mode: PagingMode,
+    mode: PagingMode = DEFAULT_PAGING_MODE,
+    max_mode: PagingMode = DEFAULT_PAGING_MODE,
+    min_mode: PagingMode = DEFAULT_PAGING_MODE,
 };
 
 // SMP
