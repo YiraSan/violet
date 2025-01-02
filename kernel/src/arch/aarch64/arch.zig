@@ -18,9 +18,7 @@ fn currentEL() u64 {
 pub fn init() void {
     const current_el = currentEL();
     if (current_el != 1) {
-        std.log.err("execution level {}", .{current_el});
+        std.log.err("wrong execution level {}", .{current_el});
         unreachable;
-    } else {
-        std.log.debug("execution level {}", .{current_el});
     }
 }
