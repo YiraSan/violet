@@ -59,7 +59,8 @@ pub fn build(b: *std.Build) void {
     switch (target.result.cpu.arch) {
         .aarch64 => {
             kernel.addAssemblyFile(b.path("src/arch/aarch64/vector_table.s"));
-        }
+        },
+        else => {}
     }
 
     const build_options = b.addOptions();
