@@ -6,7 +6,7 @@ pub const init = switch (builtin.cpu.arch) {
     else => unreachable,
 };
 
-pub fn halt() noreturn {
+pub inline fn halt() noreturn {
     while (true) {
         if (comptime builtin.cpu.arch == .x86_64) {
             asm volatile ("hlt");
