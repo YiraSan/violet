@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const limine = @import("limine.zig");
 
 const arch = @import("root").arch;
+const com = @import("root").com;
 const device = @import("root").device;
 const drivers = @import("root").drivers;
 
@@ -47,7 +48,7 @@ pub const entry = struct {
         std.log.info("version 0.0.0", .{});
 
         arch.init();
-        // memory.init()
+        com.memory.init();
         // interrupts.init()
 
         arch.halt();

@@ -1,5 +1,6 @@
 pub const arch = @import("arch/arch.zig");
 pub const boot = @import("boot/boot.zig");
+pub const com = @import("com/com.zig");
 pub const device = @import("device/device.zig");
 pub const drivers = @import("drivers/drivers.zig");
 
