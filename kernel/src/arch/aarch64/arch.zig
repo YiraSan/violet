@@ -61,18 +61,18 @@ export fn sync_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
         return;
     }
 
-    std.log.info("unhandled sync exception with EC: {x}", .{ ec });
-    arch.halt();
+    std.log.err("unhandled sync exception with EC: {x}", .{ ec });
+    unreachable;
 }
 
 export fn fault_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
-    std.log.info("unhandled fault", .{});
-    arch.halt();
+    std.log.err("unhandled fault", .{});
+    unreachable;
 }
 
 export fn irq_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
-    std.log.info("unhandled irq", .{});
-    arch.halt();
+    std.log.err("unhandled irq", .{});
+    unreachable;
 }
 
 extern const _vector_table: opaque {};
