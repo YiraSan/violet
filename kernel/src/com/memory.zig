@@ -4,6 +4,8 @@ const std = @import("std");
 
 const boot = @import("../boot/boot.zig");
 
+const log = std.log.scoped(.mmu);
+
 var usable: u64 = 0;
 var reserved: u64 = 0;
 var total: u64 = 0;
@@ -105,16 +107,16 @@ pub fn init() void {
     }
 
     resize(total);
-    std.log.info("total memory: {} {s}", .{ total / size, size_name });
+    log.info("total memory: {} {s}", .{ total / size, size_name });
 
     resize(reserved);
-    std.log.info("reserved memory: {} {s}", .{ reserved / size, size_name });
+    log.info("reserved memory: {} {s}", .{ reserved / size, size_name });
 
     resize(usable);
-    std.log.info("usable memory: {} {s}", .{ usable / size, size_name });
+    log.info("usable memory: {} {s}", .{ usable / size, size_name });
 
     if (usable < 512 * 1024 * 1024) {
-        std.log.warn("running with less than 512 MiB could lead to unexpected behavior", .{});
+        log.warn("running with less than 512 MiB could lead to unexpected behavior", .{});
     }
 
 }
