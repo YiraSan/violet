@@ -22,11 +22,11 @@ jobs:
         mkdir -p .zig-cache
 
     - run: |
-        zig build -Ddevice=q35
+        zig build iso -Ddevice=q35
         mv ./zig-out/iso/violet.iso ./violet-q35.iso
 
     - run: |
-        zig build -Ddevice=virt
+        zig build iso -Ddevice=virt
         mv ./zig-out/iso/violet.iso ./violet-virt.iso
 
     - uses: "marvinpinto/action-automatic-releases@latest"
