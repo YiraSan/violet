@@ -56,7 +56,11 @@ pub fn build(b: *std.Build) void {
         else => unreachable,
     });
 
-    kernel.addAssemblyFile(b.path("src/arch/aarch64/vector_table.s"));
+    switch (target.result.cpu.arch) {
+        .aarch64 => {
+            kernel.addAssemblyFile(b.path("src/arch/aarch64/vector_table.s"));
+        }
+    }
 
     const build_options = b.addOptions();
     build_options.addOption(Device, "device", device);
