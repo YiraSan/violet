@@ -1,7 +1,7 @@
 .{
     .name = "violet",
     .version = "0.0.0",
-    .minimum_zig_version = "0.14.0-dev.2502+d12c0bf90",
+    .minimum_zig_version = "0.14.0-dev.2597+252c20310",
     .dependencies = .{
         .limine_bin = .{
             .url = "git+https://github.com/limine-bootloader/limine#v8.6.1-binary",

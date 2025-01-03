@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
     kernel.root_module.stack_check = false;
     kernel.root_module.red_zone = false;
 
-    kernel.setLinkerScriptPath(switch (target.result.cpu.arch) {
+    kernel.setLinkerScript(switch (target.result.cpu.arch) {
         .aarch64 => b.path("build/aarch64.ld"),
         .x86_64 => b.path("build/x86_64.ld"),
         .riscv64 => b.path("build/riscv64.ld"),
