@@ -49,7 +49,6 @@ pub const entry = struct {
 
         arch.init();
         com.memory.init();
-        // interrupts.init()
 
         arch.halt();
     }
