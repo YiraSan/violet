@@ -4,7 +4,7 @@ const drivers = @import("root").drivers;
 
 pub const serial = switch (build_options.device) {
     .virt => drivers.uart.pl011,
-    else => unreachable,
+    else => drivers.null_serial,
 };
 
 pub fn init() void {
@@ -15,7 +15,7 @@ pub fn init() void {
         .virt => {
             drivers.uart.pl011.base_address = 0x09000000;
         },
-        else => unreachable,
+        else => {},
     }
 
     try serial.init();
