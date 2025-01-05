@@ -106,6 +106,5 @@ pub fn init() void {
 
     init_vector_table();
 
-    // temporary test
-    asm volatile("brk #1");
+    
 }
