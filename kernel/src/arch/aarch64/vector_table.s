@@ -143,7 +143,7 @@ _vector_table:
 
 /* EL1-SP0 */
 _exc_sp0_sync:
-    b sync_entry /* this will be removed, since EL1 won't be  */
+    b .
 .balign 0x80
 _exc_sp0_irq:
     b .
