@@ -25,11 +25,11 @@ jobs:
         mkdir -p .zig-cache
 
     - run: |
-        zig build iso -Ddevice=q35
+        zig build iso -Ddevice=q35 -Doptimize=ReleaseSafe
         mv ./zig-out/iso/violet.iso ./violet-q35.iso
 
     - run: |
-        zig build iso -Ddevice=virt
+        zig build iso -Ddevice=virt -Doptimize=ReleaseSafe
         mv ./zig-out/iso/violet.iso ./violet-virt.iso
 
     - uses: softprops/action-gh-release@v2
