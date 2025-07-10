@@ -42,7 +42,7 @@ export fn el1t_sync(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) 
 
     switch (esr_el1.ec) {
         .brk_aarch64 => {
-            log.info("BREAKPOINT EL1T_SYNC at address 0x{x} with immediate value {}", .{ctx.elr_el1, esr_el1.iss});
+            log.info("BREAKPOINT EL1T_SYNC at address 0x{x} with immediate value {}", .{ ctx.elr_el1, esr_el1.iss });
             ctx.elr_el1 += 4;
             return;
         },
