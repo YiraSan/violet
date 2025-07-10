@@ -3,15 +3,18 @@ const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
     const platform = b.option(basalt.Platform, "platform", "q35, virt, ..") orelse .q35;
+    const optimize = b.standardOptimizeOption(.{});
 
     const kernel_dep = b.dependency("kernel", .{
         .platform = platform,
+        .optimize = optimize,
     });
     const kernel_exe = kernel_dep.artifact("kernel");
     b.installArtifact(kernel_exe);
 
     const system_dep = b.dependency("system", .{
         .platform = platform,
+        .optimize = optimize,
     });
     const system_exe = system_dep.artifact("system");
     b.installArtifact(system_exe);
