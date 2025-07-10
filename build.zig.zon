@@ -1,20 +1,18 @@
 .{
-    .name = "violet",
+    .name = .violet,
     .version = "0.0.0",
-    .minimum_zig_version = "0.14.0-dev.2597+252c20310",
+    .fingerprint = 0x95f1a595b73c7658, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.929+31e46be74",
     .dependencies = .{
         .limine_bin = .{
-            .url = "git+https://github.com/limine-bootloader/limine#v8.6.1-binary",
-            .hash = "1220533e700e69d712c0a656739b83a5aa50c1ad1ee7b05781ca1ee97e28457d0807",
+            .url = "git+https://github.com/limine-bootloader/limine?ref=v9.3.4-binary#3bdb2297c80d7159243462936659bc5c82bc0983",
+            .hash = "N-V-__8AAIRpRwAz9-EPrciNtBX6AxrGGdPct5iYU_DIKR25",
+        },
+        .basalt = .{
+            .path = "./basalt/",
         },
         .kernel = .{ .path = "./kernel/" },
+        .system = .{ .path = "./system/" },
     },
-    .paths = .{
-        "build",
-        "kernel",
-        "build.zig",
-        "build.zig.zon",
-        "license",
-        "readme.md"
-    },
+    .paths = .{ "build.zig", "build.zig.zon", "basalt", "kernel", "system", "licence", "readme.md" },
 }
