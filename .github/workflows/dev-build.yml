@@ -26,11 +26,11 @@ jobs:
 
     - run: |
         zig build -Dplatform=q35 -Doptimize=ReleaseSafe
-        mv ./zig-out/iso/violet.iso ./violet-q35.iso
+        mv ./zig-out/violet.iso ./violet-q35.iso
 
     - run: |
         zig build -Dplatform=virt -Doptimize=ReleaseSafe
-        mv ./zig-out/iso/violet.iso ./violet-virt.iso
+        mv ./zig-out/violet.iso ./violet-virt.iso
 
     - uses: softprops/action-gh-release@v2
       with:
