@@ -1,4 +1,4 @@
-name: Nightly Build and Release
+name: Dev Build and Release
 
 permissions:
   contents: write
@@ -15,9 +15,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - uses: mlugg/setup-zig@v1
+    - uses: mlugg/setup-zig@v2
       with:
-        version: 0.14.0-dev.2597+252c20310
+        version: 0.15.0-dev.929+31e46be74
 
     - run: |
         sudo apt-get update
@@ -25,16 +25,16 @@ jobs:
         mkdir -p .zig-cache
 
     - run: |
-        zig build iso -Ddevice=q35 -Doptimize=ReleaseSafe
+        zig build -Dplatform=q35 -Doptimize=ReleaseSafe
         mv ./zig-out/iso/violet.iso ./violet-q35.iso
 
     - run: |
-        zig build iso -Ddevice=virt -Doptimize=ReleaseSafe
+        zig build -Dplatform=virt -Doptimize=ReleaseSafe
         mv ./zig-out/iso/violet.iso ./violet-virt.iso
 
     - uses: softprops/action-gh-release@v2
       with:
-        tag_name: nightly
+        tag_name: dev
         prerelease: true
         files: |
           violet-q35.iso
