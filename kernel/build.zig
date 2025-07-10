@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) !void {
 
     switch (kernel_query.cpu_arch.?) {
         .aarch64 => {
-            kernel_exe.addAssemblyFile(b.path("src/exception/aarch64/exception.s"));
+            kernel_exe.addAssemblyFile(b.path("src/interrupts/aarch64/interrupts.s"));
         },
         else => {},
     }

@@ -1,21 +1,21 @@
 // --- imports --- //
 
 const std = @import("std");
-const log = std.log.scoped(.exception);
+const log = std.log.scoped(.interrupts);
 
 const kernel = @import("root");
 const cpu = kernel.cpu;
 const mem = kernel.mem;
 const phys = mem.phys;
 
-// --- exception.s --- //
+// --- interrupts.s --- //
 
 extern fn set_vbar_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 extern fn set_sp_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 
 extern const exception_vector_table: [2048]u8;
 
-// --- exception.zig --- //
+// --- interrupts.zig --- //
 
 pub fn init() void {
     // TODO alloc 64 KiB instead of 4 KiB
