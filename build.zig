@@ -2,7 +2,7 @@ const std = @import("std");
 const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
-    const platform = b.option(basalt.Platform, "platform", "q35, virt, ..") orelse .q35;
+    const platform = b.option(basalt.Platform, "platform", "x86_64_q35, aarch64_virt, riscv64_virt") orelse .x86_64_q35;
     const optimize = b.standardOptimizeOption(.{});
 
     const kernel_dep = b.dependency("kernel", .{
@@ -76,26 +76,24 @@ pub fn build(b: *std.Build) !void {
     // download .fd
 
     const download_fd = switch (platform) {
-        .q35 => b.addSystemCommand(&[_][]const u8{
+        .x86_64_q35 => b.addSystemCommand(&[_][]const u8{
             "sh", "-c",
             \\[ -f .zig-cache/X64_OVMF.fd ] || curl -L -o .zig-cache/X64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
         }),
-        .virt => b.addSystemCommand(&[_][]const u8{
+        .aarch64_virt => b.addSystemCommand(&[_][]const u8{
             "sh", "-c",
             \\[ -f .zig-cache/AA64_OVMF.fd ] || curl -L -o .zig-cache/AA64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEAARCH64_QEMU_EFI.fd
         }),
-        .raspi4b => b.addSystemCommand(&[_][]const u8{
+        .riscv64_virt => b.addSystemCommand(&[_][]const u8{
             "sh", "-c",
-            \\[ -f .zig-cache/RPi4_UEFI/RPI_EFI.fd ] || curl -L -o .zig-cache/RPi4_UEFI.zip https://github.com/pftf/RPi4/releases/download/v1.42/RPi4_UEFI_Firmware_v1.42.zip
-            \\[ -f .zig-cache/RPi4_UEFI/RPI_EFI.fd ] || unzip .zig-cache/RPi4_UEFI.zip -d .zig-cache/RPi4_UEFI/
-            \\[ -f .zig-cache/RPi4_UEFI/RPI_EFI.fd ] || rm -rf .zig-cache/RPi4_UEFI.zip
+            \\[ -f .zig-cache/RISCV64_OVMF.fd ] || curl -L -o .zig-cache/RISCV64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT.fd
         }),
     };
 
     // Run QEMU
 
     const run = switch (platform) {
-        .q35 => b.addSystemCommand(&[_][]const u8{
+        .x86_64_q35 => b.addSystemCommand(&[_][]const u8{
             "qemu-system-x86_64",
             "-bios", ".zig-cache/X64_OVMF.fd",
             "-cdrom", "zig-out/violet.iso",
@@ -104,22 +102,10 @@ pub fn build(b: *std.Build) !void {
             "-serial", "mon:stdio",
             "-no-shutdown",
             "-no-reboot",
+            "-d", "int",
+            "-D", "debug.log",
         }),
-        .raspi4b => b.addSystemCommand(&[_][]const u8{
-            "qemu-system-aarch64",
-            "-cpu", "cortex-a72",
-            "-M", "raspi4b",
-            "-m", "2G",
-            "-smp", "4",
-            "-bios", ".zig-cache/RPi4_UEFI/RPI_EFI.fd",
-            "-drive", "if=sd,format=raw,file=zig-out/violet.iso",
-            "-serial", "mon:stdio",
-            "-d", "int,cpu_reset",
-            "-device", "usb-kbd",
-            "-no-shutdown",
-            "-no-reboot",
-        }),
-        .virt => b.addSystemCommand(&[_][]const u8{
+        .aarch64_virt => b.addSystemCommand(&[_][]const u8{
             "qemu-system-aarch64",
             "-cpu", "max",
             "-m", "2G",
@@ -131,12 +117,13 @@ pub fn build(b: *std.Build) !void {
             "-device", "ramfb",
             "-device", "qemu-xhci",
             "-device", "usb-kbd",
-            "-serial", "stdio",
+            "-serial", "mon:stdio",
             "-no-reboot",
             "-no-shutdown",
             "-d", "int",
             "-D", "debug.log",
         }),
+        else => unreachable,
     };
 
     run.step.dependOn(b.default_step);

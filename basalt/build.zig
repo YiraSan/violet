@@ -56,15 +56,15 @@ pub const ExecutableOptions = struct {
 };
 
 pub const Platform = enum {
-    q35,
-    virt,
-    raspi4b,
+    x86_64_q35,
+    aarch64_virt,
+    riscv64_virt,
 
     pub fn arch(self: Platform) std.Target.Cpu.Arch {
         return switch (self) {
-            .q35 => .x86_64,
-            .virt => .aarch64,
-            .raspi4b => .aarch64,
+            .x86_64_q35 => .x86_64,
+            .aarch64_virt => .aarch64,
+            .riscv64_virt => .riscv64,
         };
     }
 };
