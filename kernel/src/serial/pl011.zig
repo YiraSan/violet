@@ -14,7 +14,7 @@ const virt = mem.virt;
 // --- pl011.zig --- //
 
 pub const base_address: usize = switch (build_options.platform) {
-    .virt => 0x0900_0000,
+    .aarch64_virt, .riscv64_virt => 0x0900_0000,
     else => unreachable,
 };
 
@@ -52,7 +52,7 @@ const FLAG_TXFE: u8 = 1 << 7;
 
 pub fn init() void {
     switch (build_options.platform) {
-        .virt => {
+        .aarch64_virt, .riscv64_virt => {
             virt.kernel_space.map_contiguous(0x0900_0000, 0x0900_0000, 1, .l4K, .{
                 .writable = true,
                 .device = true,

@@ -2,7 +2,7 @@ const std = @import("std");
 const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) void {
-    const platform = b.option(basalt.Platform, "platform", "q35, virt, ..") orelse .q35;
+    const platform = b.option(basalt.Platform, "platform", "x86_64_q35, aarch64_virt, riscv64_virt") orelse .x86_64_q35;
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = basalt.addExecutable(b, .{

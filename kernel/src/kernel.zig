@@ -25,6 +25,7 @@ pub const serial = @import("serial/serial.zig");
 export fn kernel_entry() callconv(switch (builtin.cpu.arch) {
     .x86_64 => .{ .x86_64_sysv = .{} },
     .aarch64 => .{ .aarch64_aapcs = .{} },
+    .riscv64 => .{ .riscv64_lp64 = .{} },
     else => unreachable,
 }) void {
     if (!base_revision.isSupported()) {

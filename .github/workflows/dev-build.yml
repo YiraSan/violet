@@ -25,12 +25,12 @@ jobs:
         mkdir -p .zig-cache
 
     - run: |
-        zig build -Dplatform=q35 -Doptimize=ReleaseSafe
-        mv ./zig-out/violet.iso ./violet-q35.iso
+        zig build -Dplatform=x86_64_q35 -Doptimize=ReleaseSafe
+        mv ./zig-out/violet.iso ./violet-x86_64_q35.iso
 
     - run: |
-        zig build -Dplatform=virt -Doptimize=ReleaseSafe
-        mv ./zig-out/violet.iso ./violet-virt.iso
+        zig build -Dplatform=aarch64_virt -Doptimize=ReleaseSafe
+        mv ./zig-out/violet.iso ./violet-aarch64_virt.iso
 
     - uses: softprops/action-gh-release@v2
       with:

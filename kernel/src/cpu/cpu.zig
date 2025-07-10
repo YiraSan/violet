@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const arch = switch (builtin.cpu.arch) {
     .aarch64 => @import("aarch64/cpu.zig"),
     .x86_64 => @import("x86_64/cpu.zig"),
+    .riscv64 => @import("riscv64/cpu.zig"),
     else => unreachable,
 };
 
