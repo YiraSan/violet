@@ -59,9 +59,7 @@ pub fn build(b: *std.Build) !void {
                 "-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus ",
                 "-apm-block-size 2048 --efi-boot limine-uefi-cd.bin ",
                 "-efi-boot-part --efi-boot-image --protective-msdos-label ",
-                "zig-out/root/ -o zig-out/violet.iso && ",
-
-            "qemu-img resize zig-out/violet.iso 16m"
+                "zig-out/root/ -o zig-out/violet.iso ",
         }),
         // zig fmt: on
     });
