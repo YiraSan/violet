@@ -18,7 +18,7 @@ export var base_revision: limine.BaseRevision linksection(".limine_requests") = 
 // --- main.zig --- //
 
 pub const cpu = @import("cpu/cpu.zig");
-pub const exception = @import("exception/exception.zig");
+pub const interrupts = @import("interrupts/interrupts.zig");
 pub const mem = @import("mem/mem.zig");
 pub const serial = @import("serial/serial.zig");
 
@@ -41,7 +41,7 @@ export fn kernel_entry() callconv(switch (builtin.cpu.arch) {
 
     mem.virt.init();
     serial.init();
-    exception.init();
+    interrupts.init();
 
     // STAGE 2
 
