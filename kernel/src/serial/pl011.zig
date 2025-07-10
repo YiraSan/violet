@@ -1,43 +1,63 @@
+// --- imports --- //
+
 const std = @import("std");
+const log = std.log.scoped(.mem_virt);
+
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 
-const boot = @import("root").boot;
+const kernel = @import("root");
+const mem = kernel.mem;
+const phys = mem.phys;
+const virt = mem.virt;
+
+// --- pl011.zig --- //
+
+pub const base_address: usize = switch (build_options.platform) {
+    .virt => 0x0900_0000,
+    else => unreachable,
+};
 
 fn mmio_read(comptime T: type, address: usize) T {
-    const ptr = @as(*volatile T, @ptrFromInt(boot.hhdm.offset + address));
+    const ptr = @as(*volatile T, @ptrFromInt(address));
     return @atomicLoad(T, ptr, .acquire);
 }
 
 fn mmio_write(comptime T: type, address: usize, data: T) void {
-    const ptr = @as(*volatile T, @ptrFromInt(boot.hhdm.offset + address));
+    const ptr = @as(*volatile T, @ptrFromInt(address));
     @atomicStore(T, ptr, data, .release);
 }
 
-pub var base_address: usize = undefined;
-
-const   CR_TXEN: u32 = 1 << 8;
+const CR_TXEN: u32 = 1 << 8;
 const CR_UARTEN: u32 = 1 << 0;
 
-const    DR_OFFSET: usize = 0x000;
-const    FR_OFFSET: usize = 0x018;
-const  IBRD_OFFSET: usize = 0x024;
-const  FBRD_OFFSET: usize = 0x028;
-const   LCR_OFFSET: usize = 0x02c;
-const    CR_OFFSET: usize = 0x030;
-const  IMSC_OFFSET: usize = 0x038;
-const   INT_OFFSET: usize = 0x044;
+const DR_OFFSET: usize = 0x000;
+const FR_OFFSET: usize = 0x018;
+const IBRD_OFFSET: usize = 0x024;
+const FBRD_OFFSET: usize = 0x028;
+const LCR_OFFSET: usize = 0x02c;
+const CR_OFFSET: usize = 0x030;
+const IMSC_OFFSET: usize = 0x038;
+const INT_OFFSET: usize = 0x044;
 const DMACR_OFFSET: usize = 0x048;
 
-const  FLAG_CTS: u8 = 1 << 0;
-const  FLAG_DSR: u8 = 1 << 1;
-const  FLAG_DCD: u8 = 1 << 2;
+const FLAG_CTS: u8 = 1 << 0;
+const FLAG_DSR: u8 = 1 << 1;
+const FLAG_DCD: u8 = 1 << 2;
 const FLAG_BUSY: u8 = 1 << 3;
 const FLAG_RXFE: u8 = 1 << 4;
 const FLAG_TXFF: u8 = 1 << 5;
 const FLAG_RXFF: u8 = 1 << 6;
 const FLAG_TXFE: u8 = 1 << 7;
 
-pub fn init() !void {
+pub fn init() void {
+    virt.kernel_space.map_contiguous(0x0900_0000, 0x0900_0000, 1, .l4K, .{
+        .writable = true,
+        .device = true,
+    });
+
+    virt.flush(0x0900_0000);
+
     // Turn off the UART.
     mmio_write(u32, base_address + CR_OFFSET, 0);
 
@@ -63,10 +83,10 @@ inline fn read_flag_register() u8 {
 }
 
 fn write(char: u8) void {
+    if (char == '\n') write('\r');
     while (read_flag_register() & FLAG_TXFF != 0) {}
     mmio_write(u8, base_address, char);
     while (read_flag_register() & FLAG_BUSY != 0) {}
-    if (char == '\n') write('\r');
 }
 
 fn writeHandler(_: *anyopaque, bytes: []const u8) anyerror!usize {

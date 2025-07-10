@@ -1,85 +1,82 @@
 const std = @import("std");
+const basalt = @import("basalt");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
+    const platform = b.option(basalt.Platform, "platform", "q35, virt, ..") orelse .q35;
 
-    const device = 
-        b.option(Device, "device", "target device")
-        orelse unreachable;
-    
-    var target_query = b.standardTargetOptionsQueryOnly(.{});
-    target_query.cpu_arch = device.arch();
-    target_query.os_tag = .freestanding;
-    target_query.abi = .none;
+    var kernel_query = std.Target.Query{
+        .cpu_arch = platform.arch(),
+        .os_tag = .freestanding,
+        .abi = .none,
+        .ofmt = .elf,
+    };
 
-    switch (target_query.cpu_arch.?) {
+    switch (kernel_query.cpu_arch.?) {
         .x86_64 => {
             const Features = std.Target.x86.Feature;
-            target_query.cpu_features_sub.addFeature(@intFromEnum(Features.mmx));
-            target_query.cpu_features_sub.addFeature(@intFromEnum(Features.sse));
-            target_query.cpu_features_sub.addFeature(@intFromEnum(Features.sse2));
-            target_query.cpu_features_sub.addFeature(@intFromEnum(Features.avx));
-            target_query.cpu_features_sub.addFeature(@intFromEnum(Features.avx2));
-            target_query.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
+            kernel_query.cpu_features_sub.addFeature(@intFromEnum(Features.mmx));
+            kernel_query.cpu_features_sub.addFeature(@intFromEnum(Features.sse));
+            kernel_query.cpu_features_sub.addFeature(@intFromEnum(Features.sse2));
+            kernel_query.cpu_features_sub.addFeature(@intFromEnum(Features.avx));
+            kernel_query.cpu_features_sub.addFeature(@intFromEnum(Features.avx2));
+            kernel_query.cpu_features_add.addFeature(@intFromEnum(Features.soft_float));
         },
         .aarch64 => {},
         .riscv64 => {},
         else => unreachable,
     }
 
-    const target = b.resolveTargetQuery(target_query);
-    const optimize = b.standardOptimizeOption(.{});
+    const kernel_mod = b.createModule(.{
+        .root_source_file = b.path("src/kernel.zig"),
+        .target = b.resolveTargetQuery(kernel_query),
+        .optimize = .Debug,
+        .red_zone = false,
+        .stack_protector = false,
+        .stack_check = false,
+    });
 
-    const kernel = b.addExecutable(.{
+    const limine_zig = b.dependency("limine_zig", .{
+        .api_revision = 3,
+    });
+
+    kernel_mod.addImport("limine", limine_zig.module("limine"));
+
+    const build_options = b.addOptions();
+    build_options.addOption(basalt.Platform, "platform", platform);
+    build_options.addOption([]const u8, "version", try getVersion(b));
+    kernel_mod.addImport("build_options", build_options.createModule());
+
+    const kernel_exe = b.addExecutable(.{
         .name = "kernel",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .code_model = switch (target.result.cpu.arch) {
+        .root_module = kernel_mod,
+        .code_model = switch (kernel_query.cpu_arch.?) {
             .aarch64 => .small,
             .x86_64 => .kernel,
             .riscv64 => .medium,
             else => unreachable,
         },
+        .use_llvm = true,
     });
 
-    kernel.pie = true;
-    kernel.want_lto = false;
+    kernel_exe.pie = true;
+    kernel_exe.entry = .disabled;
+    kernel_exe.want_lto = false;
+    // kernel_exe.out_filename = "kernel.elf";
+    kernel_exe.setLinkerScript(b.path("linker.lds"));
 
-    kernel.root_module.stack_protector = false;
-    kernel.root_module.stack_check = false;
-    kernel.root_module.red_zone = false;
-
-    kernel.setLinkerScript(switch (target.result.cpu.arch) {
-        .aarch64 => b.path("build/aarch64.ld"),
-        .x86_64 => b.path("build/x86_64.ld"),
-        .riscv64 => b.path("build/riscv64.ld"),
-        else => unreachable,
-    });
-
-    switch (target.result.cpu.arch) {
+    switch (kernel_query.cpu_arch.?) {
         .aarch64 => {
-            kernel.addAssemblyFile(b.path("src/arch/aarch64/vector_table.s"));
+            kernel_exe.addAssemblyFile(b.path("src/exception/aarch64/exception.s"));
         },
-        else => {}
+        else => {},
     }
 
-    const build_options = b.addOptions();
-    build_options.addOption(Device, "device", device);
-    kernel.root_module.addOptions("build_options", build_options);
-
-    b.installArtifact(kernel);
-
+    b.installArtifact(kernel_exe);
 }
 
-const Device = enum(u8) {
-    virt,
-    raspi4b,
-    q35,
-
-    pub fn arch(self: Device) std.Target.Cpu.Arch {
-        return switch (self) {
-            .virt, .raspi4b => .aarch64,
-            .q35 => .x86_64,
-        };
-    }
-};
+fn getVersion(b: *std.Build) ![]const u8 {
+    var tree = try std.zig.Ast.parse(b.allocator, @embedFile("build.zig.zon"), .zon);
+    defer tree.deinit(b.allocator);
+    const version_str = tree.tokenSlice(tree.nodes.items(.main_token)[2]);
+    return b.allocator.dupe(u8, version_str[1 .. version_str.len - 1]);
+}

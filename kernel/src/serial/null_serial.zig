@@ -1,4 +1,4 @@
-pub fn init() !void {}
+pub fn init() void {}
 
 pub fn print(comptime format: []const u8, args: anytype) void {
     _ = format;

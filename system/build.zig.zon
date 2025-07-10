@@ -1,0 +1,16 @@
+.{
+    .name = .system,
+    .version = "0.0.0",
+    .fingerprint = 0xc94d118bfcdeccb4, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.929+31e46be74",
+    .dependencies = .{
+        .basalt = .{
+            .path = "../basalt/",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
