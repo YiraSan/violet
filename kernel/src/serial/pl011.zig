@@ -51,12 +51,17 @@ const FLAG_RXFF: u8 = 1 << 6;
 const FLAG_TXFE: u8 = 1 << 7;
 
 pub fn init() void {
-    virt.kernel_space.map_contiguous(0x0900_0000, 0x0900_0000, 1, .l4K, .{
-        .writable = true,
-        .device = true,
-    });
+    switch (build_options.platform) {
+        .virt => {
+            virt.kernel_space.map_contiguous(0x0900_0000, 0x0900_0000, 1, .l4K, .{
+                .writable = true,
+                .device = true,
+            });
 
-    virt.flush(0x0900_0000);
+            virt.flush(0x0900_0000);
+        },
+        else => unreachable,
+    }
 
     // Turn off the UART.
     mmio_write(u32, base_address + CR_OFFSET, 0);
