@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) !void {
     kernel_exe.pie = true;
     kernel_exe.entry = .disabled;
     kernel_exe.want_lto = false;
-    // kernel_exe.out_filename = "kernel.elf";
+    kernel_exe.out_filename = "kernel.elf";
     kernel_exe.setLinkerScript(b.path("linker.lds"));
 
     switch (kernel_query.cpu_arch.?) {

@@ -41,8 +41,8 @@ pub fn build(b: *std.Build) !void {
         "sh", "-c",
         try std.mem.concat(b.allocator, u8, &[_][]const u8{
             "mkdir -p zig-out/root/EFI/BOOT/ && ",
-            "cp zig-out/bin/kernel zig-out/root/kernel.elf && ",
-            "cp zig-out/bin/system zig-out/root/system.elf && ",
+            "cp zig-out/bin/kernel.elf zig-out/root/ && ",
+            "cp zig-out/bin/system.elf zig-out/root/ && ",
             "cp build/limine.conf zig-out/root/ && ",
 
             "cp ", limine_path.getPath(b), "/limine-bios.sys ",

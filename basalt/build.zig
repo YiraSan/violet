@@ -41,7 +41,7 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
 
     exe.pie = true;
     exe.entry = .disabled;
-    // exe.out_filename = b.fmt("{s}.elf", .{options.name});
+    exe.out_filename = b.fmt("{s}.elf", .{options.name});
 
     exe.setLinkerScript(basalt.path("linker.lds"));
 
