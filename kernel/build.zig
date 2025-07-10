@@ -3,6 +3,7 @@ const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
     const platform = b.option(basalt.Platform, "platform", "q35, virt, ..") orelse .q35;
+    const optimize = b.standardOptimizeOption(.{});
 
     var kernel_query = std.Target.Query{
         .cpu_arch = platform.arch(),
@@ -29,7 +30,7 @@ pub fn build(b: *std.Build) !void {
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/kernel.zig"),
         .target = b.resolveTargetQuery(kernel_query),
-        .optimize = .Debug,
+        .optimize = optimize,
         .red_zone = false,
         .stack_protector = false,
         .stack_check = false,
