@@ -26,10 +26,6 @@ pub fn init() void {
 
     // unmask all exceptions
     asm volatile ("msr DAIFClr, #0b1111");
-
-    asm volatile ("brk #18");
-
-    log.info("nice!", .{});
 }
 
 // --- exception handlers --- //
@@ -58,6 +54,10 @@ export fn el1t_sync(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) 
 
     cpu.hcf();
 }
+
+export const el1t_irq = unexpected_exception;
+export const el1t_fiq = unexpected_exception;
+export const el1t_serror = unexpected_exception;
 
 export const el1h_sync = unexpected_exception;
 export const el1h_irq = unexpected_exception;
