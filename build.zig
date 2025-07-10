@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) !void {
 
     const create_fat_img = b.addSystemCommand(&[_][]const u8{
         // zig fmt: off
-        "sh", "-c",
+        "/bin/sh", "-c",
         try std.mem.concat(b.allocator, u8, &[_][]const u8{
             "mkdir -p zig-out/root/EFI/BOOT/ && ",
             "cp zig-out/bin/kernel.elf zig-out/root/ && ",
