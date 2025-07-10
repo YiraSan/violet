@@ -17,11 +17,11 @@ extern const exception_vector_table: [2048]u8;
 
 // --- interrupts.zig --- //
 
-pub fn init() void {
-    // TODO alloc 64 KiB instead of 4 KiB
-    const page_addr = phys.alloc_page(.l4K) catch @panic("failed to allocate SP_EL1 page");
-    set_sp_el1(mem.hhdm_offset + page_addr + phys.PageLevel.l4K.size() - 16 * 2);
+const sp_el1_stack_size = 0x1000 * 64;
+const sp_el1_stack: [sp_el1_stack_size]u8 align(0x1000) linksection(".bss") = undefined;
 
+pub fn init() void {
+    set_sp_el1(@intFromPtr(&sp_el1_stack) + sp_el1_stack_size);
     set_vbar_el1(@intFromPtr(&exception_vector_table));
 
     // unmask all exceptions
