@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.0-dev.929+31e46be74",
     .dependencies = .{
         .limine_bin = .{
-            .url = "git+https://github.com/limine-bootloader/limine?ref=v9.3.4-binary#3bdb2297c80d7159243462936659bc5c82bc0983",
-            .hash = "N-V-__8AAIRpRwAz9-EPrciNtBX6AxrGGdPct5iYU_DIKR25",
+            .url = "git+https://github.com/limine-bootloader/limine/?ref=v9.4.0-binary#da998a6b74a2849b634fb62fd484a1ea078a97d4",
+            .hash = "N-V-__8AAOiOSACgywMIZh5dV7vJSzUGE4U_EEgl3T9bfEhT",
         },
         .basalt = .{
             .path = "./basalt/",
