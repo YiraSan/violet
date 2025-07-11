@@ -37,5 +37,5 @@ jobs:
         tag_name: dev
         prerelease: true
         files: |
-          violet-q35.iso
-          violet-virt.iso
+          violet-x86_64_q35.iso
+          violet-aarch64_virt.iso
