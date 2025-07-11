@@ -69,6 +69,9 @@ pub fn build(b: *std.Build) !void {
         .aarch64 => {
             kernel_exe.addAssemblyFile(b.path("src/interrupts/aarch64/interrupts.s"));
         },
+        .x86_64 => {
+            kernel_exe.addAssemblyFile(b.path("src/interrupts/x86_64/gdt.s"));
+        },
         else => {},
     }
 
