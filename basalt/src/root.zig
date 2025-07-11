@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const mod = @import("mod");
 
 export fn _start() callconv(switch (builtin.cpu.arch) {
     .x86_64 => .{ .x86_64_sysv = .{} },
@@ -7,5 +8,5 @@ export fn _start() callconv(switch (builtin.cpu.arch) {
     .riscv64 => .{ .riscv64_lp64 = .{} },
     else => unreachable,
 }) void {
-    while (true) {}
+    mod.main() catch {};
 }
