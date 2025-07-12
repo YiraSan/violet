@@ -73,18 +73,20 @@ fn write(char: u8) void {
     iowrite(u8, COM1 + 0, char);
 }
 
-fn writeHandler(_: *anyopaque, bytes: []const u8) anyerror!usize {
-    for (bytes) |char| {
+fn drain(_: *std.io.Writer, data: []const []const u8, _: usize) std.io.Writer.Error!usize {
+    const arr0 = data[0];
+    for (arr0) |char| {
         write(char);
     }
-    return bytes.len;
+    return arr0.len;
 }
 
-pub const writer = std.io.Writer(
-    *anyopaque,
-    anyerror,
-    writeHandler,
-){ .context = undefined };
+pub var writer = std.io.Writer{
+    .buffer = &.{},
+    .vtable = &.{
+        .drain = drain,
+    },
+};
 
 pub fn print(comptime format: []const u8, args: anytype) void {
     writer.print(format, args) catch {};

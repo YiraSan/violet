@@ -2,7 +2,7 @@
     .name = .violet,
     .version = "0.0.0",
     .fingerprint = 0x95f1a595b73c7658, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.929+31e46be74",
+    .minimum_zig_version = "0.15.0-dev.1023+f551c7c58",
     .dependencies = .{
         .limine_bin = .{
             .url = "git+https://github.com/limine-bootloader/limine/?ref=v9.4.0-binary#da998a6b74a2849b634fb62fd484a1ea078a97d4",

@@ -20,7 +20,10 @@ export var base_revision: limine.BaseRevision linksection(".limine_requests") = 
 pub const cpu = @import("cpu/cpu.zig");
 pub const interrupts = @import("interrupts/interrupts.zig");
 pub const mem = @import("mem/mem.zig");
-pub const serial = @import("serial/serial.zig");
+pub const serial = switch (build_options.platform) {
+    .aarch64_virt, .riscv64_virt => @import("serial/pl011.zig"),
+    .x86_64_q35 => @import("serial/q35_serial.zig"),
+};
 
 export fn kernel_entry() callconv(switch (builtin.cpu.arch) {
     .x86_64 => .{ .x86_64_sysv = .{} },
