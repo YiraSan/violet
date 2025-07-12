@@ -58,7 +58,7 @@ export fn kernel_entry() callconv(switch (builtin.cpu.arch) {
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
     _ = return_address;
-    log.err("kernel panic: {s}", .{message});
+    std.log.err("kernel panic: {s}", .{message});
     cpu.hcf();
 }
 
