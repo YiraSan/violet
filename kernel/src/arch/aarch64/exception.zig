@@ -8,6 +8,9 @@ const cpu = kernel.cpu;
 const mem = kernel.mem;
 const phys = mem.phys;
 
+const gic_v2 = @import("gic_v2.zig");
+const timer = @import("timer.zig");
+
 // --- exception.s --- //
 
 extern fn set_vbar_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
@@ -52,9 +55,39 @@ export fn el1t_sync(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) 
     cpu.hcf();
 }
 
-export const el1t_irq = unexpected_exception;
-export const el1t_fiq = unexpected_exception;
-export const el1t_serror = unexpected_exception;
+export fn el1t_irq(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+    // Read the interrupt ID from the GICC interface (acknowledge)
+    const irq_id = gic_v2.mmio_read(u32, gic_v2.gicc_base + gic_v2.GICC_IAR_OFFSET);
+
+    switch (irq_id) {
+        30 => { // generic timer
+            log.info("Generic timer IRQ received", .{});
+            timer.ack();
+        },
+        1023 => {
+            // 0x3FF = spurious interrupt (no valid IRQ pending)
+            log.warn("Spurious IRQ received (no valid source)", .{});
+        },
+        else => {
+            log.warn("Unhandled IRQ ID: {}", .{irq_id});
+        },
+    }
+
+    // Signal End Of Interrupt to the GIC
+    gic_v2.mmio_write(u32, gic_v2.gicc_base + gic_v2.GICC_EOIR_OFFSET, irq_id);
+}
+
+export fn el1t_fiq(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+    log.err("UNEXPECTED EL1T_FIQ", .{});
+    ESR_EL1.load().dump();
+    cpu.hcf();
+}
+
+export fn el1t_serror(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+    log.err("UNEXPECTED EL1T_SERROR", .{});
+    ESR_EL1.load().dump();
+    cpu.hcf();
+}
 
 export const el1h_sync = unexpected_exception;
 export const el1h_irq = unexpected_exception;

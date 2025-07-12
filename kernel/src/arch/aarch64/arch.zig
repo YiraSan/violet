@@ -7,6 +7,8 @@ const builtin = @import("builtin");
 
 const exception = @import("exception.zig");
 
+const gic_v2 = @import("gic_v2.zig");
+
 // --- arch.zig --- //
 
 pub fn init() void {
@@ -21,6 +23,16 @@ pub fn init() void {
     }
 
     exception.init();
+
+    switch (features0.gic_regs) {
+        0x00 => { // GIC V2
+            gic_v2.init();
+        },
+        0x01 => { // GIC V3+
+            @panic("unsupported GIC V3+, coming soon.");
+        },
+        else => unreachable,
+    }
 }
 
 // --- structs --- //
