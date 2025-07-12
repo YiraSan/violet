@@ -32,8 +32,6 @@ pub fn build(b: *std.Build) !void {
         .target = b.resolveTargetQuery(kernel_query),
         .optimize = optimize,
         .red_zone = false,
-        .stack_protector = false,
-        .stack_check = false,
     });
 
     const limine_zig = b.dependency("limine_zig", .{
@@ -67,10 +65,10 @@ pub fn build(b: *std.Build) !void {
 
     switch (kernel_query.cpu_arch.?) {
         .aarch64 => {
-            kernel_exe.addAssemblyFile(b.path("src/interrupts/aarch64/interrupts.s"));
+            kernel_exe.addAssemblyFile(b.path("src/arch/aarch64/exception.s"));
         },
         .x86_64 => {
-            kernel_exe.addAssemblyFile(b.path("src/interrupts/x86_64/gdt.s"));
+            kernel_exe.addAssemblyFile(b.path("src/arch/x86_64/gdt.s"));
         },
         else => {},
     }

@@ -1,21 +1,21 @@
 // --- imports --- //
 
 const std = @import("std");
-const log = std.log.scoped(.interrupts);
+const log = std.log.scoped(.exception);
 
 const kernel = @import("root");
 const cpu = kernel.cpu;
 const mem = kernel.mem;
 const phys = mem.phys;
 
-// --- interrupts.s --- //
+// --- exception.s --- //
 
 extern fn set_vbar_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 extern fn set_sp_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 
 extern const exception_vector_table: [2048]u8;
 
-// --- interrupts.zig --- //
+// --- exception.zig --- //
 
 const sp_el1_stack_size = 0x1000 * 64;
 const sp_el1_stack: [sp_el1_stack_size]u8 align(0x1000) linksection(".bss") = undefined;
@@ -23,9 +23,6 @@ const sp_el1_stack: [sp_el1_stack_size]u8 align(0x1000) linksection(".bss") = un
 pub fn init() void {
     set_sp_el1(@intFromPtr(&sp_el1_stack) + sp_el1_stack_size);
     set_vbar_el1(@intFromPtr(&exception_vector_table));
-
-    // unmask all exceptions
-    asm volatile ("msr DAIFClr, #0b1111");
 }
 
 // --- exception handlers --- //
