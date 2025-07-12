@@ -17,9 +17,10 @@ export var base_revision: limine.BaseRevision linksection(".limine_requests") = 
 
 // --- main.zig --- //
 
+pub const arch = @import("arch/arch.zig");
 pub const cpu = @import("cpu/cpu.zig");
-pub const interrupts = @import("interrupts/interrupts.zig");
 pub const mem = @import("mem/mem.zig");
+
 pub const serial = switch (build_options.platform) {
     .aarch64_virt, .riscv64_virt => @import("serial/pl011.zig"),
     .x86_64_q35 => @import("serial/q35_serial.zig"),
@@ -39,15 +40,11 @@ export fn kernel_entry() callconv(switch (builtin.cpu.arch) {
 
     mem.init();
     mem.phys.init();
-    cpu.init();
-
-    // STAGE 1
-
     mem.virt.init();
     serial.init();
-    interrupts.init();
+    arch.init();
 
-    // STAGE 2
+    // STAGE 1
 
     log.info("violet/kernel {s}", .{build_options.version});
 
