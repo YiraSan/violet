@@ -13,10 +13,10 @@ const virt = mem.virt;
 // --- aarch64/virt.zig --- //
 
 pub fn init() void {
-    virt.kernel_space = virt.VirtualSpace.init() catch @panic("failed to acquire a page for kernel_space");
+    virt.kernel_space = virt.AddressSpace.init(null) catch @panic("failed to acquire a page for kernel_space");
 
-    set_ttbr0_el1(virt.kernel_space.root_table_phys);
     init_mair();
+    set_ttbr0_el1(virt.kernel_space.root_table_phys);
 }
 
 pub fn flush(virt_addr: u64) void {
@@ -87,7 +87,7 @@ pub fn free_table_recursive(table_phys: u64, level: u8) void {
 }
 
 pub fn map_page(
-    space: *virt.VirtualSpace,
+    space: *virt.AddressSpace,
     virt_addr: u64,
     phys_addr: u64,
     page_level: phys.PageLevel,

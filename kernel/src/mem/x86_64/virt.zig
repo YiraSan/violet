@@ -13,7 +13,14 @@ const virt = mem.virt;
 // --- x86_64/virt.zig --- //
 
 pub fn init() void {
-    virt.kernel_space = get_current_space();
+    const cr3: usize = asm volatile (
+        \\ mov %%cr3, %[result]
+        : [result] "=r" (-> usize),
+    );
+
+    const virt_space = virt.AddressSpace.init(cr3) catch @panic("unable to allocate address space in virt.init()");
+
+    virt.kernel_space = virt_space;
 }
 
 pub fn flush(virt_addr: u64) void {
@@ -39,14 +46,6 @@ pub fn flush_all() void {
         : [input] "r" (cr3_val),
         : "memory"
     );
-}
-
-fn get_current_space() virt.VirtualSpace {
-    const cr3: usize = asm volatile (
-        \\ mov %%cr3, %[result]
-        : [result] "=r" (-> usize),
-    );
-    return .{ .root_table_phys = cr3 };
 }
 
 fn ensure_table(table_phys: usize, index: usize) usize {
@@ -87,7 +86,7 @@ pub fn free_table_recursive(table_phys: usize, level: u8) void {
 }
 
 pub fn map_page(
-    space: *virt.VirtualSpace,
+    space: *virt.AddressSpace,
     virt_addr: u64,
     phys_addr: u64,
     page_level: phys.PageLevel,
