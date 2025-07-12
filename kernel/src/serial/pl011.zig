@@ -13,10 +13,7 @@ const virt = mem.virt;
 
 // --- pl011.zig --- //
 
-pub const base_address: usize = switch (build_options.platform) {
-    .aarch64_virt, .riscv64_virt => 0x0900_0000,
-    else => unreachable,
-};
+var base_address: usize = undefined;
 
 fn mmio_read(comptime T: type, address: usize) T {
     const ptr = @as(*volatile T, @ptrFromInt(address));
@@ -53,12 +50,16 @@ const FLAG_TXFE: u8 = 1 << 7;
 pub fn init() void {
     switch (build_options.platform) {
         .aarch64_virt, .riscv64_virt => {
-            virt.kernel_space.map_contiguous(0x0900_0000, 0x0900_0000, 1, .l4K, .{
+            const addr_range = virt.kernel_space.allocate(1, .l4K);
+            
+            virt.kernel_space.map_contiguous(addr_range, 0x0900_0000, 1, .l4K, .{
                 .writable = true,
                 .device = true,
             });
 
-            virt.flush(0x0900_0000);
+            virt.flush(addr_range.base());
+
+            base_address = addr_range.base();
         },
         else => unreachable,
     }
