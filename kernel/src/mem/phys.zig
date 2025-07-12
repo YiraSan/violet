@@ -372,26 +372,6 @@ pub fn free_page(address: u64, level: PageLevel) void {
     unmark_page(address >> level.shift(), level);
 }
 
-pub fn alloc_contiguous_pages(length: usize, level: PageLevel) AllocError!u64 {
-    try check_memory_availability(length, level);
-
-    if (length > 1) {
-        @panic("TODO: implement physical contiguous allocation");
-    } else if (length == 1) {
-        return alloc_page(level);
-    }
-
-    return 0;
-}
-
-pub fn free_contiguous_pages(address: u64, length: usize, level: PageLevel) void {
-    const addr = address >> level.shift();
-    var offset: usize = 0;
-    while (offset < length) : (offset += 1) {
-        unmark_page(addr + offset, level);
-    }
-}
-
 pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel) AllocError!void {
     if (pages.len == 0) return;
 
@@ -492,5 +472,54 @@ pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel) AllocError!void
 pub fn free_noncontiguous_pages(pages: []u64, level: PageLevel) void {
     for (pages) |page_addr| {
         unmark_page(page_addr >> level.shift(), level);
+    }
+}
+
+pub fn alloc_contiguous_pages(length: usize, level: PageLevel, length_align: bool) AllocError!u64 {
+    if (length == 0) return 0;
+
+    try check_memory_availability(length, level);
+
+    if (length > 1) {
+        // TODO this version is highly unoptimized, doesn't use the counters..
+
+        const page_count = switch (level) {
+            .l1G => page_count_1g,
+            .l2M => page_count_2m,
+            .l4K => page_count_4k,
+        };
+
+        var i: usize = 0;
+        while (i < page_count) : (i += 1) {
+            if (length_align and (i % length != 0)) continue;
+
+            var run: usize = 0;
+
+            while (i + run < page_count and is_page_available(i + run, level)) {
+                run += 1;
+                if (run == length) {
+                    for (0..length) |j| {
+                        mark_page(i + j, level);
+                    }
+                    return i << level.shift();
+                }
+            }
+
+            i += run;
+        }
+
+        return AllocError.OutOfContiguousMemory;
+    } else if (length == 1) {
+        return alloc_page(level);
+    }
+
+    return 0;
+}
+
+pub fn free_contiguous_pages(address: u64, length: usize, level: PageLevel) void {
+    const addr = address >> level.shift();
+    var offset: usize = 0;
+    while (offset < length) : (offset += 1) {
+        unmark_page(addr + offset, level);
     }
 }
