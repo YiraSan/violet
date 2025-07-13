@@ -51,7 +51,7 @@ pub fn init() void {
     switch (build_options.platform) {
         .aarch64_virt, .riscv64_virt => {
             const addr_range = virt.kernel_space.allocate(1, .l4K);
-            
+
             virt.kernel_space.map_contiguous(addr_range, 0x0900_0000, 1, .l4K, .{
                 .writable = true,
                 .device = true,

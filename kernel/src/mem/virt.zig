@@ -124,7 +124,7 @@ pub const AddressSpace = struct {
                     for (0..length) |j| {
                         self.write_bitmap(i + j, true);
                     }
-                    
+
                     self.next_hint = i + length;
 
                     return .{
