@@ -17,7 +17,7 @@ jobs:
     
     - uses: mlugg/setup-zig@v2
       with:
-        version: 0.15.0-dev.1023+f551c7c58
+        version: 0.15.0-dev.1034+bd97b6618
 
     - run: |
         sudo apt-get update

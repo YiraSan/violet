@@ -25,13 +25,18 @@ pub fn build(b: *std.Build) !void {
     const limine_path = limine_bin.path(".");
     const target = b.standardTargetOptions(.{});
 
-    const limine_exe = b.addExecutable(.{
-        .name = "limine",
+    const limine_mod = b.createModule(.{
         .target = target,
-        .optimize = .ReleaseSafe,
+        .optimize = optimize,
     });
 
-    limine_exe.addCSourceFile(.{ .file = limine_bin.path("limine.c"), .flags = &[_][]const u8{"-std=c99"} });
+    limine_mod.addCSourceFile(.{ .file = limine_bin.path("limine.c"), .flags = &[_][]const u8{"-std=c99"} });
+
+    const limine_exe = b.addExecutable(.{
+        .name = "limine",
+        .root_module = limine_mod,
+    });
+
     limine_exe.linkLibC();
 
     const limine_exe_run = b.addRunArtifact(limine_exe);

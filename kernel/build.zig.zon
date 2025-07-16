@@ -2,7 +2,7 @@
     .name = .kernel,
     .version = "0.1.0-dev.1",
     .fingerprint = 0x5dd29aabfd4067c8, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.1023+f551c7c58",
+    .minimum_zig_version = "0.15.0-dev.1034+bd97b6618",
     .dependencies = .{
         .limine_zig = .{
             .url = "git+https://github.com/YiraSan/limine-zig#78714f53496933e7bb31819f725773f816d89b05",
