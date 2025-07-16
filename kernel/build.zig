@@ -48,12 +48,6 @@ pub fn build(b: *std.Build) !void {
     const kernel_exe = b.addExecutable(.{
         .name = "kernel",
         .root_module = kernel_mod,
-        .code_model = switch (kernel_query.cpu_arch.?) {
-            .aarch64 => .small,
-            .x86_64 => .kernel,
-            .riscv64 => .medium,
-            else => unreachable,
-        },
         .use_llvm = true,
     });
 
