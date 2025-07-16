@@ -9,7 +9,7 @@ PHDRS
 
 SECTIONS
 {
-    . = 0x200000;
+    . = 0x40000000;
 
     .text : {
         *(.text .text.*)
@@ -34,6 +34,7 @@ SECTIONS
 
     /DISCARD/ : {
         *(.eh_frame)
+        *(.eh_frame_hdr)
         *(.note .note.*)
         *(.comment .comment.*)
     }

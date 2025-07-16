@@ -9,3 +9,7 @@ pub fn init() void {
     gdt.init();
     idt.init();
 }
+
+pub const ThreadContext = struct {};
+
+pub const TaskContext = struct {};
