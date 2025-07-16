@@ -2,10 +2,11 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
     _ = b.addModule("basalt", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = .ReleaseSafe,
+        .optimize = optimize,
     });
 }
 
@@ -21,6 +22,7 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
 
     const basalt = b.dependency("basalt", .{
         .target = target,
+        .optimize = options.optimize,
     });
     const basalt_mod = basalt.module("basalt");
 
@@ -39,7 +41,6 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         .use_llvm = true,
     });
 
-    exe.pie = true;
     exe.entry = .disabled;
     exe.out_filename = b.fmt("{s}.elf", .{options.name});
 

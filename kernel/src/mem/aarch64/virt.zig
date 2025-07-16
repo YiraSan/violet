@@ -13,10 +13,14 @@ const virt = mem.virt;
 // --- aarch64/virt.zig --- //
 
 pub fn init() void {
-    virt.kernel_space = virt.AddressSpace.init(null) catch @panic("failed to acquire a page for kernel_space");
+    const ttbr1_el1: u64 = asm volatile (
+        \\ mrs %[result], ttbr1_el1
+        : [result] "=r" (-> u64),
+    );
+
+    virt.kernel_space = virt.AddressSpace.init(ttbr1_el1, 0xffff900000000000) catch unreachable;
 
     init_mair();
-    set_ttbr0_el1(virt.kernel_space.root_table_phys);
 }
 
 pub fn flush(virt_addr: u64) void {
@@ -102,12 +106,10 @@ pub fn map_page(
     var block_descriptor = BlockDescriptor{
         .block_type = .table_page,
         .attr_index = if (flags.device) .device_ngnrne else .normal,
-        .ap = if (flags.user)
-            if (flags.writable) .rw_el0 else .ro_el0
-        else if (flags.writable) .rw_el1 else .ro_el1,
+        .ap = if (flags.writable and !flags.user) .rw_el1 else if (flags.writable and flags.user) .rw_el0 else if (!flags.writable and !flags.user) .ro_el1 else .ro_el0,
         .output_addr = @truncate(phys_addr >> 12),
-        .pxn = !flags.user and flags.executable,
-        .uxn = flags.user and flags.executable,
+        .pxn = !flags.executable or flags.user,
+        .uxn = !flags.executable or !flags.user,
         .contiguous = contiguous_segment,
     };
 
@@ -146,56 +148,6 @@ pub fn map_page(
 }
 
 // --- TTBRx_ELx --- //
-
-fn get_ttbr0_el0() virt.VirtualSpace {
-    const ttbr0_el0: u64 = asm volatile (
-        \\ mrs %[result], ttbr0_el0
-        : [result] "=r" (-> u64),
-    );
-    return .{ .root_table_phys = ttbr0_el0 };
-}
-
-fn get_ttbr1_el0() virt.VirtualSpace {
-    const ttbr1_el0: u64 = asm volatile (
-        \\ mrs %[result], ttbr1_el0
-        : [result] "=r" (-> u64),
-    );
-    return .{ .root_table_phys = ttbr1_el0 };
-}
-
-fn get_ttbr0_el1() virt.VirtualSpace {
-    const ttbr0_el1: u64 = asm volatile (
-        \\ mrs %[result], ttbr0_el1
-        : [result] "=r" (-> u64),
-    );
-    return .{ .root_table_phys = ttbr0_el1 };
-}
-
-fn get_ttbr1_el1() virt.VirtualSpace {
-    const ttbr1_el1: u64 = asm volatile (
-        \\ mrs %[result], ttbr1_el1
-        : [result] "=r" (-> u64),
-    );
-    return .{ .root_table_phys = ttbr1_el1 };
-}
-
-fn set_ttbr0_el0(addr: u64) void {
-    asm volatile (
-        \\ msr ttbr0_el0, %[input]
-        :
-        : [input] "r" (addr),
-        : "memory"
-    );
-}
-
-fn set_ttbr1_el0(addr: u64) void {
-    asm volatile (
-        \\ msr ttbr1_el0, %[input]
-        :
-        : [input] "r" (addr),
-        : "memory"
-    );
-}
 
 fn set_ttbr0_el1(addr: u64) void {
     asm volatile (

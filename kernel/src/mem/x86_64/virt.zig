@@ -18,7 +18,7 @@ pub fn init() void {
         : [result] "=r" (-> usize),
     );
 
-    const virt_space = virt.AddressSpace.init(cr3) catch @panic("unable to allocate address space in virt.init()");
+    const virt_space = virt.AddressSpace.init(cr3, 0) catch @panic("unable to allocate address space in virt.init()");
 
     virt.kernel_space = virt_space;
 }

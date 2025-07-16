@@ -12,3 +12,6 @@ const arch = switch (builtin.cpu.arch) {
 pub fn init() void {
     arch.init();
 }
+
+pub const ThreadContext = arch.ThreadContext;
+pub const TaskContext = arch.TaskContext;

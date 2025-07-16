@@ -53,8 +53,8 @@ pub const AddressRange = struct {
     virt_base_index: u32,
     virt_page_len: u32,
 
-    pub fn base(self: AddressRange) u64 {
-        return @as(u64, self.virt_base_index) << VIRTUAL_PAGE_SHIFT;
+    pub fn base(self: AddressRange, space: *AddressSpace) u64 {
+        return (@as(u64, self.virt_base_index) << VIRTUAL_PAGE_SHIFT) + space.virt_offset;
     }
 
     pub fn len(self: AddressRange) u64 {
@@ -66,9 +66,12 @@ pub const AddressSpace = struct {
     root_table_phys: u64,
     bitmap: []u64,
     next_hint: u64,
+    virt_offset: u64,
 
-    pub fn init(root_table_phys: ?u64) !@This() {
+    pub fn init(root_table_phys: ?u64, virt_offset: u64) !@This() {
         var virtual_space: @This() = undefined;
+
+        virtual_space.virt_offset = virt_offset;
 
         virtual_space.bitmap = @as([*]u64, @ptrFromInt(mem.hhdm_offset + try mem.phys.alloc_contiguous_pages(BITMAP_PAGE_LEN, .l4K, false)))[0 .. VIRTUAL_SPACE_LEN / 64];
         @memset(virtual_space.bitmap[0 .. (VIRTUAL_SPACE_BASE >> VIRTUAL_PAGE_SHIFT) / 64], 0xffff_ffff_ffff_ffff);
@@ -88,7 +91,7 @@ pub const AddressSpace = struct {
 
     pub fn deinit(self: *@This()) void {
         arch.free_table_recursive(self.root_table_phys, 0);
-        mem.phys.free_contiguous_pages(@intFromPtr(self.bitmap) - mem.hhdm_offset, BITMAP_PAGE_LEN, .l4K);
+        mem.phys.free_contiguous_pages(@intFromPtr(self.bitmap.ptr) - mem.hhdm_offset, BITMAP_PAGE_LEN, .l4K);
     }
 
     inline fn read_bitmap(self: *@This(), page_index: u64) bool {
@@ -151,25 +154,29 @@ pub const AddressSpace = struct {
         }
     }
 
-    pub fn map_contiguous(self: *@This(), range: AddressRange, phys_addr: u64, num_pages: u64, level: phys.PageLevel, flags: MapFlags) void {
+    pub fn map_contiguous(self: *@This(), range: AddressRange, virt_offset: u64, phys_addr: u64, num_pages: u64, level: phys.PageLevel, flags: MapFlags) void {
         std.debug.assert(std.mem.isAligned(phys_addr, level.size()));
-        std.debug.assert(num_pages << level.shift() <= range.len());
+        std.debug.assert(std.mem.isAligned(virt_offset, level.size()));
+        std.debug.assert((num_pages << level.shift()) + virt_offset <= range.len());
 
-        const virt_base = range.base();
+        const virt_base = range.base(self);
 
         var offset: usize = 0;
         for (0..num_pages) |_| {
-            arch.map_page(self, virt_base + offset, phys_addr + offset, level, flags, false); // TODO implement contiguous mapping
+            const virta = virt_base + virt_offset + offset;
+            const physa = phys_addr + offset;
+            arch.map_page(self, virta, physa, level, flags, false); // TODO implement contiguous mapping
             offset += level.size();
         }
     }
 
-    pub fn map_noncontiguous(self: *@This(), range: AddressRange, pages: []u64, level: phys.PageLevel, flags: MapFlags) void {
-        std.debug.assert(pages.len << level.shift() <= range.len());
+    pub fn map_noncontiguous(self: *@This(), range: AddressRange, virt_offset: u64, pages: []u64, level: phys.PageLevel, flags: MapFlags) void {
+        std.debug.assert(std.mem.isAligned(virt_offset, level.size()));
+        std.debug.assert((pages.len << level.shift()) + virt_offset <= range.len());
 
-        const virt_base = range.base();
+        const virt_base = range.base(self);
 
-        var offset: usize = 0;
+        var offset: usize = virt_offset;
         for (0..pages.len) |i| {
             arch.map_page(self, virt_base + offset, pages[i], level, flags, false);
             offset += level.size();

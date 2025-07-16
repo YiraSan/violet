@@ -52,14 +52,16 @@ pub fn init() void {
         .aarch64_virt, .riscv64_virt => {
             const addr_range = virt.kernel_space.allocate(1, .l4K);
 
-            virt.kernel_space.map_contiguous(addr_range, 0x0900_0000, 1, .l4K, .{
+            virt.kernel_space.map_contiguous(addr_range, 0, 0x0900_0000, 1, .l4K, .{
                 .writable = true,
                 .device = true,
             });
 
-            virt.flush(addr_range.base());
+            const base = addr_range.base(&virt.kernel_space);
 
-            base_address = addr_range.base();
+            virt.flush(base);
+
+            base_address = base;
         },
         else => unreachable,
     }

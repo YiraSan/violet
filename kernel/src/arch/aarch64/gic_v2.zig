@@ -49,15 +49,17 @@ pub fn init() void {
     const num_pages = (GICD_SIZE + GICC_SIZE) >> page_level.shift();
     const range = mem.virt.kernel_space.allocate(num_pages, page_level);
 
-    mem.virt.kernel_space.map_contiguous(range, GICD_PHYS_BASE, num_pages, page_level, .{
+    mem.virt.kernel_space.map_contiguous(range, 0, GICD_PHYS_BASE, num_pages, page_level, .{
         .device = true,
         .writable = true,
     });
 
-    mem.virt.flush(range.base());
+    const base = range.base(&mem.virt.kernel_space);
 
-    gicd_base = range.base();
-    gicc_base = range.base() + GICD_SIZE;
+    mem.virt.flush(base);
+
+    gicd_base = base;
+    gicc_base = base + GICD_SIZE;
 
     init_dist();
     init_cpu();

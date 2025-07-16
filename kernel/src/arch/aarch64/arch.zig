@@ -3,28 +3,37 @@
 const std = @import("std");
 const log = std.log.scoped(.arch);
 
+const kernel = @import("root");
+const process = kernel.process;
+
 const builtin = @import("builtin");
 
 const exception = @import("exception.zig");
 
+const regs = @import("regs.zig");
 const gic_v2 = @import("gic_v2.zig");
 
 // --- arch.zig --- //
 
 pub fn init() void {
-    const features0 = ID_AA64PFR0_EL1.load();
+    const id_aa64pfr0_el1 = regs.ID_AA64PFR0_EL1.load();
+    var cpacr_el1 = regs.CPACR_EL1.load();
 
-    if (features0.fp != 0x01) {
-        @panic("hardware floating point is unsupported");
+    if (id_aa64pfr0_el1.fp != 0x01) {
+        @panic("FP/NEON is required on violetOS");
     }
 
-    if (features0.adv_simd != 0x01) {
-        @panic("advanced SIMD is unsupported");
+    cpacr_el1.fpen = .el0_el1; // TODO el1_only then trap to active dynamic context switching
+
+    if (id_aa64pfr0_el1.adv_simd == 0x01) {
+        log.warn("ADV SIMD detected. Not supported now.", .{});
     }
+
+    cpacr_el1.store();
 
     exception.init();
 
-    switch (features0.gic_regs) {
+    switch (id_aa64pfr0_el1.gic_regs) {
         0x00 => { // GIC V2
             gic_v2.init();
         },
@@ -37,21 +46,21 @@ pub fn init() void {
 
 // --- structs --- //
 
-const ID_AA64PFR0_EL1 = packed struct(u64) {
-    el0: u4, // bit 0-3
-    el1: u4, // bit 4-7
-    el2: u4, // bit 8-11
-    el3: u4, // bit 12-15
-    fp: u4, // bit 16-19
-    adv_simd: u4, // bit 20-23
-    gic_regs: u4, // bit 24-27
-    _reserved: u36, // bit 28-63
+pub const TaskContext = struct {
+    xregs: [30]u64 = std.mem.zeroes([30]u64), // x0-x29
+    lr: u64 = 0, // x30 (link register)
+    spsr_el1: regs.SPSR_EL1, // process state (flags + mode)
+    elr_el1: u64, // return address (PC)
+    sp_el0: u64, // stack pointer (SP_EL0)
+    tpidr_el1: u64, // pointer to Task (kernel)
+    tpidrro_el0: process.TaskInfo, // pointer to TaskInfo for userland
+    // FP/NEON
+    vregs: [32]u128 = std.mem.zeroes([32]u128),
+    fpcr: u64 = 0,
+    fpsr: u64 = 0,
+};
 
-    pub fn load() ID_AA64PFR0_EL1 {
-        const id_aa64pfr0_el1: ID_AA64PFR0_EL1 = asm volatile (
-            \\ mrs %[result], id_aa64pfr0_el1
-            : [result] "=r" (-> ID_AA64PFR0_EL1),
-        );
-        return id_aa64pfr0_el1;
-    }
+pub const ThreadContext = struct {
+    sp_el1: u64,
+    tpidr_el0: u64 = 0,
 };
