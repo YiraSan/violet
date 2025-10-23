@@ -58,18 +58,18 @@ pub fn init(self: *@This(), base_address: u64) void {
     mmio_write(u32, self.base_address + CR_OFFSET, CR_UARTEN | CR_TXEN | CR_RXEN);
 }
 
-inline fn read_flag_register(self: *@This()) u8 {
+inline fn read_flag_register(self: *const @This()) u8 {
     return mmio_read(u8, self.base_address + FR_OFFSET);
 }
 
-pub fn write(self: *@This(), char: u8) void {
+pub fn write(self: *const @This(), char: u8) void {
     if (char == '\n') self.write('\r');
     while (self.read_flag_register() & FLAG_TXFF != 0) {}
     mmio_write(u8, self.base_address, char);
     while (self.read_flag_register() & FLAG_BUSY != 0) {}
 }
 
-pub fn read(self: *@This()) ?u8 {
+pub fn read(self: *const @This()) ?u8 {
     if (self.read_flag_register() & FLAG_RXFE != 0) {
         return null;
     } else {

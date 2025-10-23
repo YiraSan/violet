@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const uefi = std.os.uefi;
 
 pub const cpu = struct {
-
     pub fn halt() noreturn {
         while (true) {
             switch (builtin.cpu.arch) {
@@ -384,7 +383,7 @@ pub const cpu = struct {
                 /// Floating-point.
                 fp: enum(u4) { // bit 16-19
                     /// Floating-point is implemented, and includes support for:
-                    /// 
+                    ///
                     /// - Single-precision and double-precision floating-point types.
                     /// - Conversions between single-precision and half-precision data types, and double-precision and half-precision data types.
                     base_implementation = 0b0000,
@@ -395,7 +394,7 @@ pub const cpu = struct {
                 /// Advanced SIMD.
                 adv_simd: enum(u4) { // bit 20-23
                     /// Advanced SIMD is implemented, including support for the following SISD and SIMD operations:
-                    /// 
+                    ///
                     /// - Integer byte, halfword, word and doubleword element operations.
                     /// - Single-precision and double-precision floating-point arithmetic.
                     /// - Conversions between single-precision and half-precision data types, and double-precision and half-precision data types.base_implementation = 0b0000,
@@ -409,7 +408,7 @@ pub const cpu = struct {
                     gic_cpu_v3_v4 = 0b0001,
                     gic_cpu_v4_1 = 0b0011,
                 },
-                /// RAS Extension version. TODO. 
+                /// RAS Extension version. TODO.
                 ras: u4, // 28-31
                 /// Scalable Vector Extension.
                 sve: enum(u4) { // 32-35
@@ -443,7 +442,7 @@ pub const cpu = struct {
                 i: bool, // bit 7
                 a: bool, // bit 8
                 d: bool, // bit 9
-                _reserved1: u18, // bit 10-17 
+                _reserved1: u18, // bit 10-17
                 v: u1, // bit 28
                 c: u1, // bit 29
                 z: u1, // bit 30

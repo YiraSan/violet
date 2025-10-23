@@ -5,12 +5,11 @@ const build_options = @import("build_options");
 const builtin = @import("builtin");
 const std = @import("std");
 
+const uefi = std.os.uefi;
+
 // --- imports --- //
 
-const serial = switch (build_options.platform) {
-    .aarch64_qemu, .riscv64_qemu => @import("serial/pl011.zig"),
-    else => @import("serial/null_serial.zig"),
-};
+pub const drivers = @import("drivers/root.zig");
 
 // --- root static variables --- //
 
@@ -25,12 +24,17 @@ var memory_table: PhysicalMemory.MemoryTable = undefined;
 var hhdm_base: u64 = undefined;
 var hhdm_limit: u64 = undefined;
 
+var config_tables: [*]uefi.tables.ConfigurationTable = undefined;
+var number_of_entries: usize = undefined;
+
 export fn kernel_entry(
     map: *anyopaque,
     map_size: u64,
     descriptor_size: u64,
     _hhdm_base: u64,
     _hhdm_limit: u64,
+    _config_tables: [*]uefi.tables.ConfigurationTable,
+    _number_of_entries: usize,
 ) callconv(switch (builtin.cpu.arch) {
     .aarch64 => .{ .aarch64_aapcs = .{} },
     .riscv64 => .{ .riscv64_lp64 = .{} },
@@ -46,37 +50,11 @@ export fn kernel_entry(
     hhdm_base = _hhdm_base;
     hhdm_limit = _hhdm_limit;
 
+    config_tables = _config_tables;
+    number_of_entries = _number_of_entries;
+
     PhysicalMemory.init(memory_table) catch unreachable;
 
-    const stack = PhysicalMemory.alloc_page(.l4K) catch unreachable;
-    const stack_top = stack + 0x1000;
-
-    asm volatile(
-        \\ mov x1, #0
-        \\ msr spsel, x1
-        \\ isb
-        \\
-        \\ mov sp, %[st]
-        \\ isb
-        \\
-        \\ b _main
-        :
-        : [st] "r" (stack_top)
-        : "memory", "x1"
-    );
-
-    ark.cpu.halt();
-}
-
-export fn _main() noreturn {
-    main() catch |err| {
-        std.log.err("main returned with an error: {}", .{err});
-    };
-
-    ark.cpu.halt();
-}
-
-fn main() !void {
     vm = .{
         .user_space = @constCast(&ark.mem.VirtualSpace.init(.lower, switch (builtin.cpu.arch) {
             .aarch64 => @ptrFromInt(ark.cpu.armv8a_64.registers.TTBR0_EL1.get().l0_table),
@@ -96,31 +74,22 @@ fn main() !void {
         ._free = &_free,
     };
 
-    {
-        const reservation = ark.mem.VirtualReservation{
-            .space = &vm.kernel_space,
-            .virt = hhdm_base + 0x09000000,
-            .size = 1,
-        };
+    const stack = PhysicalMemory.alloc_page(.l4K) catch unreachable;
+    const stack_top = stack + 0x1000;
 
-        reservation.map_contiguous(page_allocator, 0x09000000, .{
-            .device = true,
-            .writable = true,
-        });
-    }
-
-    switch (build_options.platform) {
-        .aarch64_qemu => {
-            serial.init(hhdm_base + 0x09000000);
-        },
-        else => {},
-    }
-
-    log.info("kernel v{s}", .{build_options.version});
-
-    exception_init();
-
-    gic_v2.init();
+    asm volatile (
+        \\ mov x1, #0
+        \\ msr spsel, x1
+        \\ isb
+        \\
+        \\ mov sp, %[st]
+        \\ isb
+        \\
+        \\ b _main
+        :
+        : [st] "r" (stack_top),
+        : "memory", "x1"
+    );
 
     ark.cpu.halt();
 }
@@ -132,6 +101,41 @@ fn _alloc(_: *anyopaque, count: usize) ark.mem.PageAllocator.AllocError![*]align
 
 fn _free(_: *anyopaque, addr: [*]align(0x1000) u8, count: usize) void {
     PhysicalMemory.free_contiguous_pages(@intFromPtr(addr), count, .l4K);
+}
+
+export fn _main() noreturn {
+    main() catch |err| {
+        std.log.err("main returned with an error: {}", .{err});
+    };
+
+    ark.cpu.halt();
+}
+
+fn main() !void {
+    const configuration_tables = config_tables[0..number_of_entries];
+
+    var xsdt: *drivers.acpi.Xsdt = undefined;
+    var xsdt_found = false;
+    for (configuration_tables) |*entry| {
+        if (entry.vendor_guid.eql(uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
+            @setRuntimeSafety(false);
+            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(@intFromPtr(entry.vendor_table));
+            xsdt = @ptrFromInt(rsdp.xsdt_addr);
+            xsdt_found = true;
+        }
+    }
+
+    if (!xsdt_found) return error.IncompatibleAcpi;
+
+    drivers.serial.init(xsdt) catch {};
+
+    log.info("kernel v{s}", .{build_options.version});
+
+    exception_init();
+
+    // TODO implement GIC with ACPI
+
+    gic_v2.init();
 }
 
 // --- zig std features --- //
@@ -150,7 +154,7 @@ pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal)
         .info => "\x1b[36minfo",
         .debug => "\x1b[90mdebug",
     } ++ ": \x1b[0m";
-    serial.print(prefix ++ format ++ "\n", args);
+    drivers.serial.print(prefix ++ format ++ "\n", args);
 }
 
 pub const std_options: std.Options = .{
@@ -166,11 +170,11 @@ extern fn set_sp_el0(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 
 extern const exception_vector_table: [2048]u8;
 
-const sp_el1_stack_size = 0x1000 * 64;
-const sp_el1_stack: [sp_el1_stack_size]u8 align(0x1000) linksection(".bss") = undefined;
-
 pub fn exception_init() void {
-    set_sp_el1(@intFromPtr(&sp_el1_stack) + sp_el1_stack_size);
+    const sp_el1_stack = PhysicalMemory.alloc_page(.l4K) catch unreachable;
+    const sp_el1_stack_size = 0x1000;
+
+    set_sp_el1(sp_el1_stack + sp_el1_stack_size);
     set_vbar_el1(@intFromPtr(&exception_vector_table));
 }
 
@@ -309,9 +313,7 @@ fn unexpected_exception(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }
     ark.cpu.halt();
 }
 
-pub const VirtualMemory = struct {
-
-};
+pub const VirtualMemory = struct {};
 
 pub const Timer = struct {
     pub fn init() void {}
@@ -319,7 +321,7 @@ pub const Timer = struct {
     pub fn cancel() void {}
 };
 
-/// If conditions are met, the system will give the quantum asked by the process, 
+/// If conditions are met, the system will give the quantum asked by the process,
 /// if the system' charge increase the quantum will probably be reduced, the minimum being 1ms.
 pub const Quantum = enum {
     /// 1ms
@@ -329,12 +331,12 @@ pub const Quantum = enum {
     /// 10ms
     moderate,
     /// 50ms
-    /// 
+    ///
     /// Require a permission if used with reactive.
     /// It is impossible to use heavy with realtime.
     heavy,
     /// 100ms
-    /// 
+    ///
     /// Require a permission if not used with normal and reactive.
     /// It is impossible to use ultra_heavy with realtime.
     ultra_heavy,
@@ -348,7 +350,7 @@ pub const Priority = enum {
     /// Gives the priority over normal-task, while having the same aspect as normal tasks.
     reactive,
     /// Guarantee that the task is scheduled very often even under massive charge.
-    /// 
+    ///
     /// Whenever a realtime task becomes ready the kernel preempts the currently running task immediately if it is not also a realtime task.
     realtime,
 };
@@ -722,8 +724,6 @@ pub const PhysicalMemory = struct {
         }
     }
 
-    const uefi = std.os.uefi;
-
     pub const MemoryTable = struct {
         map: *anyopaque,
         map_key: usize,
@@ -742,7 +742,7 @@ pub const PhysicalMemory = struct {
     ) !void {
         var i: usize = 0;
         var is_base_set = false;
-        while (memory_map.get(i)) |entry| : (i+=1) {
+        while (memory_map.get(i)) |entry| : (i += 1) {
             if (entry.type == .conventional_memory) {
                 const original_base = entry.physical_start;
                 entry.physical_start = std.mem.alignForward(u64, entry.physical_start, PageLevel.l4K.size());
@@ -790,7 +790,7 @@ pub const PhysicalMemory = struct {
         ) >> 12;
 
         i = 0;
-        while (memory_map.get(i)) |entry| : (i+=1) {
+        while (memory_map.get(i)) |entry| : (i += 1) {
             if (entry.type == .conventional_memory and entry.number_of_pages > maps_size) {
                 var alloc_base = std.mem.alignForward(u64, entry.physical_start, @alignOf(u64));
 
@@ -843,7 +843,7 @@ pub const PhysicalMemory = struct {
 
         // configure bitmap_4k
         i = 0;
-        while (memory_map.get(i)) |entry| : (i+=1) {
+        while (memory_map.get(i)) |entry| : (i += 1) {
             if (entry.type == .conventional_memory) {
                 var page_index = entry.physical_start >> PageLevel.l4K.shift();
                 const page_end = page_index + entry.number_of_pages;
