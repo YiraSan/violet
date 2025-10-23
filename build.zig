@@ -1,9 +1,12 @@
 const std = @import("std");
+const dimmer = @import("dimmer");
 const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
-    const platform = b.option(basalt.Platform, "platform", "x86_64_q35, aarch64_virt, riscv64_virt") orelse .x86_64_q35;
+    const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
     const optimize = b.standardOptimizeOption(.{});
+
+    // dependencies
 
     const kernel_dep = b.dependency("kernel", .{
         .platform = platform,
@@ -12,126 +15,108 @@ pub fn build(b: *std.Build) !void {
     const kernel_exe = kernel_dep.artifact("kernel");
     b.installArtifact(kernel_exe);
 
-    const system_dep = b.dependency("system", .{
+    const bootloader_dep = b.dependency("bootloader", .{
         .platform = platform,
         .optimize = optimize,
     });
-    const system_exe = system_dep.artifact("system");
-    b.installArtifact(system_exe);
+    const bootloader_exe = bootloader_dep.artifact("bootloader");
+    b.installArtifact(bootloader_exe);
 
-    // FAT image
+    // Disk
 
-    const limine_bin = b.dependency("limine_bin", .{});
-    const limine_path = limine_bin.path(".");
-    const target = b.standardTargetOptions(.{});
+    var bootfs = dimmer.BuildInterface.FileSystemBuilder.init(b);
+    {
+        bootfs.mkdir("/EFI");
+        bootfs.mkdir("/EFI/BOOT");
 
-    const limine_mod = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
+        bootfs.copyFile(bootloader_exe.getEmittedBin(), switch (platform.arch()) {
+            .aarch64 => "/EFI/BOOT/BOOTAA64.EFI",
+            .riscv64 => "/EFI/BOOT/BOOTRISCV64.EFI",
+            else => unreachable,
+        });
+
+        bootfs.copyFile(kernel_exe.getEmittedBin(), "/kernel.elf");
+    }
+
+    const disk_image_dep = b.dependency("dimmer", .{ .release = true });
+    const disk_image_tools = dimmer.BuildInterface.init(b, disk_image_dep);
+
+    const disk_image = disk_image_tools.createDisk(128 * dimmer.BuildInterface.MiB, .{
+        .gpt_part_table = .{
+            .partitions = &.{
+                .{
+                    .type = .{ .name = .@"bios-boot" },
+                    .name = "BIOS Bootloader",
+                    .size = 0x8000,
+                    .offset = 0x5000,
+                    .data = .empty,
+                },
+                .{
+                    .type = .{ .name = .@"efi-system" },
+                    .name = "EFI System",
+                    .offset = 0xD000,
+                    .size = 33 * dimmer.BuildInterface.MiB,
+                    .data = .{
+                        .vfat = .{
+                            .format = .fat32,
+                            .label = "UEFI",
+                            .tree = bootfs.finalize(),
+                        },
+                    },
+                },
+            },
+        },
     });
 
-    limine_mod.addCSourceFile(.{ .file = limine_bin.path("limine.c"), .flags = &[_][]const u8{"-std=c99"} });
+    const install_disk_image = b.addInstallFile(disk_image, "disk.img");
+    b.getInstallStep().dependOn(&install_disk_image.step);
 
-    const limine_exe = b.addExecutable(.{
-        .name = "limine",
-        .root_module = limine_mod,
-    });
-
-    limine_exe.linkLibC();
-
-    const limine_exe_run = b.addRunArtifact(limine_exe);
-
-    const create_fat_img = b.addSystemCommand(&[_][]const u8{
-        // zig fmt: off
-        "/bin/sh", "-c",
-        try std.mem.concat(b.allocator, u8, &[_][]const u8{
-            "mkdir -p zig-out/root/EFI/BOOT/ && ",
-            "cp zig-out/bin/kernel.elf zig-out/root/ && ",
-            "cp zig-out/bin/system.elf zig-out/root/ && ",
-            "cp build/limine.conf zig-out/root/ && ",
-
-            "cp ", limine_path.getPath(b), "/limine-bios.sys ",
-                   limine_path.getPath(b), "/limine-bios-cd.bin ",
-                   limine_path.getPath(b), "/limine-uefi-cd.bin ",
-                   "zig-out/root/ && ",
-
-            "cp ", limine_path.getPath(b), "/BOOTX64.EFI ",
-                   limine_path.getPath(b), "/BOOTAA64.EFI ",
-                   limine_path.getPath(b), "/BOOTRISCV64.EFI ",
-                   "zig-out/root/EFI/BOOT/ && ",
-            
-            "xorriso -as mkisofs -R -r -J -b limine-bios-cd.bin ",
-                "-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus ",
-                "-apm-block-size 2048 --efi-boot limine-uefi-cd.bin ",
-                "-efi-boot-part --efi-boot-image --protective-msdos-label ",
-                "zig-out/root/ -o zig-out/violet.iso ",
-        }),
-        // zig fmt: on
-    });
-
-    create_fat_img.step.dependOn(&kernel_exe.step);
-    create_fat_img.step.dependOn(&system_exe.step);
-
-    _ = limine_exe_run.addArg("bios-install");
-    _ = limine_exe_run.addFileArg(b.path("zig-out/violet.iso"));
-    limine_exe_run.step.dependOn(&create_fat_img.step);
-
-    b.default_step.dependOn(&limine_exe_run.step);
-
-    // download .fd
+    // QEMU
 
     const download_fd = switch (platform) {
-        .x86_64_q35 => b.addSystemCommand(&[_][]const u8{
-            "sh", "-c",
-            \\[ -f .zig-cache/X64_OVMF.fd ] || curl -L -o .zig-cache/X64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
-        }),
-        .aarch64_virt => b.addSystemCommand(&[_][]const u8{
+        // .x86_64_q35 => b.addSystemCommand(&[_][]const u8{
+        //     "sh", "-c",
+        //     \\[ -f .zig-cache/X64_OVMF.fd ] || curl -L -o .zig-cache/X64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
+        // }),
+        .aarch64_qemu => b.addSystemCommand(&[_][]const u8{
             "sh", "-c",
             \\[ -f .zig-cache/AA64_OVMF.fd ] || curl -L -o .zig-cache/AA64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEAARCH64_QEMU_EFI.fd
         }),
-        .riscv64_virt => b.addSystemCommand(&[_][]const u8{
+        .riscv64_qemu => b.addSystemCommand(&[_][]const u8{
             "sh", "-c",
             \\[ -f .zig-cache/RISCV64_OVMF.fd ] || curl -L -o .zig-cache/RISCV64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT.fd
-        }),
-    };
-
-    // Run QEMU
-
-    const run = switch (platform) {
-        .x86_64_q35 => b.addSystemCommand(&[_][]const u8{
-            "qemu-system-x86_64",
-            "-bios", ".zig-cache/X64_OVMF.fd",
-            "-cdrom", "zig-out/violet.iso",
-            "-m", "2G",
-            "-smp", "4",
-            "-serial", "mon:stdio",
-            "-no-shutdown",
-            "-no-reboot",
-            "-d", "int",
-            "-D", "debug.log",
-        }),
-        .aarch64_virt => b.addSystemCommand(&[_][]const u8{
-            "qemu-system-aarch64",
-            "-cpu", "max",
-            "-m", "2G",
-            "-smp", "4",
-            "-M", "virt",
-            "-bios", ".zig-cache/AA64_OVMF.fd",
-            "-cdrom", "zig-out/violet.iso",
-            "-boot", "d",
-            "-device", "ramfb",
-            "-device", "qemu-xhci",
-            "-device", "usb-kbd",
-            "-serial", "mon:stdio",
-            "-no-reboot",
-            "-no-shutdown",
-            "-d", "int",
-            "-D", "debug.log",
         }),
         else => unreachable,
     };
 
-    run.step.dependOn(b.default_step);
-    run.step.dependOn(&download_fd.step);
-    b.step("run", "Run Violet in QEMU").dependOn(&run.step);
+    const qemu_run = switch (platform) {
+        .aarch64_qemu => b.addSystemCommand(&[_][]const u8{
+            // zig fmt: off
+            "qemu-system-aarch64",
+            "-cpu", "max",
+            "-machine", "virt",
+            "-m", "4G",
+            "-smp", "4",
+            "-bios", ".zig-cache/AA64_OVMF.fd",
+            "-cdrom", "zig-out/disk.img",
+            "-device", "ramfb",
+            // "-device", "virtio-gpu-pci", // TODO first support ramfb then virtio-gpu-pci
+            "-serial", "stdio",
+            "-boot", "d",
+            "-no-reboot",
+            "-no-shutdown",
+            "-d", "int",
+            "-D", "debug.log",
+            // zig fmt: on
+        }),
+        .aarch64_rpi => b.addSystemCommand(&[_][]const u8 {"echo", "QEMU doesn't support a good enough emulation of raspberry pi"}),
+        else => unreachable,
+    };
+
+    qemu_run.step.dependOn(&download_fd.step);
+    qemu_run.step.dependOn(b.getInstallStep());
+
+    const run_step = b.step("run", "run violetOS with qemu");
+
+    run_step.dependOn(&qemu_run.step);
 }

@@ -14,6 +14,8 @@ set_sp_el0:
 
     mov x1, #1
     msr spsel, x1
+
+    dsb sy
     isb
 
     ret
@@ -32,6 +34,8 @@ set_sp_el1:
 
     mov x1, #0
     msr spsel, x1
+
+    dsb sy
     isb
 
     ret
@@ -43,6 +47,7 @@ set_sp_el1:
 
 set_vbar_el1:
     msr vbar_el1, x0
+    dsb sy
     isb
 
     ret

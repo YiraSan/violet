@@ -1,0 +1,12 @@
+.{
+    .name = .uart_pl011,
+    .version = "0.0.0",
+    .fingerprint = 0x88b221d659b2c8c7, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.1",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

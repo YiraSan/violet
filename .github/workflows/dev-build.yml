@@ -17,20 +17,15 @@ jobs:
     
     - uses: mlugg/setup-zig@v2
       with:
-        version: 0.15.0-dev.1034+bd97b6618
+        version: 0.14.1
 
     - run: |
         sudo apt-get update
-        sudo apt-get install -y xorriso
         mkdir -p .zig-cache
 
     - run: |
-        zig build -Dplatform=x86_64_q35 -Doptimize=ReleaseSafe
-        mv ./zig-out/violet.iso ./violet-x86_64_q35.iso
-
-    - run: |
-        zig build -Dplatform=aarch64_virt -Doptimize=ReleaseSafe
-        mv ./zig-out/violet.iso ./violet-aarch64_virt.iso
+        zig build -Dplatform=aarch64_qemu -Doptimize=ReleaseSafe
+        mv ./zig-out/disk.img ./violet-aarch64_qemu.img
 
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
@@ -39,7 +34,7 @@ jobs:
         prerelease: true
         title: "Development Build"
         files: |
-          violet-x86_64_q35.iso
-          violet-aarch64_virt.iso
+          violet-aarch64_qemu.img
+          violet-aarch64_rpi4b.img
           license
           readme.md
