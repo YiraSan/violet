@@ -131,8 +131,8 @@ pub fn main() uefi.Status {
 
     // configure HHDM
     var i: usize = 0;
-    var limit: u64 = 0; 
-    while (memory_map.get(i)) |entry| : (i+=1) {
+    var limit: u64 = 0;
+    while (memory_map.get(i)) |entry| : (i += 1) {
         const size = entry.number_of_pages << 12;
         const end = entry.physical_start + size;
         if (end > limit) {
@@ -144,7 +144,7 @@ pub fn main() uefi.Status {
     const hhdm_base = reservation.address();
 
     i = 0;
-    while (memory_map.get(i)) |entry| : (i+=1) {
+    while (memory_map.get(i)) |entry| : (i += 1) {
         reservation.virt = hhdm_base + entry.physical_start;
         reservation.size = entry.number_of_pages;
 
@@ -154,16 +154,16 @@ pub fn main() uefi.Status {
             .acpi_reclaim_memory,
             .loader_code,
             .boot_services_data,
-                => reservation.map_contiguous(page_allocator, entry.physical_start, .{
-                    .writable = true,
-                }),
+            => reservation.map_contiguous(page_allocator, entry.physical_start, .{
+                .writable = true,
+            }),
             .memory_mapped_io,
             .memory_mapped_io_port_space,
-                => reservation.map_contiguous(page_allocator, entry.physical_start, .{
-                    .device = true,
-                    .writable = true,
-                }),
-            else => {}
+            => reservation.map_contiguous(page_allocator, entry.physical_start, .{
+                .device = true,
+                .writable = true,
+            }),
+            else => {},
         }
     }
 
@@ -220,29 +220,25 @@ pub fn main() uefi.Status {
         else => unreachable,
     }
 
-    // TODO ACPI
-
-    // exit BootServices (4)
-
     memory_map = getMemoryMap(boot_services);
 
     _ = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
-
-    // jump to kernel (5)
 
     const kernel_entry: *const fn (
         map: *anyopaque,
         map_size: u64,
         descriptor_size: u64,
         hhdm_base: u64,
-        virt_base_alloc: u64,
+        hhdm_limit: u64,
+        config_tables: [*]uefi.tables.ConfigurationTable,
+        number_of_entries: usize,
     ) callconv(switch (builtin.cpu.arch) {
         .aarch64 => .{ .aarch64_aapcs = .{} },
         .riscv64 => .{ .riscv64_lp64 = .{} },
         else => unreachable,
     }) noreturn = @ptrFromInt(entry_address);
 
-    kernel_entry(memory_map.map, memory_map.map_size, memory_map.descriptor_size, hhdm_base, vm.kernel_space.last_addr);
+    kernel_entry(memory_map.map, memory_map.map_size, memory_map.descriptor_size, hhdm_base, vm.kernel_space.last_addr, uefi.system_table.configuration_table, uefi.system_table.number_of_table_entries);
 
     hcf();
 }

@@ -32,10 +32,6 @@ pub fn build(b: *std.Build) !void {
     const ark_mod = ark_dep.module("ark");
     kernel_mod.addImport("ark", ark_mod);
 
-    const uart_pl011_dep = b.dependency("uart_pl011", .{});
-    const uart_pl011_mod = uart_pl011_dep.module("uart_pl011");
-    kernel_mod.addImport("uart_pl011", uart_pl011_mod);
-
     const kernel_exe = b.addExecutable(.{
         .name = "kernel",
         .root_module = kernel_mod,
