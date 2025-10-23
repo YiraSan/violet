@@ -4,27 +4,12 @@ const std = @import("std");
 const ark = @import("ark");
 
 const uefi = std.os.uefi;
-
-const Segment = struct {
-    phys: usize,
-    virt: usize,
-    size: usize,
-    flags: u32,
-};
+const hcf = ark.cpu.halt;
 
 pub fn main() uefi.Status {
-    std.log.info("bootloader v{s}", .{build_options.version});
-
-    // get BootServices (0)
-
     const boot_services: *uefi.tables.BootServices = uefi.system_table.boot_services orelse {
-        std.log.err("failed to load boot services", .{});
         return uefi.Status.unsupported;
     };
-
-    // get "kernel.elf" (1)
-
-    std.log.debug("loading kernel.elf file...", .{});
 
     var file_system: *uefi.protocol.SimpleFileSystem = undefined;
 
@@ -34,14 +19,12 @@ pub fn main() uefi.Status {
         @ptrCast(&file_system),
     );
     if (status != .success) {
-        std.log.err("unexpected status: {}", .{status});
         return status;
     }
 
     var root: *const uefi.protocol.File = undefined;
     status = file_system.openVolume(&root);
     if (status != .success) {
-        std.log.err("unexpected status: {}", .{status});
         return status;
     }
 
@@ -49,7 +32,6 @@ pub fn main() uefi.Status {
         var kernel_elf: *const uefi.protocol.File = undefined;
         status = root.open(&kernel_elf, std.unicode.utf8ToUtf16LeStringLiteral("kernel.elf"), uefi.protocol.File.efi_file_mode_read, 0);
         if (status != .success) {
-            std.log.err("unexpected status: {}", .{status});
             return status;
         }
 
@@ -57,7 +39,6 @@ pub fn main() uefi.Status {
         var size: usize = info_buf.len;
         status = kernel_elf.getInfo(&uefi.FileInfo.guid, &size, &info_buf);
         if (status != .success) {
-            std.log.err("unexpected status: {}", .{status});
             return status;
         }
 
@@ -66,14 +47,12 @@ pub fn main() uefi.Status {
         var buffer: [*]align(8) u8 = undefined;
         status = boot_services.allocatePool(uefi.tables.MemoryType.loader_data, info.file_size, &buffer);
         if (status != .success) {
-            std.log.err("unexpected status: {}", .{status});
             return status;
         }
 
         var buffer_size: usize = info.file_size;
         status = kernel_elf.read(&buffer_size, buffer);
         if (status != .success) {
-            std.log.err("unexpected status: {}", .{status});
             return status;
         }
 
@@ -84,29 +63,27 @@ pub fn main() uefi.Status {
 
     _ = root.close();
 
-    std.log.debug("loaded kernel.elf. done.", .{});
+    const page_allocator = ark.mem.PageAllocator{
+        .ctx = boot_services,
+        ._alloc = &_alloc,
+        ._free = &_free,
+    };
 
-    // load kernel to memory (2)
-
-    std.log.debug("loading kernel into memory...", .{});
+    var vm = ark.mem.VirtualMemory.init(page_allocator) catch hcf();
 
     const elf_header = std.elf.Header.parse(@ptrCast(kernel_file)) catch {
-        std.log.err("couldn't parse ELF header", .{});
         return uefi.Status.compromised_data;
     };
 
     if (!elf_header.is_64) {
-        std.log.err("kernel.elf should be 64bit", .{});
         return uefi.Status.compromised_data;
     }
 
     if (elf_header.endian != .little) {
-        std.log.err("kernel.elf should be little endian", .{});
         return uefi.Status.compromised_data;
     }
 
     if (elf_header.type != .EXEC) {
-        std.log.err("kernel.elf should be an executable", .{});
         return uefi.Status.compromised_data;
     }
 
@@ -116,11 +93,8 @@ pub fn main() uefi.Status {
         .x86_64 => elf_header.machine != .X86_64,
         else => unreachable,
     }) {
-        std.log.err("kernel.elf should be '{s}'", .{@tagName(builtin.cpu.arch)});
         return uefi.Status.compromised_data;
     }
-
-    var segments = std.ArrayList(Segment).init(uefi.pool_allocator);
 
     for (0..elf_header.phnum) |phi| {
         const ph: *std.elf.Elf64_Phdr = @alignCast(@ptrCast(kernel_file[elf_header.phoff + phi * @sizeOf(std.elf.Elf64_Phdr) ..]));
@@ -132,7 +106,6 @@ pub fn main() uefi.Status {
 
         status = boot_services.allocatePages(.allocate_any_pages, .loader_data, page_count, &physical_address);
         if (status != .success) {
-            std.log.err("unexpected status: {}", .{status});
             return status;
         }
 
@@ -143,42 +116,16 @@ pub fn main() uefi.Status {
             @memset(physical_address[ph.p_filesz..ph.p_memsz], 0);
         }
 
-        segments.append(.{
-            .phys = @intFromPtr(physical_address),
-            .virt = ph.p_vaddr,
-            .size = ph.p_memsz,
-            .flags = ph.p_flags,
-        }) catch |err| {
-            std.log.err("unexpected error: {}", .{err});
-            return uefi.Status.aborted;
-        };
+        const reservation = vm.kernel_space.reserve(std.mem.alignForward(usize, ph.p_memsz, 0x1000) >> 12);
+        if (reservation.address() != ph.p_vaddr) @panic("kernel bad-alignment");
+
+        reservation.map_contiguous(page_allocator, @intFromPtr(physical_address), .{
+            .writable = (ph.p_flags & std.elf.PF_W) != 0,
+            .executable = (ph.p_flags & std.elf.PF_X) != 0,
+        });
     }
 
     const entry_address = elf_header.entry;
-
-    std.log.debug("loaded kernel into memory. done.", .{});
-
-    // setup virtual memory (3)
-
-    std.log.debug("setting up virtual memory...", .{});
-
-    const page_allocator = ark.mem.PageAllocator{
-        .ctx = boot_services,
-        ._alloc = &_alloc,
-        ._free = &_free,
-    };
-
-    var vm = ark.mem.VirtualMemory.init(page_allocator) catch hcf();
-
-    for (segments.items) |segment| {
-        const reservation = vm.kernel_space.reserve(std.mem.alignForward(usize, segment.size, 0x1000) >> 12);
-        if (reservation.address() != segment.virt) @panic("kernel bad-alignment");
-
-        reservation.map_contiguous(page_allocator, segment.phys, .{
-            .writable = (segment.flags & std.elf.PF_W) != 0,
-            .executable = (segment.flags & std.elf.PF_X) != 0,
-        });
-    }
 
     var memory_map = getMemoryMap(boot_services);
 
@@ -273,13 +220,9 @@ pub fn main() uefi.Status {
         else => unreachable,
     }
 
-    std.log.debug("virtual memory setup. done.", .{});
-
     // TODO ACPI
 
     // exit BootServices (4)
-
-    std.log.debug("exiting bootServices and jumping into kernel_entry...", .{});
 
     memory_map = getMemoryMap(boot_services);
 
@@ -346,7 +289,6 @@ fn getMemoryMap(boot_services: *uefi.tables.BootServices) MemoryTable {
     );
 
     if (status != .buffer_too_small) {
-        std.log.err("unexpected return status: {}", .{status});
         unreachable;
     }
 
@@ -369,7 +311,6 @@ fn getMemoryMap(boot_services: *uefi.tables.BootServices) MemoryTable {
             continue;
         }
 
-        std.log.err("unexpected return status: {}", .{status});
         unreachable;
     }
 
@@ -380,37 +321,3 @@ fn getMemoryMap(boot_services: *uefi.tables.BootServices) MemoryTable {
         .descriptor_size = descriptor_size,
     };
 }
-
-// --- zig std features --- //
-
-fn hcf() noreturn {
-    while (true) {
-        switch (builtin.cpu.arch) {
-            .aarch64, .riscv64 => asm volatile ("wfi"),
-            else => unreachable,
-        }
-    }
-}
-
-pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
-    _ = return_address;
-    std.log.err("bootloader panic: {s}", .{message});
-    hcf();
-}
-
-const log = @import("log.zig");
-
-pub fn logFn(comptime level: std.log.Level, comptime _: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
-    const prefix = "[bootloader] " ++ switch (level) {
-        .err => "error",
-        .warn => "warn",
-        .info => "info",
-        .debug => "debug",
-    } ++ ": ";
-    log.print(prefix ++ format ++ "\n", args);
-}
-
-pub const std_options: std.Options = .{
-    .logFn = logFn,
-    .log_level = if (builtin.mode == .Debug) .debug else .info,
-};
