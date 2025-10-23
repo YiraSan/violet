@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
     _ = b.addModule("basalt", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -57,15 +58,15 @@ pub const ExecutableOptions = struct {
 };
 
 pub const Platform = enum {
-    x86_64_q35,
-    aarch64_virt,
-    riscv64_virt,
+    aarch64_qemu,
+    riscv64_qemu,
+
+    aarch64_rpi,
 
     pub fn arch(self: Platform) std.Target.Cpu.Arch {
         return switch (self) {
-            .x86_64_q35 => .x86_64,
-            .aarch64_virt => .aarch64,
-            .riscv64_virt => .riscv64,
+            .aarch64_qemu, .aarch64_rpi => .aarch64,
+            .riscv64_qemu => .riscv64,
         };
     }
 };

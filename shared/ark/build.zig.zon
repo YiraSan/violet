@@ -1,7 +1,7 @@
 .{
-    .name = .basalt,
-    .version = "0.1.0",
-    .fingerprint = 0xfe136ee48cd5b0ac, // Changing this has security and trust implications.
+    .name = .ark,
+    .version = "0.0.0",
+    .fingerprint = 0x713ddba115d7b469, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
     .dependencies = .{},
     .paths = .{

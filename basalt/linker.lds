@@ -15,13 +15,13 @@ SECTIONS
         *(.text .text.*)
     } :text
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    . = ALIGN(4K);
 
     .rodata : {
         *(.rodata .rodata.*)
     } :rodata
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    . = ALIGN(4K);
 
     .data : {
         *(.data .data.*)

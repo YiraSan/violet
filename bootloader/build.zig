@@ -7,53 +7,43 @@ pub fn build(b: *std.Build) !void {
 
     const target_query = std.Target.Query{
         .cpu_arch = platform.arch(),
-        .os_tag = .freestanding,
+        .os_tag = .uefi,
         .abi = .none,
-        .ofmt = .elf,
+        .ofmt = .coff,
     };
 
     const target = b.resolveTargetQuery(target_query);
 
-    const kernel_mod = b.createModule(.{
+    const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .stack_check = false,
+        .stack_protector = false,
     });
 
     const build_options = b.addOptions();
     build_options.addOption(basalt.Platform, "platform", platform);
     build_options.addOption([]const u8, "version", try getVersion(b));
-    kernel_mod.addImport("build_options", build_options.createModule());
+    mod.addImport("build_options", build_options.createModule());
 
     const ark_dep = b.dependency("ark", .{
         .target = target,
         .optimize = optimize,
     });
     const ark_mod = ark_dep.module("ark");
-    kernel_mod.addImport("ark", ark_mod);
+    mod.addImport("ark", ark_mod);
 
-    const uart_pl011_dep = b.dependency("uart_pl011", .{});
-    const uart_pl011_mod = uart_pl011_dep.module("uart_pl011");
-    kernel_mod.addImport("uart_pl011", uart_pl011_mod);
-
-    const kernel_exe = b.addExecutable(.{
-        .name = "kernel",
-        .root_module = kernel_mod,
+    const exe = b.addExecutable(.{
+        .name = "bootloader",
+        .root_module = mod,
         .use_llvm = true,
     });
 
-    kernel_exe.entry = .disabled;
-    kernel_exe.want_lto = false;
-    kernel_exe.setLinkerScript(b.path("linker.lds"));
+    exe.want_lto = false;
+    exe.subsystem = .EfiApplication;
 
-    switch (target.result.cpu.arch) {
-        .aarch64 => {
-            kernel_exe.addAssemblyFile(b.path("src/exception.s"));
-        },
-        else => unreachable,
-    }
-
-    b.installArtifact(kernel_exe);
+    b.installArtifact(exe);
 }
 
 fn getVersion(b: *std.Build) ![]const u8 {

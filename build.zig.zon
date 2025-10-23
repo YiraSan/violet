@@ -2,17 +2,25 @@
     .name = .violet,
     .version = "0.0.0",
     .fingerprint = 0x95f1a595b73c7658, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.1034+bd97b6618",
+    .minimum_zig_version = "0.14.1",
     .dependencies = .{
-        .limine_bin = .{
-            .url = "git+https://github.com/limine-bootloader/limine/?ref=v9.4.0-binary#da998a6b74a2849b634fb62fd484a1ea078a97d4",
-            .hash = "N-V-__8AAOiOSACgywMIZh5dV7vJSzUGE4U_EEgl3T9bfEhT",
-        },
-        .basalt = .{
-            .path = "./basalt/",
-        },
+        .basalt = .{ .path = "./basalt/" },
         .kernel = .{ .path = "./kernel/" },
-        .system = .{ .path = "./system/" },
+        .bootloader = .{ .path = "./bootloader/" },
+        .dimmer = .{
+            .url = "git+https://github.com/zig-osdev/disk-image-step#c0411db63cfda4c42a502dda277fd10f4a751160",
+            .hash = "dimmer-2.0.0-suxOkghVAgCZxYfOd33arl5jOJrnL_8hoZEnCL86IXyX",
+        },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "basalt", "kernel", "system", "licence", "readme.md" },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "basalt",
+        "bootloader",
+        "kernel",
+        "libs",
+        "system",
+        "license",
+        "readme.md",
+    },
 }
