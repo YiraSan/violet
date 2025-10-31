@@ -153,6 +153,7 @@ pub fn main() uefi.Status {
             .acpi_memory_nvs,
             .acpi_reclaim_memory,
             .loader_code,
+            .loader_data,
             .boot_services_data,
             => reservation.map_contiguous(page_allocator, entry.physical_start, .{
                 .writable = true,
