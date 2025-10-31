@@ -2,6 +2,9 @@
 
 > I'm rewriting a lot of stuff and changing the kernel-architecture. So, don't be afraid of the current state of the code (pretty crappy...)
 
+> [!IMPORTANT]
+> This project is in early development. APIs and behavior may change significantly until v1.0.0.
+
 ## Roadmap
 
 ...
