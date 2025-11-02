@@ -226,13 +226,13 @@ pub fn main() uefi.Status {
     _ = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
 
     const kernel_entry: *const fn (
-        map: *anyopaque,
-        map_size: u64,
-        descriptor_size: u64,
-        hhdm_base: u64,
-        hhdm_limit: u64,
-        config_tables: [*]uefi.tables.ConfigurationTable,
-        number_of_entries: usize,
+        _memory_map_ptr: [*]uefi.tables.MemoryDescriptor,
+        _memory_map_size: u64,
+        _memory_map_descriptor_size: u64,
+        _hhdm_base: u64,
+        _hhdm_limit: u64,
+        _configuration_tables: [*]uefi.tables.ConfigurationTable,
+        _configuration_number_of_entries: usize,
     ) callconv(switch (builtin.cpu.arch) {
         .aarch64 => .{ .aarch64_aapcs = .{} },
         .riscv64 => .{ .riscv64_lp64 = .{} },
@@ -257,7 +257,7 @@ fn _free(ctx: *anyopaque, addr: [*]align(0x1000) u8, count: usize) void {
 }
 
 const MemoryTable = struct {
-    map: *anyopaque,
+    map: [*]uefi.tables.MemoryDescriptor,
     map_key: usize,
     map_size: usize,
     descriptor_size: usize,

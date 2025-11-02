@@ -32,6 +32,13 @@ pub fn build(b: *std.Build) !void {
     const ark_mod = ark_dep.module("ark");
     kernel_mod.addImport("ark", ark_mod);
 
+    const basalt_dep = b.dependency("basalt", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const basalt_mod = basalt_dep.module("basalt");
+    kernel_mod.addImport("basalt", basalt_mod);
+
     const kernel_exe = b.addExecutable(.{
         .name = "kernel",
         .root_module = kernel_mod,
@@ -44,7 +51,7 @@ pub fn build(b: *std.Build) !void {
 
     switch (target.result.cpu.arch) {
         .aarch64 => {
-            kernel_exe.addAssemblyFile(b.path("src/exception.s"));
+            kernel_exe.addAssemblyFile(b.path("src/arch/aarch64/exception.s"));
         },
         else => unreachable,
     }

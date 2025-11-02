@@ -436,18 +436,18 @@ pub const cpu = struct {
                     el1h = 0b0101,
                     // TODO. there's two others
                 },
-                es: u1, // bit 4,
-                _reserved0: u1, // bit 5
-                f: bool, // bit 6
-                i: bool, // bit 7
-                a: bool, // bit 8
-                d: bool, // bit 9
-                _reserved1: u18, // bit 10-17
-                v: u1, // bit 28
-                c: u1, // bit 29
-                z: u1, // bit 30
-                n: u1, // bit 31
-                _reserved2: u32, // bit 32-63
+                es: u1 = 0, // bit 4,
+                _reserved0: u1 = 0, // bit 5
+                f: bool = false, // bit 6
+                i: bool = false, // bit 7
+                a: bool = false, // bit 8
+                d: bool = false, // bit 9
+                _reserved1: u18 = 0, // bit 10-17
+                v: u1 = 0, // bit 28
+                c: u1 = 0, // bit 29
+                z: u1 = 0, // bit 30
+                n: u1 = 0, // bit 31
+                _reserved2: u32 = 0, // bit 32-63
 
                 pub fn get() @This() {
                     const spsr_el1: @This() = asm volatile (
@@ -469,12 +469,97 @@ pub const cpu = struct {
             };
 
             pub const ESR_EL1 = packed struct(u64) {
-                iss: u25, // bits 0-24
+                iss: packed union { // bits 0-24
+                    unknown_reason: packed struct(u25) { _reserved0: u25 },
+                    brk_aarch64: packed struct(u25) {
+                        comment: u16, // bit 0-15
+                        _reserved0: u9, // bit 16-24
+                    },
+                    svc_hvc: packed struct(u25) {
+                        imm16: u16, // bit 0-15
+                        _reserved0: u9, // bit 16-24
+                    },
+                    data_abort: packed struct(u25) {
+                        /// Data Fault Status Code.
+                        dfsc: enum(u6) { // bit 0-5
+                            /// Address size fault, level 0 of translation or translation table base register.
+                            address_size_fault_lv0 = 0b000000,
+                            /// Address size fault, level 1.
+                            address_size_fault_lv1 = 0b000001,
+                            /// Address size fault, level 2.
+                            address_size_fault_lv2 = 0b000010,
+                            /// Address size fault, level 3.
+                            address_size_fault_lv3 = 0b000011,
+
+                            /// Translation fault, level 0.
+                            translation_fault_lv0 = 0b000100,
+                            /// Translation fault, level 1.
+                            translation_fault_lv1 = 0b000101,
+                            /// Translation fault, level 2.
+                            translation_fault_lv2 = 0b000110,
+                            /// Translation fault, level 3.
+                            translation_fault_lv3 = 0b000111,
+
+                            /// Translation fault, level 1.
+                            access_flag_lv1 = 0b001001,
+                            /// Translation fault, level 2.
+                            access_flag_lv2 = 0b001010,
+                            /// Translation fault, level 3.
+                            access_flag_lv3 = 0b001011,
+                            /// Translation fault, level 0.
+                            /// When FEAT_LPA2 is implemented.
+                            access_flag_lv0 = 0b001000,
+
+                            /// Permission fault, level 0.
+                            /// When FEAT_LPA2 is implemented
+                            permission_fault_lv0 = 0b001100,
+                            /// Permission fault, level 1.
+                            permission_fault_lv1 = 0b001101,
+                            /// Permission fault, level 2.
+                            permission_fault_lv2 = 0b001110,
+                            /// Permission fault, level 3.
+                            permission_fault_lv3 = 0b001111,
+
+                            /// Synchronous External abort, not on translation table walk or hardware update of translation table.
+                            synchronous_external_abort = 0b010000,
+
+                            // TODO ...
+                        },
+                        /// Write not Read. Indicates whether a synchronous abort was caused by an instruction writing to a memory location, or by an instruction reading from a memory location.
+                        wnr: enum(u1) { // bit 6
+                            reading = 0b0,
+                            writing = 0b1,
+                        },
+                        /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk.
+                        s1ptw: enum(u1) { // bit 7
+                            fault_not_on_a_stage_2 = 0b0,
+                            fault_on_the_stage_2 = 0b01,
+                        },
+                        /// TODO.
+                        cm: u1, // bit 8
+                        ea: u1, // bit 9
+                        /// FAR Not Valid.
+                        fnv: enum(u1) { // bit 10
+                            valid = 0b0,
+                            not_valid = 0b1,
+                        },
+                        _bit11_12: u2, // bit 11-12
+                        _reserved0: u1, // bit 13
+                        _bit14: u1, // bit 14
+                        _bit15: u1, // bit 15
+                        _bit16_20: u5, // bit 16-20
+                        sse: u1, // bit 21
+                        sas: u2, // bit 22-23
+                        isv: u1,
+                    },
+                },
                 il: enum(u1) { // bit 25
-                    b16,
-                    b32,
+                    b16 = 0b0,
+                    b32 = 0b1,
                 },
                 ec: enum(u6) { // bits 26-31
+                    /// ISS encoding for exceptions with an unknown reason ;
+                    /// ISS2 encoding for all other exceptions.
                     unknown_reason = 0b000000,
                     trapped_wfi_wfe = 0b000001,
                     trapped_mcr_mrc_cp15 = 0b000011,
@@ -489,6 +574,8 @@ pub const cpu = struct {
                     illegal_execution = 0b001110,
                     svc_inst_aarch32 = 0b010001,
                     trapped_msrr_mrrs_sys_uncovered_aarch64 = 0b010100,
+                    /// ISS encoding for an exception from HVC or SVC instruction execution ;
+                    /// ISS2 encoding for all other exceptions.
                     svc_inst_aarch64 = 0b010101,
                     trapped_msr_mrs_sys_uncovered_aarch64 = 0b011000,
                     trapped_sve = 0b011001,
@@ -499,7 +586,11 @@ pub const cpu = struct {
                     inst_abort_lower_el = 0b100000,
                     inst_abort_same_el = 0b100001,
                     pc_align_fault = 0b100010,
+                    /// ISS encoding for an exception from a Data Abort ;
+                    /// ISS2 encoding for an exception from a Data Abort.
                     data_abort_lower_el = 0b100100,
+                    /// ISS encoding for an exception from a Data Abort ;
+                    /// ISS2 encoding for an exception from a Data Abort.
                     data_abort_same_el = 0b100101,
                     sp_align_fault = 0b100110,
                     mem_op = 0b100111,
@@ -517,7 +608,11 @@ pub const cpu = struct {
                     brk_aarch64 = 0b111100,
                     profiling = 0b111101,
                 },
-                _reserved: u32, // bit 32-63
+                iss2: packed union { // bit 32-55
+                    // TODO ...
+                    all_others: packed struct(u24) { _reserved0: u24 },
+                },
+                _reserved0: u8, // bit 56-63
 
                 pub fn get() @This() {
                     const esr_el1: @This() = asm volatile (
@@ -572,6 +667,113 @@ pub const cpu = struct {
                 pub fn set(self: @This()) void {
                     asm volatile (
                         \\ msr cpacr_el1, %[input]
+                        :
+                        : [input] "r" (self),
+                        : "memory"
+                    );
+                }
+            };
+
+            /// Multiprocessor Affinity Register (EL1)
+            pub const MPIDR_EL1 = packed struct(u64) {
+                aff0: u8, // bit 0-7
+                aff1: u8, // bit 8-15
+                aff2: u8, // bit 16-23
+                mt: enum(u1) { // bit 24
+                    independent = 0b00,
+                    interdependent = 0b01,
+                },
+                _reserved0: u5, // bit 25-29
+                u: enum(u1) { // bit 30
+                    multiprocessor = 0b00,
+                    uniprocessor = 0b01,
+                },
+                _reserved1: u1, // bit 31
+                aff3: u8, // bit 32-39
+                _reserved2: u24, // bit 40-63
+
+                pub fn get() @This() {
+                    const mpidr_el1: @This() = asm volatile (
+                        \\ mrs %[result], mpidr_el1
+                        : [result] "=r" (-> @This()),
+                    );
+
+                    return mpidr_el1;
+                }
+            };
+
+            pub const FAR_EL1 = packed struct(u64) {
+                address: u64,
+
+                pub fn get() @This() {
+                    const far_el1: @This() = asm volatile (
+                        \\ mrs %[result], far_el1
+                        : [result] "=r" (-> @This()),
+                    );
+
+                    return far_el1;
+                }
+            };
+
+            pub const TPIDR_EL0 = packed struct(u64) {
+                value: u64,
+
+                pub fn get() @This() {
+                    const tpidr_el0: @This() = asm volatile (
+                        \\ mrs %[result], tpidr_el0
+                        : [result] "=r" (-> @This()),
+                    );
+
+                    return tpidr_el0;
+                }
+
+                pub fn set(self: @This()) void {
+                    asm volatile (
+                        \\ msr tpidr_el0, %[input]
+                        :
+                        : [input] "r" (self),
+                        : "memory"
+                    );
+                }
+            };
+
+            pub const TPIDR_EL1 = packed struct(u64) {
+                value: u64,
+
+                pub fn get() @This() {
+                    const tpidr_el1: @This() = asm volatile (
+                        \\ mrs %[result], tpidr_el1
+                        : [result] "=r" (-> @This()),
+                    );
+
+                    return tpidr_el1;
+                }
+
+                pub fn set(self: @This()) void {
+                    asm volatile (
+                        \\ msr tpidr_el1, %[input]
+                        :
+                        : [input] "r" (self),
+                        : "memory"
+                    );
+                }
+            };
+
+            pub const TPIDRRO_EL0 = packed struct(u64) {
+                value: u64,
+
+                pub fn get() @This() {
+                    const tpidrro_el0: @This() = asm volatile (
+                        \\ mrs %[result], tpidrro_el0
+                        : [result] "=r" (-> @This()),
+                    );
+
+                    return tpidrro_el0;
+                }
+
+                pub fn set(self: @This()) void {
+                    asm volatile (
+                        \\ msr tpidrro_el0, %[input]
                         :
                         : [input] "r" (self),
                         : "memory"
