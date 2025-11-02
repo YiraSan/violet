@@ -9,6 +9,9 @@ const acpi = kernel.drivers.acpi;
 
 const Pl011 = @import("pl011.zig");
 
+const mem = kernel.mem;
+const virt = mem.virt;
+
 // --- serial/root.zig --- //
 
 var impl: Impl = .null;
@@ -32,27 +35,31 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                                 const sizes = device.address_sizes();
 
                                 const page_count = std.mem.alignForward(u32, sizes[0], 0x1000);
-                                
-                                const reservation = kernel.vm.kernel_space.reserve(page_count);
 
-                                reservation.map_contiguous(kernel.page_allocator, addrs[0].address, .{
+                                const reservation = virt.kernel_space.reserve(page_count);
+
+                                reservation.map(addrs[0].address, .{
                                     .writable = true,
                                     .device = true,
                                 });
 
+                                const addr = reservation.address();
+
+                                virt.flush(addr);
+
                                 var pl011: Pl011 = undefined;
 
-                                pl011.init(reservation.address());
+                                pl011.init(addr);
 
                                 impl = .{ .pl011 = pl011 };
                                 break :xsdt_loop;
                             },
-                            else => {}
+                            else => {},
                         }
                     }
                 }
             },
-            else => {}
+            else => {},
         }
     }
 }
@@ -64,7 +71,7 @@ fn writeHandler(_: *anyopaque, bytes: []const u8) anyerror!usize {
             for (bytes) |char| {
                 pl011.write(char);
             }
-        }
+        },
     }
 
     return bytes.len;

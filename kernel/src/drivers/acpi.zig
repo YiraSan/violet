@@ -22,42 +22,54 @@ const DBG2_SIGNATURE = "DBG2";
 const IORT_SIGNATURE = "IORT";
 const BGRT_SIGNATURE = "BGRT";
 
-pub const Gas = packed struct {
-    address_space_id: u8,
-    register_bit_width: u8,
-    register_bit_offset: u8,
-    access_size: u8,
-    address: u64,
+pub const Gas = extern struct {
+    address_space_id: u8 align(1),
+    register_bit_width: u8 align(1),
+    register_bit_offset: u8 align(1),
+    access_size: u8 align(1),
+    address: u64 align(1),
+
+    comptime {
+        if (@sizeOf(Gas) != 12) @compileError("Gas should have a size of 12.");
+    }
 };
 
-pub const Rsdp = packed struct {
-    signature: u64,
-    checksum: u8,
-    oemid: u48,
-    revision: u8,
-    rsdt_addr: u32,
+pub const Rsdp = extern struct {
+    signature: [8]u8 align(1),
+    checksum: u8 align(1),
+    oemid: [6]u8 align(1),
+    revision: u8 align(1),
+    rsdt_addr: u32 align(1),
 
     // available ONLY if revision >= 2.0
-    length: u32,
-    xsdt_addr: u64,
-    extended_checksum: u8,
-    rsvd: u24,
+    length: u32 align(1),
+    xsdt_addr: u64 align(1),
+    extended_checksum: u8 align(1),
+    _reserved0: [3]u8 align(1),
+
+    comptime {
+        if (@sizeOf(Rsdp) != 36) @compileError("Rsdp should have a size of 36.");
+    }
 };
 
-pub const SdtHeader = packed struct {
-    signature: u32,
-    length: u32,
-    revision: u8,
-    checksum: u8,
-    oemid: u48,
-    oem_table_id: u64,
-    oem_revision: u32,
-    creator_id: u32,
-    creator_revision: u32,
+pub const SdtHeader = extern struct {
+    signature: [4]u8 align(1),
+    length: u32 align(1),
+    revision: u8 align(1),
+    checksum: u8 align(1),
+    oemid: [6]u8 align(1),
+    oem_table_id: u64 align(1),
+    oem_revision: u32 align(1),
+    creator_id: u32 align(1),
+    creator_revision: u32 align(1),
+
+    comptime {
+        if (@sizeOf(SdtHeader) != 36) @compileError("SdtHeader should have a size of 36.");
+    }
 };
 
-pub const Xsdt = packed struct {
-    header: SdtHeader,
+pub const Xsdt = extern struct {
+    header: SdtHeader align(1),
 
     pub fn iter(self: *@This()) XsdtIterator {
         return .{ .xsdt = self };
@@ -149,54 +161,161 @@ pub const MadtEntryType = enum(u8) {
     // OEM from 0x80 to 0xff
 };
 
-pub const EntryHeader = packed struct {
-    type: union {
-        madt: MadtEntryType,
-        // srat
-    },
-    length: u8,
+pub const MadtEntryHeader = extern struct {
+    type: MadtEntryType align(1),
+    length: u8 align(1),
 };
 
-pub const Madt = packed struct {
-    header: SdtHeader,
-    local_interrupt_controller_address: u32,
-    flags: u32,
-    // entries: [_]EntryHeader,
+pub const Madt = extern struct {
+    header: SdtHeader align(1),
+    local_interrupt_controller_address: u32 align(1),
+    flags: u32 align(1),
+
+    pub fn iter(self: *@This()) MadtIterator {
+        return .{ .madt = self };
+    }
 };
 
-pub const Fadt = packed struct {
-    header: SdtHeader,
+pub const MadtIterator = struct {
+    madt: *Madt,
+    offset: usize = 0,
+
+    pub fn next(self: *@This()) ?MadtEntry {
+        @setRuntimeSafety(false);
+
+        if (self.offset >= self.madt.header.length) return null;
+
+        const entry_header: *MadtEntryHeader = @ptrFromInt(@intFromPtr(self.madt) + @sizeOf(Madt) + self.offset);
+        self.offset += entry_header.length;
+
+        return switch (entry_header.type) {
+            .gicd => .{ .gicd = @ptrCast(entry_header) },
+            .gicc => .{ .gicc = @ptrCast(entry_header) },
+            .multiprocessor_wakeup => .{ .multiprocessor_wakeup = @ptrCast(entry_header) },
+            else => {
+                std.log.warn("unimplemented MadtEntry: {}", .{entry_header.type});
+                return null;
+            },
+        };
+    }
+};
+
+pub const MadtEntry = union(enum) {
+    gicd: *MadtGicd,
+    gicc: *MadtGicc,
+    multiprocessor_wakeup: *MadtMultiprocessorWakeup,
+};
+
+pub const MadtGicd = extern struct {
+    header: MadtEntryHeader align(1),
+    _reserved0: u16 align(1),
+    id: u32 align(1),
+    address: u64 align(1),
+    system_vector_base: u32 align(1),
+    gic_version: u8 align(1),
+    _reserved1: [3]u8 align(1),
+
+    comptime {
+        if (@sizeOf(MadtGicd) != 24) @compileError("MadtGicd should have a size of 24.");
+    }
+};
+
+pub const MadtGiccInterruptMode = enum(u1) {
+    level = 0b0,
+    edge = 0b1,
+};
+
+pub const MadtGicc = extern struct {
+    header: MadtEntryHeader align(1),
+    _reserved0: u16 align(1),
+    interface_number: u32 align(1),
+    acpi_id: u32 align(1),
+    flags: packed struct(u32) {
+        enabled: bool,
+        perf_interrupt_mode: MadtGiccInterruptMode,
+        vgic_maintenance_interrupt_mode: MadtGiccInterruptMode,
+        online_capable: bool,
+        _reserved0: u28,
+    } align(1),
+    parking_protocol_version: u32 align(1),
+    perf_interrupt_gsiv: u32 align(1),
+    parked_address: u64 align(1),
+    address: u64 align(1),
+    gicv: u64 align(1),
+    gich: u64 align(1),
+    vgic_maitenante_interrupt: u32 align(1),
+    gicr_base_address: u64 align(1),
+    mpidr: u64 align(1),
+    power_efficiency_class: u8 align(1),
+    _reserved1: u8 align(1),
+    spe_overflow_interrupt: u16 align(1),
+    trbe_interrupt: u16 align(1),
+
+    comptime {
+        if (@sizeOf(MadtGicc) != 82) @compileError("MadtGicc should have a size of 82.");
+    }
+};
+
+pub const MadtMultiprocessorWakeup = extern struct {
+    header: MadtEntryHeader align(1),
+    mailbox_version: u16 align(1),
+    _reserved0: u32 align(1),
+    mailbox_address: u64 align(1),
+
+    comptime {
+        if (@sizeOf(MadtMultiprocessorWakeup) != 16) @compileError("MadtMultiprocessorWakeup should have a size of 82.");
+    }
+};
+
+pub const Fadt = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };
 
-pub const Pptt = packed struct {
-    header: SdtHeader,
+pub const Pptt = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };
 
-pub const Gtdt = packed struct {
-    header: SdtHeader,
+pub const Gtdt = extern struct {
+    header: SdtHeader align(1),
+    cnt_control_base: u64 align(1),
+    _reserved0: u32 align(1),
+    el1_secure_gsiv: u32 align(1),
+    el1_secure_flags: u32 align(1),
+    el1_non_secure_gsiv: u32 align(1),
+    el1_non_secure_flags: u32 align(1),
+    el1_virtual_gsiv: u32 align(1),
+    el1_virtual_flags: u32 align(1),
+    el2_gsiv: u32 align(1),
+    el2_flags: u32 align(1),
+    cnt_read_base: u64 align(1),
+    platform_timer_count: u32 align(1),
+    platform_timer_offset: u32 align(1),
+
+    // revision >= 3
+    el2_virtual_gsiv: u32 align(1),
+    el2_virtual_flags: u32 align(1),
+};
+
+pub const Mcfg = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };
 
-pub const Mcfg = packed struct {
-    header: SdtHeader,
+pub const Spcr = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };
 
-pub const Spcr = packed struct {
-    header: SdtHeader,
-    // TODO
-};
-
-pub const Dbg2 = packed struct {
-    header: SdtHeader,
-    offset: u32,
-    number: u32,
+pub const Dbg2 = extern struct {
+    header: SdtHeader align(1),
+    offset: u32 align(1),
+    number: u32 align(1),
 
     pub fn iter(self: *@This()) Dbg2Iterator {
         return .{ .dbg2 = self };
-    } 
+    }
 };
 
 pub const Dbg2Iterator = struct {
@@ -218,20 +337,20 @@ pub const Dbg2Iterator = struct {
     }
 };
 
-pub const Dbg2DeviceInfo = packed struct {
-    revision: u8,
-    length: u16,
-    number_generic_address_registers: u8,
-    namespace_string_length: u16,
-    namespace_string_offset: u16,
-    oem_data_length: u16,
-    oem_data_offset: u16,
+pub const Dbg2DeviceInfo = extern struct {
+    revision: u8 align(1),
+    length: u16 align(1),
+    number_generic_address_registers: u8 align(1),
+    namespace_string_length: u16 align(1),
+    namespace_string_offset: u16 align(1),
+    oem_data_length: u16 align(1),
+    oem_data_offset: u16 align(1),
     port_type: enum(u16) {
         serial = 0x8000,
         _1394 = 0x8001,
         usb = 0x8002,
         net = 0x8003,
-    },
+    } align(1),
     port_subtype: packed union {
         serial: enum(u16) {
             ns16550 = 0x0,
@@ -263,10 +382,10 @@ pub const Dbg2DeviceInfo = packed struct {
             xhci_debug = 0x0,
             ehci_debug = 0x1,
         },
-    },
-    rsvd: u16,
-    base_address_register_offset: u16,
-    address_size_offset: u16,
+    } align(1),
+    rsvd: u16 align(1),
+    base_address_register_offset: u16 align(1),
+    address_size_offset: u16 align(1),
 
     pub fn base_address_registers(self: *Dbg2DeviceInfo) []Gas {
         @setRuntimeSafety(false);
@@ -286,12 +405,12 @@ pub const Dbg2DeviceInfo = packed struct {
     // TODO. oem_data
 };
 
-pub const Iort = packed struct {
-    header: SdtHeader,
+pub const Iort = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };
 
-pub const Bgrt = packed struct {
-    header: SdtHeader,
+pub const Bgrt = extern struct {
+    header: SdtHeader align(1),
     // TODO
 };

@@ -1,0 +1,14 @@
+.{
+    .name = .somafs,
+    .version = "0.0.0",
+    .fingerprint = 0x5de45c3ee3f26f43, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.1034+bd97b6618",
+    .dependencies = .{
+        .diskio = .{ .path = "../diskio/" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

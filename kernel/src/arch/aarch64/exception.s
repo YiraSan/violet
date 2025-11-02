@@ -20,6 +20,26 @@ set_sp_el0:
 
     ret
 
+// --- get_sp_el0 --- // USED FROM SP_EL1
+
+    .global get_sp_el0
+    .type get_sp_el0, %function
+get_sp_el0:
+    mov x1, #0
+    msr spsel, x1
+    isb
+
+    mov x0, sp
+    isb
+
+    mov x1, #1
+    msr spsel, x1
+
+    dsb sy
+    isb
+
+    ret
+
 // --- set_sp_el1 --- // USED FROM SP_EL0
 
     .global set_sp_el1
