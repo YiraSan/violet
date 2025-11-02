@@ -134,7 +134,7 @@ fn _task0() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     while (true) {}
 
     // terminate task.
-    asm volatile("svc #1");
+    asm volatile ("svc #1");
 
     unreachable;
 }
@@ -148,7 +148,7 @@ fn _task1() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     while (true) {}
 
     // terminate task.
-    asm volatile("svc #1");
+    asm volatile ("svc #1");
 
     unreachable;
 }

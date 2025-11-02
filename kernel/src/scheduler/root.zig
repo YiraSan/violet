@@ -87,7 +87,7 @@ pub fn acknowledgeTimer(arch_data: *anyopaque) void {
 fn armTimer(task: *Task) void {
     const precision = task.options.precision.toDelay();
     const quantum = task.options.quantum.toDelay();
-    
+
     if (@intFromEnum(quantum) < @intFromEnum(precision)) {
         kernel.drivers.Timer.arm(quantum);
     } else {
@@ -132,7 +132,7 @@ pub fn switchTask(arch_data: *anyopaque) void {
     kernel.arch.save_context(arch_data, null, &current_task.context);
 
     LocalStorage.setTaskId(next_task.id);
-    kernel.arch.load_context(arch_data, null, &next_task.context);    
+    kernel.arch.load_context(arch_data, null, &next_task.context);
 }
 
 pub fn terminateProcess(arch_data: *anyopaque) void {
