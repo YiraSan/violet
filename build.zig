@@ -109,7 +109,7 @@ pub fn build(b: *std.Build) !void {
             "-D", "debug.log",
             // zig fmt: on
         }),
-        .aarch64_rpi => b.addSystemCommand(&[_][]const u8 {"echo", "QEMU doesn't support a good enough emulation of raspberry pi"}),
+        .rpi4, .rpi3 => b.addSystemCommand(&[_][]const u8 {"echo", "QEMU doesn't support a good enough emulation of raspberry pi"}),
         else => unreachable,
     };
 

@@ -69,11 +69,12 @@ pub const Platform = enum {
     aarch64_qemu,
     riscv64_qemu,
 
-    aarch64_rpi,
+    rpi4,
+    rpi3,
 
     pub fn arch(self: Platform) std.Target.Cpu.Arch {
         return switch (self) {
-            .aarch64_qemu, .aarch64_rpi => .aarch64,
+            .aarch64_qemu, .rpi4, .rpi3 => .aarch64,
             .riscv64_qemu => .riscv64,
         };
     }
