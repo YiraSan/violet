@@ -21,14 +21,14 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     try generic_timer.init(xsdt);
 }
 
-pub fn mask_interrupts() void {
+pub fn maskInterrupts() void {
     asm volatile (
         \\ msr daifset, #0b1111
         \\ isb
     );
 }
 
-pub fn unmask_interrupts() void {
+pub fn unmaskInterrupts() void {
     asm volatile (
         \\ msr daifclr, #0b1111
         \\ isb
