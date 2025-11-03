@@ -102,7 +102,7 @@ pub fn firstEntry(arch_data: *anyopaque) void {
     var process = &Process.procs[0];
     var task = &process.tasks[0];
 
-    kernel.arch.load_context(arch_data, &process.context, &task.context);
+    kernel.arch.loadContext(arch_data, &process.context, &task.context);
 
     armTimer(task);
 }
@@ -113,10 +113,10 @@ pub fn switchProcess(arch_data: *anyopaque) void {
 
     if (current_process == next_process) return switchTask(arch_data);
 
-    kernel.arch.save_context(arch_data, &current_process.context, null);
+    kernel.arch.storeContext(arch_data, &current_process.context, null);
 
     LocalStorage.setProcessId(next_process.id);
-    kernel.arch.load_context(arch_data, &next_process.context, null);
+    kernel.arch.loadContext(arch_data, &next_process.context, null);
 
     unreachable;
 }
@@ -129,10 +129,10 @@ pub fn switchTask(arch_data: *anyopaque) void {
 
     if (current_task == next_task) return;
 
-    kernel.arch.save_context(arch_data, null, &current_task.context);
+    kernel.arch.storeContext(arch_data, null, &current_task.context);
 
     LocalStorage.setTaskId(next_task.id);
-    kernel.arch.load_context(arch_data, null, &next_task.context);
+    kernel.arch.loadContext(arch_data, null, &next_task.context);
 }
 
 pub fn terminateProcess(arch_data: *anyopaque) void {

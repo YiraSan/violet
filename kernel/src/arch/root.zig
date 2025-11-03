@@ -23,26 +23,26 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     try impl.init(xsdt);
 }
 
-pub fn mask_interrupts() void {
-    impl.mask_interrupts();
+pub fn maskInterrupts() void {
+    impl.maskInterrupts();
 }
 
-pub fn unmask_interrupts() void {
-    impl.unmask_interrupts();
+pub fn unmaskInterrupts() void {
+    impl.unmaskInterrupts();
 }
 
-pub fn save_context(
+pub fn storeContext(
     arch_data: *anyopaque,
     process_ctx: ?*kernel.arch.ProcessContext,
     task_ctx: ?*kernel.arch.TaskContext,
 ) void {
-    impl.save_context(arch_data, process_ctx, task_ctx);
+    impl.storeContext(arch_data, process_ctx, task_ctx);
 }
 
-pub fn load_context(
+pub fn loadContext(
     arch_data: *anyopaque,
     process_ctx: ?*kernel.arch.ProcessContext,
     task_ctx: ?*kernel.arch.TaskContext,
 ) void {
-    impl.load_context(arch_data, process_ctx, task_ctx);
+    impl.loadContext(arch_data, process_ctx, task_ctx);
 }

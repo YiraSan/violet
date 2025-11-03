@@ -107,7 +107,7 @@ fn main() !void {
     try arch.init(xsdt);
     try scheduler.init();
 
-    arch.unmask_interrupts();
+    arch.unmaskInterrupts();
 
     const process = scheduler.Process.new(.kernel);
 
