@@ -1,3 +1,4 @@
+//! TODO make a boot/ that will contains agnostic interface in order to avoid using directly ACPI and make the kernel bootloading-agnostic. To then implement UEFI-less bootloading.
 // --- dependencies --- //
 
 const ark = @import("ark");
@@ -18,11 +19,12 @@ pub const scheduler = @import("scheduler/root.zig");
 
 // --- main.zig --- //
 
-var memory_map: mem.MemoryMap = undefined;
-
 pub var hhdm_base: u64 = undefined;
 var hhdm_limit: u64 = undefined;
 
+// memory_map and configuration_tables becomes unavailable after full kernel initialization.
+
+var memory_map: mem.MemoryMap = undefined;
 var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
 
 export fn kernel_entry(
@@ -38,6 +40,8 @@ export fn kernel_entry(
     .riscv64 => .{ .riscv64_lp64 = .{} },
     else => unreachable,
 }) noreturn {
+    arch.maskInterrupts();
+
     memory_map = .{
         .map = _memory_map_ptr,
         .map_size = _memory_map_size,
@@ -105,14 +109,15 @@ fn main() !void {
     log.info("kernel v{s}", .{build_options.version});
 
     try arch.init(xsdt);
-    try scheduler.init();
 
-    arch.unmaskInterrupts();
+    try scheduler.init();
 
     const process = scheduler.Process.new(.kernel);
 
     _ = process.newTask(&_task0, .{});
     _ = process.newTask(&_task1, .{});
+
+    arch.unmaskInterrupts();
 
     // Enter scheduler...
     switch (builtin.cpu.arch) {
@@ -161,6 +166,24 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
     ark.cpu.halt();
 }
 
+const SpinLock = struct {
+    value: std.atomic.Value(u32) = .init(0),
+
+    pub fn lock(self: *SpinLock) void {
+        while (true) {
+            if (self.value.cmpxchgWeak(0, 1, .seq_cst, .seq_cst) == null) {
+                break;
+            }
+        }
+    }
+
+    pub fn unlock(self: *SpinLock) void {
+        self.value.store(0, .seq_cst);
+    }
+};
+
+var logfn_lock: SpinLock = .{};
+
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) "unknown" else @tagName(scope);
     const prefix = "\x1b[35m[kernel:" ++ scope_prefix ++ "] " ++ switch (level) {
@@ -169,6 +192,8 @@ pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal)
         .info => "\x1b[36minfo",
         .debug => "\x1b[90mdebug",
     } ++ ": \x1b[0m";
+    logfn_lock.lock();
+    defer logfn_lock.unlock();
     drivers.serial.print(prefix ++ format ++ "\n", args);
 }
 
