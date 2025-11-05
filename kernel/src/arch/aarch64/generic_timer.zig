@@ -37,7 +37,8 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 
 fn callback(ctx: *exception.ExceptionContext) void {
     disable();
-    kernel.scheduler.acknowledgeTimer(ctx);
+    _ = ctx;
+    // kernel.scheduler.acknowledgeTimer(ctx);
 }
 
 /// Reads the current system counter frequency from CNTFRQ_EL0.

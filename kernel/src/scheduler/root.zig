@@ -188,7 +188,7 @@ pub const Process = struct {
         procs[id].tasks.len = 0;
 
         if (execution_level == .user) {
-            procs[id].virt_space = .init(.lower, mem.phys.alloc_page(.l4K, true) catch unreachable);
+            procs[id].virt_space = .init(.lower, mem.phys.allocPage(.l4K, true) catch unreachable);
         }
 
         procs[id].execution_level = execution_level;

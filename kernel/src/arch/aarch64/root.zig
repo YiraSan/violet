@@ -2,12 +2,14 @@
 
 const std = @import("std");
 const ark = @import("ark");
+const builtin = @import("builtin");
 
 // --- imports --- //
 
 const kernel = @import("root");
 
 const acpi = kernel.drivers.acpi;
+const mem = kernel.mem;
 
 const exception = @import("exception.zig");
 const gic = @import("gic.zig");
@@ -16,20 +18,65 @@ const psci = @import("psci.zig");
 
 // --- aarch64/root.zig --- //
 
+pub fn initCpus(xsdt: *acpi.Xsdt) !void {
+    for (&cpus) |*cpu| cpu.* = null;
+
+    var xsdt_iter = xsdt.iter();
+    while (xsdt_iter.next()) |xsdt_entry| {
+        switch (xsdt_entry) {
+            .madt => |madt| {
+                var madt_iter = madt.iter();
+                while (madt_iter.next()) |madt_entry| {
+                    switch (madt_entry) {
+                        .gicc => |gicc| {
+                            const mpidr: ark.cpu.armv8a_64.registers.MPIDR_EL1 = @bitCast(gicc.mpidr);
+                            if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
+
+                            const cpu_ptr: *Cpu = @ptrFromInt(kernel.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
+                            cpus[mpidr.aff0] = cpu_ptr;
+
+                            cpu_ptr.mpidr = gicc.mpidr;
+                        },
+                        else => {},
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
+    var reg = ark.cpu.armv8a_64.registers.CPACR_EL1.get();
+    reg.fpen = .el0_el1;
+    reg.set();
+
+    const cpu = cpus[Cpu.id()].?;
+    asm volatile (
+        \\ msr tpidr_el1, %[in]
+        :
+        : [in] "r" (cpu),
+        : "memory"
+    );
+}
+
 pub fn init(xsdt: *acpi.Xsdt) !void {
     try exception.init();
     try gic.init(xsdt);
     try generic_timer.init(xsdt);
     try psci.init(xsdt);
+}
 
-    const l0_page = kernel.mem.phys.alloc_page(.l4K, false) catch unreachable;
+/// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
+var cpus: [256]?*Cpu = undefined;
+
+pub fn bootCpus() !void {
+    const l0_page = try kernel.mem.phys.allocPage(.l4K, false);
     var ttbr0_space = kernel.mem.virt.Space.init(.lower, l0_page);
 
     const trampoline_ptr = @intFromPtr(&trampoline);
     const trampoline_page = kernel.mem.virt.kernel_space.getPage(trampoline_ptr).?;
     const trampoline_addr = trampoline_page.phys_addr | (trampoline_ptr & 0xfff);
 
-    var res = kernel.mem.virt.Reservation {
+    var res = kernel.mem.virt.Reservation{
         .space = &ttbr0_space,
         .virt = trampoline_page.phys_addr,
         .size = 1,
@@ -37,6 +84,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 
     res.map(trampoline_page.phys_addr, .{
         .executable = true,
+        .writable = true,
     });
 
     cpu_setup_data.ttbr0 = ttbr0_space.l0_table;
@@ -45,26 +93,25 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     cpu_setup_data.tcr = @bitCast(ark.cpu.armv8a_64.registers.TCR_EL1.get());
     cpu_setup_data.mair = @bitCast(ark.cpu.armv8a_64.registers.MAIR_EL1.get());
 
-    cpu_setup_data.entry_virt = @intFromPtr(&cpuMain);
-    
-    for (1..2) |_| {
-        cpu_setup_data.stack_top_virt = kernel.hhdm_base + (kernel.mem.phys.alloc_page(.l4K, false) catch unreachable);    
-        psci.cpuOn(1, trampoline_addr, 0) catch unreachable;
+    cpu_setup_data.entry_virt = @intFromPtr(&initSecondary);
+
+    for (cpus) |cpu_nptr| {
+        if (cpu_nptr) |cpu| {
+            if (cpu.mpidr == Cpu.id()) continue;
+
+            cpu_setup_data.stack_top_virt = kernel.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
+            cpu_setup_data.setup_done = 0;
+
+            asm volatile ("dsb ish ; isb" ::: "memory");
+
+            try psci.cpuOn(cpu.mpidr, trampoline_addr, 0);
+
+            while (cpu_setup_data.setup_done != 1) {
+                asm volatile ("wfe");
+                asm volatile ("dsb ish ; isb" ::: "memory");
+            }
+        }
     }
-}
-
-export fn cpuMain() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
-    var reg = ark.cpu.armv8a_64.registers.CPACR_EL1.get();
-    reg.fpen = .el0_el1;
-    reg.set();
-
-    exception.init() catch {};
-
-    std.log.info("hello from a secondary cpu !!", .{});
-
-    asm volatile("brk #0");
-
-    while (true) {}
 }
 
 extern var cpu_setup_data: extern struct {
@@ -74,13 +121,15 @@ extern var cpu_setup_data: extern struct {
     mair: u64 align(1),
     stack_top_virt: u64 align(1),
     entry_virt: u64 align(1),
+    setup_done: u64 align(1),
 };
 
-/// the alignment is necessary to make sure that everything is on one single page.
-/// 
-/// the linksection is `.data` (read-write) in the higher-half mapping, in the lower-half identity mapping this is read-execute mapped (technically not even a thing because this is read outside the MMU).
 fn trampoline() align(0x1000) linksection(".data") callconv(.naked) noreturn {
     asm volatile (
+        \\ ic iallu
+        \\ dsb ish
+        \\ isb
+        \\
         \\ adr x0, cpu_setup_data
         \\ ldr x1, [x0, #0]  // ttbr0
         \\ ldr x2, [x0, #8]  // ttbr1
@@ -96,18 +145,22 @@ fn trampoline() align(0x1000) linksection(".data") callconv(.naked) noreturn {
         \\ dsb ish
         \\ isb
         \\
-        \\ mrs x7, sctlr_el1
-        \\ orr x7, x7, #1 // enable MMU
-        \\ msr sctlr_el1, x7
-        \\
-        \\ dsb ish
         \\ tlbi vmalle1
         \\ dsb ish
         \\ isb
         \\
+        \\ mrs x7, sctlr_el1
+        \\ orr x7, x7, #1 // enable MMU
+        \\ msr sctlr_el1, x7
+        \\
         \\ mov x7, #0
         \\ msr spsel, x7
         \\ mov sp, x5
+        \\
+        \\ mov x7, #1
+        \\ str x7, [x0, #48]
+        \\ dsb ish
+        \\ sev
         \\
         \\ br x6
         \\
@@ -124,7 +177,35 @@ fn trampoline() align(0x1000) linksection(".data") callconv(.naked) noreturn {
         \\    .quad 0 // mair
         \\    .quad 0 // stack_top_virt
         \\    .quad 0 // entry_virt
+        \\    .quad 0 // setup_done
     );
+}
+
+fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+    var reg = ark.cpu.armv8a_64.registers.CPACR_EL1.get();
+    reg.fpen = .el0_el1;
+    reg.set();
+
+    const cpu = cpus[Cpu.id()].?;
+    asm volatile (
+        \\ msr tpidr_el1, %[in]
+        :
+        : [in] "r" (cpu),
+        : "memory"
+    );
+
+    mem.phys.initCpu() catch unreachable;
+    exception.init() catch {};
+
+    // TODO gic initCpu
+
+    std.log.info("hello from core {}", .{Cpu.id()});
+
+    asm volatile ("brk #0");
+
+    while (true) {
+        asm volatile ("wfi");
+    }
 }
 
 pub fn maskInterrupts() void {
@@ -140,6 +221,40 @@ pub fn unmaskInterrupts() void {
         \\ isb
     );
 }
+
+pub const Cpu = struct {
+    mpidr: u64,
+    primary_4k_cache: [128]u64,
+    primary_4k_cache_pos: usize,
+    recycle_4k_cache: [128]u64,
+    recycle_4k_cache_num: usize,
+
+    pub fn id() usize {
+        switch (builtin.cpu.arch) {
+            .aarch64 => {
+                const mpidr = ark.cpu.armv8a_64.registers.MPIDR_EL1.get();
+                // NOTE the primary core should not even start a core from another cluster.
+                if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) unreachable;
+                return mpidr.aff0;
+            },
+            else => unreachable,
+        }
+    }
+
+    pub fn get() *Cpu {
+        return switch (builtin.cpu.arch) {
+            .aarch64 => asm volatile (
+                \\ mrs %[out], tpidr_el1
+                : [out] "=r" (-> *Cpu),
+            ),
+            else => unreachable,
+        };
+    }
+
+    comptime {
+        if (@sizeOf(Cpu) > mem.PageLevel.l2M.size()) @compileError("Cpu should be less than or equal to 2 MiB.");
+    }
+};
 
 pub const ProcessContext = struct {};
 

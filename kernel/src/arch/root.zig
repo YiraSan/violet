@@ -16,11 +16,20 @@ const impl = switch (builtin.cpu.arch) {
 
 pub const ProcessContext = impl.ProcessContext;
 pub const TaskContext = impl.TaskContext;
+pub const Cpu = impl.Cpu;
 
 // -- arch/root.zig -- //
 
 pub fn init(xsdt: *acpi.Xsdt) !void {
     try impl.init(xsdt);
+}
+
+pub fn initCpus(xsdt: *acpi.Xsdt) !void {
+    try impl.initCpus(xsdt);
+}
+
+pub fn bootCpus() !void {
+    try impl.bootCpus();
 }
 
 pub fn maskInterrupts() void {

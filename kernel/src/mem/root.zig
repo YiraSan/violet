@@ -34,6 +34,23 @@ pub const PageLevel = enum(u2) {
     }
 };
 
+pub const SpinLock = struct {
+    value: std.atomic.Value(u32) = .init(0),
+
+    pub fn lock(self: *SpinLock) void {
+        while (true) {
+            if (self.value.cmpxchgWeak(0, 1, .seq_cst, .seq_cst) == null) {
+                break;
+            }
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn unlock(self: *SpinLock) void {
+        self.value.store(0, .seq_cst);
+    }
+};
+
 pub const MemoryMap = struct {
     map: [*]uefi.tables.MemoryDescriptor,
     map_size: usize,

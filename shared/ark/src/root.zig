@@ -26,11 +26,15 @@ pub const cpu = struct {
             pub fn hypervisorCall(self: *@This()) u64 {
                 return asm volatile (
                     \\ hvc #0
-                    : [out] "={x0}" (-> u64)
-                    : [in0] "{x0}" (self.x0), [in1] "{x1}" (self.x1), 
-                      [in2] "{x2}" (self.x2), [in3] "{x3}" (self.x3), 
-                      [in4] "{x4}" (self.x4), [in5] "{x5}" (self.x5),
-                      [in6] "{x6}" (self.x6), [in7] "{x7}" (self.x7),
+                    : [out] "={x0}" (-> u64),
+                    : [in0] "{x0}" (self.x0),
+                      [in1] "{x1}" (self.x1),
+                      [in2] "{x2}" (self.x2),
+                      [in3] "{x3}" (self.x3),
+                      [in4] "{x4}" (self.x4),
+                      [in5] "{x5}" (self.x5),
+                      [in6] "{x6}" (self.x6),
+                      [in7] "{x7}" (self.x7),
                     : "memory"
                 );
             }
@@ -41,8 +45,8 @@ pub const cpu = struct {
                 // return asm volatile (
                 //     \\ smc #0
                 //     : [out] "={x0}" (-> u64)
-                //     : [in0] "{x0}" (self.x0), [in1] "{x1}" (self.x1), 
-                //       [in2] "{x2}" (self.x2), [in3] "{x3}" (self.x3), 
+                //     : [in0] "{x0}" (self.x0), [in1] "{x1}" (self.x1),
+                //       [in2] "{x2}" (self.x2), [in3] "{x3}" (self.x3),
                 //       [in4] "{x4}" (self.x4), [in5] "{x5}" (self.x5),
                 //       [in6] "{x6}" (self.x6), [in7] "{x7}" (self.x7),
                 //     : "memory"

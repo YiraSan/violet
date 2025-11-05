@@ -291,7 +291,7 @@ fn ensure_table(table_addr: u64, index: u64) u64 {
         return entry.output_addr << 12;
     }
 
-    const new_table = phys.alloc_page(.l4K, true) catch @panic("unable to allocate a page_table");
+    const new_table = phys.allocPage(.l4K, true) catch @panic("unable to allocate a page_table");
 
     entry.* = BlockDescriptor{
         .block_type = .table_page,
@@ -311,9 +311,9 @@ fn free_table_recursive(table_addr: u64, level: u8) void {
         if (entry.block_type == .table_page and level != 3) {
             free_table_recursive(entry.output_addr << 12, level + 1);
         } else {
-            phys.free_page(entry.output_addr << 12, .l4K);
+            phys.freePage(entry.output_addr << 12, .l4K);
         }
     }
 
-    phys.free_page(table_addr, .l4K);
+    phys.freePage(table_addr, .l4K);
 }

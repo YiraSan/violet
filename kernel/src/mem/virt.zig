@@ -41,12 +41,14 @@ pub const Space = struct {
     half: MemoryLocation,
     l0_table: u64,
     last_addr: u64,
+    lock: mem.SpinLock,
 
     pub fn init(half: MemoryLocation, l0_table: u64) @This() {
         return .{
             .half = half,
             .l0_table = l0_table,
             .last_addr = if (half == .lower) 0x1000 else 0,
+            .lock = .{},
         };
     }
 
@@ -58,6 +60,9 @@ pub const Space = struct {
     }
 
     pub fn reserve(self: *Space, count: usize) Reservation {
+        self.lock.lock();
+        defer self.lock.unlock();
+
         const reservation = Reservation{
             .space = self,
             .virt = self.last_addr,
@@ -71,11 +76,17 @@ pub const Space = struct {
 
     /// Returns current state of a page, `null` if there's no mapping.
     pub fn getPage(self: *Space, virt_addr: u64) ?Mapping {
+        self.lock.lock();
+        defer self.lock.unlock();
+
         return impl.getPage(self, virt_addr);
     }
 
     /// Returns `null` if no modification has been made.
     pub fn setPage(self: *Space, virt_addr: u64, mapping: Mapping) ?void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
         return impl.setPage(self, virt_addr, mapping);
     }
 };
@@ -103,6 +114,9 @@ pub const Reservation = struct {
 
     /// if `phys_addr` == 0 it won't commit physical pages, but will commit-on-use.
     pub fn map(self: @This(), phys_addr: u64, flags: MemoryFlags) void {
+        self.space.lock.lock();
+        defer self.space.lock.unlock();
+
         const virt_addr = self.address();
 
         var offset: usize = 0;
