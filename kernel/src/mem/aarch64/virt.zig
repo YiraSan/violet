@@ -15,17 +15,20 @@ const virt = mem.virt;
 // --- mem/virt.zig --- //
 
 pub fn init(hhdm_limit: u64) !void {
-    virt.user_space = @constCast(&virt.Space.init(.lower, switch (builtin.cpu.arch) {
-        .aarch64 => ark.cpu.armv8a_64.registers.TTBR0_EL1.get().l0_table,
-        else => unreachable,
-    }));
-
     virt.kernel_space = .init(.higher, switch (builtin.cpu.arch) {
         .aarch64 => ark.cpu.armv8a_64.registers.TTBR1_EL1.get().l0_table,
         else => unreachable,
     });
 
     virt.kernel_space.last_addr = hhdm_limit;
+}
+
+pub fn applySpace(space: *virt.Space) void {
+    var reg = ark.cpu.armv8a_64.registers.TTBR0_EL1{
+        .l0_table = space.l0_table,
+    };
+
+    reg.set();
 }
 
 pub fn flush(virt_addr: u64) void {

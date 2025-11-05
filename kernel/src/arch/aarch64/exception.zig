@@ -97,25 +97,6 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
             const iss = esr_el1.iss.svc_hvc;
 
             switch (iss.imm16) {
-                // SYSCALL:TERMINATE_PROCESS
-                0 => if (first_entry) {
-                    first_entry = false;
-                    kernel.scheduler.firstEntry(ctx);
-                    return;
-                } else {
-                    kernel.scheduler.terminateProcess(ctx);
-                    return;
-                },
-                // SYSCALL:TERMINATE_TASK
-                1 => {
-                    kernel.scheduler.terminateTask(ctx);
-                    return;
-                },
-                // SYSCALL:YIELD_TASK
-                2 => {
-                    kernel.scheduler.switchTask(ctx);
-                    return;
-                },
                 else => {
                     // TODO specifiy how are returned syscall errors.
                     @panic("bad syscall id");

@@ -27,6 +27,14 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     }
 }
 
+pub fn initCpu(xsdt: *acpi.Xsdt) !void {
+    switch (gic_version) {
+        .v2 => {
+            try gic_v2.initCpu(xsdt);
+        },
+    }
+}
+
 pub fn enableIRQ(irq: u32) void {
     switch (gic_version) {
         .v2 => gic_v2.enableIRQ(irq),

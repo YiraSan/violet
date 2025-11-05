@@ -20,7 +20,6 @@ const impl = switch (builtin.cpu.arch) {
 
 // --- mem/virt.zig --- //
 
-pub var user_space: *Space = undefined;
 pub var kernel_space: Space = undefined;
 
 pub fn init(hhdm_limit: u64) !void {
@@ -42,6 +41,17 @@ pub const Space = struct {
     l0_table: u64,
     last_addr: u64,
     lock: mem.SpinLock,
+
+    /// SHOULD NEVER BE APPLIED ON KERNEL_SPACE
+    /// NOTE on x86_64 this will be used to copy kernel_space onto the space
+    pub fn apply(self: *Space) void {
+        const cpu = kernel.arch.Cpu.get();
+        cpu.user_space = self;
+
+        impl.applySpace(self);
+
+        impl.flushAll();
+    }
 
     pub fn init(half: MemoryLocation, l0_table: u64) @This() {
         return .{
