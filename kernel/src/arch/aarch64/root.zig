@@ -62,6 +62,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     try exception.init();
     try gic.init(xsdt);
     try generic_timer.init(xsdt);
+    try generic_timer.enableCpu();
     try psci.init(xsdt);
 }
 
@@ -112,6 +113,8 @@ pub fn bootCpus() !void {
             }
         }
     }
+
+    // TODO free PTEs
 }
 
 extern var cpu_setup_data: extern struct {
@@ -164,10 +167,6 @@ fn trampoline() align(0x1000) linksection(".data") callconv(.naked) noreturn {
         \\
         \\ br x6
         \\
-        \\ halt:
-        \\    wfi
-        \\    b halt
-        \\
         \\ .align 3
         \\ .global cpu_setup_data
         \\ cpu_setup_data:
@@ -195,13 +194,18 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     );
 
     mem.phys.initCpu() catch unreachable;
+    kernel.boot_space.apply();
+
     exception.init() catch {};
+    gic.initCpu(kernel.xsdt) catch unreachable;
+    generic_timer.enableCpu() catch unreachable;
 
-    // TODO gic initCpu
+    kernel.scheduler.initCpu() catch unreachable;
 
-    std.log.info("hello from core {}", .{Cpu.id()});
+    unmaskInterrupts();
 
-    asm volatile ("brk #0");
+    // jump to scheduler.
+    kernel.drivers.Timer.arm(._5ms);
 
     while (true) {
         asm volatile ("wfi");
@@ -222,12 +226,26 @@ pub fn unmaskInterrupts() void {
     );
 }
 
+// TODO move arch-independent part into arch/root.zig
+
 pub const Cpu = struct {
     mpidr: u64,
+
+    // -- physical memory -- //
+
     primary_4k_cache: [128]u64,
     primary_4k_cache_pos: usize,
     recycle_4k_cache: [128]u64,
     recycle_4k_cache_num: usize,
+
+    // -- virtual memory -- //
+
+    user_space: *mem.virt.Space,
+
+    // -- scheduler -- //
+
+    process: ?*kernel.scheduler.Process,
+    task: ?*kernel.scheduler.Task,
 
     pub fn id() usize {
         switch (builtin.cpu.arch) {

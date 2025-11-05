@@ -15,6 +15,8 @@ const Timer = kernel.drivers.Timer;
 
 // --- generic_timer.zig --- //
 
+var gsiv: u32 = undefined;
+
 pub fn init(xsdt: *acpi.Xsdt) !void {
     var xsdt_iter = xsdt.iter();
     xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
@@ -24,7 +26,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 
                 exception.irq_callbacks[gtdt.el1_non_secure_gsiv] = &callback;
 
-                gic.enableIRQ(gtdt.el1_non_secure_gsiv);
+                gsiv = gtdt.el1_non_secure_gsiv;
 
                 Timer.selected_timer = .generic_timer;
 
@@ -35,10 +37,17 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     }
 }
 
+pub fn enableCpu() !void {
+    gic.enableIRQ(gsiv);
+}
+
+pub fn disableCpu() !void {
+    gic.disableIRQ(gsiv);
+}
+
 fn callback(ctx: *exception.ExceptionContext) void {
     disable();
-    _ = ctx;
-    // kernel.scheduler.acknowledgeTimer(ctx);
+    kernel.scheduler.acknowledgeTimer(ctx);
 }
 
 /// Reads the current system counter frequency from CNTFRQ_EL0.

@@ -22,11 +22,10 @@ pub const scheduler = @import("scheduler/root.zig");
 pub var hhdm_base: u64 = undefined;
 pub var hhdm_limit: u64 = undefined;
 
-// memory_map and configuration_tables becomes unavailable after full kernel initialization.
-
-var memory_map: mem.MemoryMap = undefined;
-var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
-var xsdt: *drivers.acpi.Xsdt = undefined;
+pub var boot_space: mem.virt.Space = undefined;
+pub var xsdt: *drivers.acpi.Xsdt = undefined;
+pub var memory_map: mem.MemoryMap = undefined;
+pub var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
 
 export fn kernel_entry(
     _memory_map_ptr: [*]uefi.tables.MemoryDescriptor,
@@ -75,6 +74,11 @@ export fn kernel_entry(
 
     mem.virt.init(hhdm_limit) catch unreachable;
 
+    boot_space = .init(.lower, switch (builtin.cpu.arch) {
+        .aarch64 => ark.cpu.armv8a_64.registers.TTBR0_EL1.get().l0_table,
+        else => unreachable,
+    });
+
     const stack = mem.phys.allocContiguousPages(8, .l4K, false) catch unreachable;
     const stack_top = hhdm_base + stack + (0x1000 * 8);
 
@@ -114,26 +118,19 @@ fn main() !void {
     log.info("kernel v{s}", .{build_options.version});
 
     try arch.init(xsdt);
+    try scheduler.init();
     try arch.bootCpus();
-
-    // try scheduler.init();
 
     // const process = scheduler.Process.new(.kernel);
 
     // _ = process.newTask(&_task0, .{});
     // _ = process.newTask(&_task1, .{});
 
-    // arch.unmaskInterrupts();
+    // jump to scheduler
+    arch.unmaskInterrupts();
+    drivers.Timer.arm(._5ms);
 
-    // // Enter scheduler...
-    // switch (builtin.cpu.arch) {
-    //     .aarch64 => {
-    //         asm volatile ("svc #0");
-    //     },
-    //     else => unreachable,
-    // }
-
-    @panic("not supposed to come back there !");
+    ark.cpu.halt();
 }
 
 fn _task0() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
