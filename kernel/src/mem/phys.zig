@@ -202,17 +202,17 @@ inline fn check_alignment(address: u64, level: PageLevel) AllocError!void {
     }
 }
 
-pub fn alloc_page(level: PageLevel, reset: bool) AllocError!u64 {
+fn alloc_page(level: PageLevel, reset: bool) AllocError!u64 {
     var pages: [1]u64 = undefined;
     try alloc_noncontiguous_pages(&pages, level, reset);
     return pages[0];
 }
 
-pub fn free_page(address: u64, level: PageLevel) void {
+fn free_page(address: u64, level: PageLevel) void {
     unmark_page(address >> level.shift(), level);
 }
 
-pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) AllocError!void {
+fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) AllocError!void {
     if (pages.len == 0) return;
 
     try check_memory_availability(pages.len, level);
@@ -239,7 +239,7 @@ pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) Al
 
                 for (0..page_count_1g) |page_index| {
                     const count_2m = counter_1g[page_index];
-                    if (count_2m < 512 and (count_2m > hotspot_max or !hotspot_set)) {
+                    if (is_page_sub_available(page_index, .l1G) and count_2m < 512 and (count_2m > hotspot_max or !hotspot_set)) {
                         hotspot_index = page_index;
                         hotspot_max = count_2m;
                         hotspot_set = true;
@@ -267,8 +267,9 @@ pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) Al
                 var hotspot_set_1g = false;
 
                 for (0..page_count_1g) |idx| {
-                    if (counter_1g_4k[idx] < 512 * 512 and (counter_1g_4k[idx] > hotspot_max_1g or !hotspot_set_1g)) {
-                        hotspot_max_1g = counter_1g_4k[idx];
+                    const count_1g_4k = counter_1g_4k[idx];
+                    if (is_page_sub_available(idx, .l1G) and count_1g_4k < 512 * 512 and (count_1g_4k > hotspot_max_1g or !hotspot_set_1g)) {
+                        hotspot_max_1g = count_1g_4k;
                         hotspot_index_1g = idx;
                         hotspot_set_1g = true;
                     }
@@ -283,7 +284,7 @@ pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) Al
 
                     for (0..512) |idx| {
                         const page_index = (hotspot_index_1g << 9) | idx;
-                        if (counter_2m[page_index] < 512 and (counter_2m[page_index] > hotspot_max_2m or !hotspot_set_2m)) {
+                        if (is_page_sub_available(page_index, .l2M) and counter_2m[page_index] < 512 and (counter_2m[page_index] > hotspot_max_2m or !hotspot_set_2m)) {
                             hotspot_max_2m = counter_2m[page_index];
                             hotspot_index_2m = page_index;
                             hotspot_set_2m = true;
@@ -312,13 +313,16 @@ pub fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) Al
     return AllocError.OutOfContiguousMemory;
 }
 
-pub fn free_noncontiguous_pages(pages: []u64, level: PageLevel) void {
+fn free_noncontiguous_pages(pages: []u64, level: PageLevel) void {
     for (pages) |page_addr| {
         unmark_page(page_addr >> level.shift(), level);
     }
 }
 
-pub fn alloc_contiguous_pages(length: usize, level: PageLevel, length_align: bool) AllocError!u64 {
+pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool) AllocError!u64 {
+    phys_lock.lock();
+    defer phys_lock.unlock();
+
     if (length == 0) return 0;
 
     try check_memory_availability(length, level);
@@ -359,7 +363,10 @@ pub fn alloc_contiguous_pages(length: usize, level: PageLevel, length_align: boo
     return 0;
 }
 
-pub fn free_contiguous_pages(address: u64, length: usize, level: PageLevel) void {
+pub fn freeContiguousPages(address: u64, length: usize, level: PageLevel) void {
+    phys_lock.lock();
+    defer phys_lock.unlock();
+
     const addr = address >> level.shift();
     var offset: usize = 0;
     while (offset < length) : (offset += 1) {
@@ -509,5 +516,74 @@ pub fn init(
             if (page_used_2m) counter_1g[page_index_1g] += 1;
         }
         if (counter_1g[page_index_1g] > 0) write_bitmap(page_index_1g, .l1G, true);
+    }
+}
+
+var phys_lock: mem.SpinLock = .{};
+
+pub fn initCpu() AllocError!void {
+    try reloadCache();
+}
+
+fn reloadCache() AllocError!void {
+    const cpu = kernel.arch.Cpu.get();
+
+    {
+        phys_lock.lock();
+        defer phys_lock.unlock();
+        try alloc_noncontiguous_pages(&cpu.primary_4k_cache, .l4K, true);
+    }
+
+    cpu.primary_4k_cache_pos = 0;
+
+    cpu.recycle_4k_cache_num = 0;
+}
+
+pub fn allocPage(level: PageLevel, reset: bool) AllocError!u64 {
+    const cpu = kernel.arch.Cpu.get();
+
+    switch (level) {
+        .l4K => {
+            if (cpu.recycle_4k_cache_num > 0) {
+                cpu.recycle_4k_cache_num -= 1;
+                return cpu.recycle_4k_cache[cpu.recycle_4k_cache_num];
+            }
+
+            if (cpu.primary_4k_cache_pos >= 128) try reloadCache();
+            defer cpu.primary_4k_cache_pos += 1;
+            return cpu.primary_4k_cache[cpu.primary_4k_cache_pos];
+        },
+        .l2M, .l1G => {
+            phys_lock.lock();
+            defer phys_lock.unlock();
+
+            return alloc_page(level, reset);
+        },
+    }
+}
+
+pub fn freePage(address: u64, level: PageLevel) void {
+    const cpu = kernel.arch.Cpu.get();
+
+    switch (level) {
+        .l4K => {
+            cpu.recycle_4k_cache[cpu.recycle_4k_cache_num] = address;
+            cpu.recycle_4k_cache_num += 1;
+
+            if (cpu.recycle_4k_cache_num >= 128) {
+                cpu.recycle_4k_cache_num = 0;
+
+                phys_lock.lock();
+                defer phys_lock.unlock();
+
+                free_noncontiguous_pages(&cpu.recycle_4k_cache, .l4K);
+            }
+        },
+        .l2M, .l1G => {
+            phys_lock.lock();
+            defer phys_lock.unlock();
+
+            return free_page(address, level);
+        },
     }
 }

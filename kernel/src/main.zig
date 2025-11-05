@@ -20,12 +20,13 @@ pub const scheduler = @import("scheduler/root.zig");
 // --- main.zig --- //
 
 pub var hhdm_base: u64 = undefined;
-var hhdm_limit: u64 = undefined;
+pub var hhdm_limit: u64 = undefined;
 
 // memory_map and configuration_tables becomes unavailable after full kernel initialization.
 
 var memory_map: mem.MemoryMap = undefined;
 var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
+var xsdt: *drivers.acpi.Xsdt = undefined;
 
 export fn kernel_entry(
     _memory_map_ptr: [*]uefi.tables.MemoryDescriptor,
@@ -54,10 +55,27 @@ export fn kernel_entry(
     configuration_tables = _configuration_tables[0.._configuration_number_of_entries];
 
     mem.init() catch unreachable;
+
     mem.phys.init(memory_map, hhdm_base) catch unreachable;
+
+    var xsdt_found = false;
+    for (configuration_tables) |*entry| {
+        if (entry.vendor_guid.eql(uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
+            @setRuntimeSafety(false);
+            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(@intFromPtr(entry.vendor_table));
+            xsdt = @ptrFromInt(rsdp.xsdt_addr);
+            xsdt_found = true;
+        }
+    }
+
+    if (!xsdt_found) unreachable;
+
+    arch.initCpus(xsdt) catch unreachable;
+    mem.phys.initCpu() catch unreachable;
+
     mem.virt.init(hhdm_limit) catch unreachable;
 
-    const stack = mem.phys.alloc_contiguous_pages(8, .l4K, false) catch unreachable;
+    const stack = mem.phys.allocContiguousPages(8, .l4K, false) catch unreachable;
     const stack_top = hhdm_base + stack + (0x1000 * 8);
 
     switch (builtin.cpu.arch) {
@@ -91,41 +109,29 @@ export fn _main() noreturn {
 }
 
 fn main() !void {
-    var xsdt: *drivers.acpi.Xsdt = undefined;
-    var xsdt_found = false;
-    for (configuration_tables) |*entry| {
-        if (entry.vendor_guid.eql(uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
-            @setRuntimeSafety(false);
-            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(@intFromPtr(entry.vendor_table));
-            xsdt = @ptrFromInt(rsdp.xsdt_addr);
-            xsdt_found = true;
-        }
-    }
-
-    if (!xsdt_found) return error.IncompatibleAcpi;
-
     try drivers.serial.init(xsdt);
 
     log.info("kernel v{s}", .{build_options.version});
 
     try arch.init(xsdt);
+    try arch.bootCpus();
 
-    try scheduler.init();
+    // try scheduler.init();
 
-    const process = scheduler.Process.new(.kernel);
+    // const process = scheduler.Process.new(.kernel);
 
-    _ = process.newTask(&_task0, .{});
-    _ = process.newTask(&_task1, .{});
+    // _ = process.newTask(&_task0, .{});
+    // _ = process.newTask(&_task1, .{});
 
-    arch.unmaskInterrupts();
+    // arch.unmaskInterrupts();
 
-    // Enter scheduler...
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            asm volatile ("svc #0");
-        },
-        else => unreachable,
-    }
+    // // Enter scheduler...
+    // switch (builtin.cpu.arch) {
+    //     .aarch64 => {
+    //         asm volatile ("svc #0");
+    //     },
+    //     else => unreachable,
+    // }
 
     @panic("not supposed to come back there !");
 }
@@ -166,23 +172,7 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
     ark.cpu.halt();
 }
 
-const SpinLock = struct {
-    value: std.atomic.Value(u32) = .init(0),
-
-    pub fn lock(self: *SpinLock) void {
-        while (true) {
-            if (self.value.cmpxchgWeak(0, 1, .seq_cst, .seq_cst) == null) {
-                break;
-            }
-        }
-    }
-
-    pub fn unlock(self: *SpinLock) void {
-        self.value.store(0, .seq_cst);
-    }
-};
-
-var logfn_lock: SpinLock = .{};
+var logfn_lock: mem.SpinLock = .{};
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) "unknown" else @tagName(scope);

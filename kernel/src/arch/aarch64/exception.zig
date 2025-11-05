@@ -15,7 +15,7 @@ const phys = mem.phys;
 // --- aarch64/exception.zig --- //
 
 pub fn init() !void {
-    const sp_el1_stack = kernel.hhdm_base + (phys.alloc_page(.l4K, false) catch unreachable);
+    const sp_el1_stack = kernel.hhdm_base + (phys.allocPage(.l4K, false) catch unreachable);
     const sp_el1_stack_size = 0x1000;
 
     set_sp_el1(sp_el1_stack + sp_el1_stack_size);
@@ -68,7 +68,7 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
                         };
 
                         mapping.tocommit_heap = false;
-                        mapping.phys_addr = phys.alloc_page(mapping.level, true) catch @panic("no more memory uhh");
+                        mapping.phys_addr = phys.allocPage(mapping.level, true) catch @panic("no more memory uhh");
 
                         mem.virt.kernel_space.setPage(far, mapping) orelse {
                             @panic("uhhh ???");

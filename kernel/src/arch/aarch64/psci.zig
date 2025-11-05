@@ -57,16 +57,7 @@ pub const ReturnCode = enum(i32) {
     disabled = -8,
 };
 
-pub const Error = error {
-    NotSupported,
-    InvalidParams,
-    Denied,
-    AlreadyOn,
-    OnPending,
-    InternalFailure,
-    NotPresent,
-    Disabled
-};
+pub const Error = error{ NotSupported, InvalidParams, Denied, AlreadyOn, OnPending, InternalFailure, NotPresent, Disabled };
 
 pub fn cpuOn(mpidr: u64, entry: u64, context_id: u64) Error!void {
     var call_args: CallArgs = .{};
@@ -81,6 +72,7 @@ pub fn cpuOn(mpidr: u64, entry: u64, context_id: u64) Error!void {
     })))));
 
     switch (result) {
+        // TODO is considering already-on and on-pending not an error safe ?
         .success, .already_on, .on_pending => {},
         .denied => return Error.Denied,
         .disabled => return Error.Disabled,
