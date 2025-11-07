@@ -48,6 +48,8 @@ var first_entry = true;
 
 // TODO dissociate sync_handler depending on EL0/EL1t/EL1h later
 fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+    kernel.arch.maskInterrupts();
+
     const esr_el1 = ark.cpu.armv8a_64.registers.ESR_EL1.get();
     const cpu = kernel.arch.Cpu.get();
 
@@ -97,8 +99,16 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
             const iss = esr_el1.iss.svc_hvc;
 
             switch (iss.imm16) {
+                0 => {
+                    _ = kernel.scheduler.terminateProcess(ctx);
+                    return;
+                },
+                1 => {
+                    _ = kernel.scheduler.terminateTask(ctx);
+                    return;
+                },
                 else => {
-                    // TODO specifiy how are returned syscall errors.
+                    // TODO specify how are returned syscall errors.
                     @panic("bad syscall id");
                 },
             }
@@ -118,6 +128,8 @@ pub const IrqCallback = *const fn (ctx: *ExceptionContext) void;
 pub var irq_callbacks: [1024]?IrqCallback linksection(".bss") = undefined;
 
 fn irq_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+    kernel.arch.maskInterrupts();
+
     const irq_id = gic.acknowledge();
 
     if (irq_id >= 1023) {

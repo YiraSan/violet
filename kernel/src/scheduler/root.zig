@@ -35,10 +35,18 @@ pub fn acknowledgeTimer(arch_data: *anyopaque) void {
 
     // TODO register timer event
 
+    if (cpu.current_task) |task| {
+        if (task.isTerminated() or task.process.isTerminated()) {
+            task.destroy();
+            cpu.current_task = null;
+        }
+    }
+
     if (cpu.current_task) |current_task| {
         current_task.quantum_elapsed_ns += getTimerPrecision(current_task).nanoseconds();
 
         if (current_task.quantum_elapsed_ns < current_task.quantum.toDelay().nanoseconds()) {
+            kernel.drivers.Timer.arm(getTimerPrecision(current_task));
             return;
         }
 
@@ -48,23 +56,55 @@ pub fn acknowledgeTimer(arch_data: *anyopaque) void {
     const nlast_task = cpu.current_task;
 
     if (switchTask(arch_data)) {
-        if (nlast_task) |last_task| {
-            cpu.queue_tasks.append(last_task) catch @panic("oops scheduler out of memory");
+        if (nlast_task) |task| {
+            cpu.queue_tasks.append(task) catch @panic("oops scheduler out of memory");
         }
         return;
     } else if (cpu.current_task) |task| {
         kernel.drivers.Timer.arm(getTimerPrecision(task));
     } else {
-        if (true) { // "true" corresponds to "no event to wait"
-            kernel.drivers.Timer.arm(._100ms);
-        } else {
-            kernel.drivers.Timer.arm(._5ms);
-        }
+        idle();
+    }
+}
 
-        kernel.arch.unmaskInterrupts();
-        while (true) {
-            ark.cpu.halt();
-        }
+pub fn terminateProcess(arch_data: *anyopaque) void {
+    const cpu = kernel.arch.Cpu.get();
+
+    if (cpu.current_task) |current_task| {
+        current_task.process.terminate();
+        current_task.destroy();
+        cpu.current_task = null;
+    }
+
+    if (!switchTask(arch_data)) {
+        idle();
+    }
+}
+
+pub fn terminateTask(arch_data: *anyopaque) void {
+    const cpu = kernel.arch.Cpu.get();
+
+    if (cpu.current_task) |current_task| {
+        current_task.terminate();
+        current_task.destroy();
+        cpu.current_task = null;
+    }
+
+    if (!switchTask(arch_data)) {
+        idle();
+    }
+}
+
+fn idle() void {
+    if (true) { // "true" corresponds to "no event to wait"
+        kernel.drivers.Timer.arm(._100ms);
+    } else {
+        kernel.drivers.Timer.arm(._5ms);
+    }
+
+    kernel.arch.unmaskInterrupts();
+    while (true) {
+        ark.cpu.halt();
     }
 }
 
@@ -100,6 +140,11 @@ fn switchTask(arch_data: *anyopaque) bool {
     }
 
     if (ntask) |task| {
+        if (task.process.isTerminated() or task.isTerminated()) {
+            task.destroy();
+            return switchTask(arch_data);
+        }
+
         if (cpu.current_task) |current_task| {
             if (current_task.process.id != task.process.id) {
                 task.process.virtual_space.apply();
@@ -118,16 +163,6 @@ fn switchTask(arch_data: *anyopaque) bool {
     }
 
     return false;
-}
-
-pub fn terminateProcess(arch_data: *anyopaque) void {
-    _ = arch_data;
-    unreachable;
-}
-
-pub fn terminateTask(arch_data: *anyopaque) void {
-    _ = arch_data;
-    unreachable;
 }
 
 pub fn init() !void {

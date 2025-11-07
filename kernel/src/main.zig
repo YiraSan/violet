@@ -139,12 +139,8 @@ fn _task0(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
     log.info("hello from task 0 !", .{});
 
-    // TODO.
-    while (true) {}
-
     // terminate task.
     asm volatile ("svc #1");
-
     unreachable;
 }
 
@@ -153,12 +149,8 @@ fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
     log.info("hello from task 1 !", .{});
 
-    // TODO.
-    while (true) {}
-
     // terminate task.
     asm volatile ("svc #1");
-
     unreachable;
 }
 
