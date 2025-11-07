@@ -172,8 +172,8 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
 var logfn_lock: mem.SpinLock = .{};
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
-    const scope_prefix = if (scope == .default) "unknown" else @tagName(scope);
-    const prefix = "\x1b[35m[kernel:" ++ scope_prefix ++ "] " ++ switch (level) {
+    const scope_prefix = if (scope == .default) "" else ":" ++ @tagName(scope);
+    const prefix = "\x1b[35m[kernel" ++ scope_prefix ++ "] " ++ switch (level) {
         .err => "\x1b[31merror",
         .warn => "\x1b[33mwarn",
         .info => "\x1b[36minfo",
