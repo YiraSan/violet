@@ -39,5 +39,3 @@ pub fn maskInterrupts() void {
 pub fn unmaskInterrupts() void {
     impl.unmaskInterrupts();
 }
-
-// TODO implements those inside Process and Task.

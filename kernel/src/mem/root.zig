@@ -130,7 +130,7 @@ pub fn Queue(comptime T: type) type {
                 std.log.warn("Queue.pop unimplemented buffer shrinking.", .{});
                 // self.cursor = 0;
             }
-            
+
             return item;
         }
     };
