@@ -169,8 +169,6 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
     ark.cpu.halt();
 }
 
-var logfn_lock: mem.SpinLock = .{};
-
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) "" else ":" ++ @tagName(scope);
     const prefix = "\x1b[35m[kernel" ++ scope_prefix ++ "] " ++ switch (level) {
@@ -179,8 +177,6 @@ pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal)
         .info => "\x1b[36minfo",
         .debug => "\x1b[90mdebug",
     } ++ ": \x1b[0m";
-    logfn_lock.lock();
-    defer logfn_lock.unlock();
     drivers.serial.print(prefix ++ format ++ "\n", args);
 }
 
