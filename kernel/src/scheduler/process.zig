@@ -18,6 +18,7 @@ pub const PER_PROCESS_TASK_MAX_COUNT = 1024;
 pub const Error = error{
     TooMuchProcess,
     TooMuchTask,
+    ProcessTerminated,
 };
 
 pub fn init() !void {
@@ -52,7 +53,6 @@ pub const ProcessState = enum(u8) {
 
 pub const Process = struct {
     id: u32,
-    arc: mem.Arc,
 
     execution_level: basalt.process.ExecutionLevel,
     state: std.atomic.Value(ProcessState),
@@ -76,7 +76,6 @@ pub const Process = struct {
         const process = &processes[id];
         process.* = std.mem.zeroes(Process);
         process.id = id;
-        process.arc = .{};
 
         process.execution_level = options.execution_level;
         process.state = .init(.alive);
@@ -118,9 +117,9 @@ pub const Process = struct {
         return process;
     }
 
+    /// should only be called if tasks_count == 0
     pub fn destroy(self: *@This()) void {
-        processes_lock.lock();
-        defer processes_lock.unlock();
+        std.log.info("process {} terminated", .{self.id});
 
         mem.heap.free(self.getVirtualSpace(), self.data_context);
 
@@ -130,6 +129,9 @@ pub const Process = struct {
             self.virtual_space.free();
         }
 
+        processes_lock.lock();
+        defer processes_lock.unlock();
+
         freeId(self.id);
     }
 
@@ -137,8 +139,8 @@ pub const Process = struct {
         self.state.store(.terminated, .seq_cst);
     }
 
-    pub fn isAlive(self: *@This()) bool {
-        return self.state.load(.seq_cst) == .alive;
+    pub fn isTerminated(self: *@This()) bool {
+        return self.state.load(.seq_cst) == .terminated;
     }
 
     pub fn isUser(self: *@This()) bool {
@@ -168,6 +170,8 @@ pub const Process = struct {
     // -- Task -- //
 
     pub fn createTask(self: *@This(), options: TaskOptions) !*Task {
+        if (self.state.load(.seq_cst) == .terminated) return Error.ProcessTerminated;
+
         self.tasks_lock.lock();
         defer self.tasks_lock.unlock();
 
@@ -178,6 +182,8 @@ pub const Process = struct {
         task.id = id;
 
         task.process = self;
+
+        task.process.tasks_count += 1;
 
         task.state.store(.ready, .seq_cst);
         task.priority = options.priority;
@@ -273,6 +279,36 @@ pub const Task = struct {
 
     arch_context: kernel.arch.Context,
     base_stack_pointer: u64,
+
+    pub fn isTerminated(self: *@This()) bool {
+        return self.state.load(.seq_cst) == .terminated;
+    }
+
+    pub fn terminate(self: *@This()) void {
+        self.state.store(.terminated, .seq_cst);
+    }
+
+    pub fn destroy(self: *@This()) void {
+        std.log.info("task {} from process {} terminated", .{ self.id, self.process.id });
+
+        mem.heap.free(self.process.getVirtualSpace(), self.base_stack_pointer);
+
+        var process_destroy = false;
+        {
+            self.process.tasks_lock.lock();
+            defer self.process.tasks_lock.unlock();
+
+            self.process.tasks_count -= 1;
+
+            self.process.freeTaskId(self.id);
+
+            if (self.process.tasks_count == 0) {
+                process_destroy = true;
+            }
+        }
+
+        if (process_destroy) self.process.destroy();
+    }
 };
 
 // -- Process IDs -- //

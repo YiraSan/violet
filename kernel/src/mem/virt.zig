@@ -63,6 +63,7 @@ pub const Space = struct {
     }
 
     pub fn free(self: *@This()) void {
+        std.log.warn("(todo) free heap and stack from space", .{});
         impl.free_table_recursive(self.l0_table, 0);
     }
 
