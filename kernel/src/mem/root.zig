@@ -63,4 +63,75 @@ pub const MemoryMap = struct {
     }
 };
 
-pub fn init() !void {}
+pub const Arc = struct {
+    reference_counter: std.atomic.Value(u64) = .init(0),
+
+    pub fn acquire(self: *@This()) void {
+        _ = self.reference_counter.fetchAdd(1, .seq_cst);
+    }
+
+    pub fn drop(self: *@This()) void {
+        _ = self.reference_counter.fetchSub(1, .seq_cst);
+    }
+
+    pub fn isDropped(self: *@This()) bool {
+        return self.reference_counter.load(.seq_cst) == 0;
+    }
+};
+
+pub fn Queue(comptime T: type) type {
+    return struct {
+        items: []T = undefined,
+        cursor: usize = 0,
+        alloc_count: usize = 0,
+
+        pub fn count(self: *@This()) usize {
+            return self.items.len - self.cursor;
+        }
+
+        pub fn append(self: *@This(), item: T) !void {
+            if (self.alloc_count > 0) {
+                const used_size = self.items.len * @sizeOf(T);
+                const alloc_size = self.alloc_count << PageLevel.l4K.shift();
+                const current_count = (alloc_size - used_size) / @sizeOf(T);
+
+                if ((self.items.len + 1) > current_count) {
+                    self.alloc_count += std.mem.alignForward(usize, @sizeOf(T), PageLevel.l4K.size()) >> PageLevel.l4K.shift();
+                    self.items.ptr = @ptrFromInt(heap.realloc(
+                        &virt.kernel_space,
+                        @intFromPtr(self.items.ptr),
+                        @intCast(self.alloc_count),
+                    ));
+                }
+
+                self.items.len += 1;
+            } else {
+                self.alloc_count = std.mem.alignForward(usize, @sizeOf(T), PageLevel.l4K.size()) >> PageLevel.l4K.shift();
+                self.items.ptr = @ptrFromInt(heap.alloc(
+                    &virt.kernel_space,
+                    .l4K,
+                    @intCast(self.alloc_count),
+                    .{ .writable = true },
+                    false,
+                ));
+
+                self.items.len = 1;
+            }
+
+            self.items[self.items.len - 1] = item;
+        }
+
+        pub fn pop(self: *@This()) T {
+            const item_ptr = &self.items[self.cursor];
+            const item = item_ptr.*;
+            self.cursor += 1;
+
+            if (self.cursor * @sizeOf(T) > 0x1000) {
+                std.log.warn("Queue.pop unimplemented buffer shrinking.", .{});
+                // self.cursor = 0;
+            }
+            
+            return item;
+        }
+    };
+}

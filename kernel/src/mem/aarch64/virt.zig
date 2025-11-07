@@ -59,8 +59,7 @@ pub fn mapPage(
     phys_addr: u64,
     page_level: mem.PageLevel,
     flags: virt.MemoryFlags,
-    /// NOTE this is an hint
-    contiguous_segment: bool,
+    hint: virt.MappingHint,
 ) void {
     const l0 = (virt_addr >> 39) & 0x1FF;
     const l1 = (virt_addr >> 30) & 0x1FF;
@@ -74,9 +73,8 @@ pub fn mapPage(
         .output_addr = @truncate(phys_addr >> 12),
         .pxn = !flags.executable or flags.user,
         .uxn = !flags.executable or !flags.user,
-        .contiguous = contiguous_segment,
+        ._os_available = hint,
         .access_flag = phys_addr != 0,
-        ._os_available = if (phys_addr == 0) .access_flag_for_heap else .undefined,
     };
 
     var tp = space.l0_table;
@@ -154,7 +152,7 @@ pub fn getPage(
     const l3_table: u64 = l2_entry.output_addr << 12;
     const l3_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return null;
-    if (l3_entry.block_type != .table_page) unreachable; // if unreachable is reached, then WTF ?
+    if (l3_entry.block_type != .table_page) unreachable; // WTF ?
 
     var mapping = l3_entry.getPageMapping();
     mapping.level = .l4K;
@@ -198,9 +196,49 @@ pub fn setPage(
     const l3_table: u64 = l2_entry.output_addr << 12;
     const l3_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return null;
-    if (l3_entry.block_type != .table_page) unreachable; // if unreachable is reached, then WTF ?
+    if (l3_entry.block_type != .table_page) unreachable; // WTF ?
 
     l3_entry.setPageMapping(mapping);
+}
+
+pub fn unmapPage(
+    space: *virt.Space,
+    virt_addr: u64,
+) void {
+    const l0_index = (virt_addr >> 39) & 0x1FF;
+    const l1_index = (virt_addr >> 30) & 0x1FF;
+    const l2_index = (virt_addr >> 21) & 0x1FF;
+    const l3_index = (virt_addr >> 12) & 0x1FF;
+
+    const l0_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + space.l0_table + l0_index * 8);
+    if (!l0_entry.valid) return;
+    if (l0_entry.block_type != .table_page) unreachable; // should not be possible since 512 GiB allocation is not permitted.
+
+    const l1_table: u64 = l0_entry.output_addr << 12;
+    const l1_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + l1_table + l1_index * 8);
+    if (!l1_entry.valid) return;
+
+    // 1 GiB page
+    if (l1_entry.block_type == .block) {
+        l1_entry.valid = false;
+    }
+
+    const l2_table: u64 = l1_entry.output_addr << 12;
+    const l2_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + l2_table + l2_index * 8);
+    if (!l2_entry.valid) return;
+
+    // 2 MiB page
+    if (l2_entry.block_type == .block) {
+        l2_entry.valid = false;
+    }
+
+    // 4 KiB page
+    const l3_table: u64 = l2_entry.output_addr << 12;
+    const l3_entry: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
+    if (!l3_entry.valid) return;
+    if (l3_entry.block_type != .table_page) unreachable; // WTF ?
+
+    l3_entry.valid = false;
 }
 
 // --- mem/aarch64/virt.zig --- //
@@ -238,10 +276,7 @@ const BlockDescriptor = packed struct(u64) {
     contiguous: bool = false, // bit 52
     pxn: bool = false, // bit 53
     uxn: bool = false, // bit 54
-    _os_available: enum(u4) { // bit 55-58
-        undefined = 0b0000,
-        access_flag_for_heap = 0b0001,
-    } = .undefined,
+    _os_available: virt.MappingHint = .no_hint, // bit 55-58
     impl_def: u4 = 0, // bit 59-62
     _reserved3: u1 = 0, // bit 63
 
@@ -255,14 +290,13 @@ const BlockDescriptor = packed struct(u64) {
             .uxn = !mapping.flags.executable or !mapping.flags.user,
             .contiguous = false,
             .access_flag = mapping.phys_addr != 0,
-            ._os_available = if (mapping.tocommit_heap) .access_flag_for_heap else .undefined,
+            ._os_available = mapping.hint,
         };
     }
 
     pub fn getPageMapping(self: *@This()) virt.Mapping {
         const phys_addr: u64 = self.output_addr << 12;
         return virt.Mapping{
-            .tocommit_heap = self._os_available == .access_flag_for_heap,
             .phys_addr = phys_addr,
             .level = undefined,
             .flags = .{
@@ -273,6 +307,7 @@ const BlockDescriptor = packed struct(u64) {
                 .user = self.ap == .ro_el0 or self.ap == .rw_el0,
                 .executable = !self.uxn or (!self.pxn and (self.ap == .ro_el1 or self.ap == .rw_el1)),
             },
+            .hint = self._os_available,
         };
     }
 };
@@ -304,7 +339,7 @@ fn ensure_table(table_addr: u64, index: u64) u64 {
     return new_table;
 }
 
-fn free_table_recursive(table_addr: u64, level: u8) void {
+pub fn free_table_recursive(table_addr: u64, level: u8) void {
     for (0..512) |i| {
         const e_ptr: *BlockDescriptor = @ptrFromInt(kernel.hhdm_base + table_addr + i * 8);
         const entry = e_ptr.*;

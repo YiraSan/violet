@@ -14,8 +14,8 @@ const impl = switch (builtin.cpu.arch) {
     else => unreachable,
 };
 
-pub const ProcessContext = impl.ProcessContext;
-pub const TaskContext = impl.TaskContext;
+pub const Context = impl.Context;
+
 pub const Cpu = impl.Cpu;
 
 // -- arch/root.zig -- //
@@ -41,19 +41,3 @@ pub fn unmaskInterrupts() void {
 }
 
 // TODO implements those inside Process and Task.
-
-pub fn storeContext(
-    arch_data: *anyopaque,
-    process_ctx: ?*kernel.arch.ProcessContext,
-    task_ctx: ?*kernel.arch.TaskContext,
-) void {
-    impl.storeContext(arch_data, process_ctx, task_ctx);
-}
-
-pub fn loadContext(
-    arch_data: *anyopaque,
-    process_ctx: ?*kernel.arch.ProcessContext,
-    task_ctx: ?*kernel.arch.TaskContext,
-) void {
-    impl.loadContext(arch_data, process_ctx, task_ctx);
-}

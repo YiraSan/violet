@@ -62,6 +62,10 @@ pub const Space = struct {
         };
     }
 
+    pub fn free(self: *@This()) void {
+        impl.free_table_recursive(self.l0_table, 0);
+    }
+
     pub fn base(self: *Space) u64 {
         return switch (self.half) {
             .higher => 0xFFFF_8000_0000_0000,
@@ -69,7 +73,7 @@ pub const Space = struct {
         };
     }
 
-    pub fn reserve(self: *Space, count: usize) Reservation {
+    pub fn reserve(self: *@This(), count: usize) Reservation {
         self.lock.lock();
         defer self.lock.unlock();
 
@@ -85,7 +89,7 @@ pub const Space = struct {
     }
 
     /// Returns current state of a page, `null` if there's no mapping.
-    pub fn getPage(self: *Space, virt_addr: u64) ?Mapping {
+    pub fn getPage(self: *@This(), virt_addr: u64) ?Mapping {
         self.lock.lock();
         defer self.lock.unlock();
 
@@ -93,19 +97,39 @@ pub const Space = struct {
     }
 
     /// Returns `null` if no modification has been made.
-    pub fn setPage(self: *Space, virt_addr: u64, mapping: Mapping) ?void {
+    pub fn setPage(self: *@This(), virt_addr: u64, mapping: Mapping) ?void {
         self.lock.lock();
         defer self.lock.unlock();
 
         return impl.setPage(self, virt_addr, mapping);
     }
+
+    pub fn unmapPage(self: *@This(), virt_addr: u64) void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        return impl.unmapPage(self, virt_addr);
+    }
+};
+
+pub const MappingHint = enum(u4) {
+    no_hint = 0b0000,
+    heap_begin = 0b0001,
+    heap_inbetween = 0b0010,
+    heap_end = 0b0011,
+    heap_single = 0b0100,
+    heap_stack = 0b0101,
+    heap_begin_stack = 0b0111,
+    stack_begin_guard_page = 0b1000,
+    stack_end_guard_page = 0b1001,
 };
 
 pub const Mapping = struct {
-    tocommit_heap: bool,
+    /// `0` means "uncommited page".
     phys_addr: u64,
     level: mem.PageLevel,
     flags: MemoryFlags,
+    hint: MappingHint = .no_hint,
 };
 
 pub const Reservation = struct {
@@ -123,7 +147,7 @@ pub const Reservation = struct {
     }
 
     /// if `phys_addr` == 0 it won't commit physical pages, but will commit-on-use.
-    pub fn map(self: @This(), phys_addr: u64, flags: MemoryFlags) void {
+    pub fn map(self: @This(), phys_addr: u64, flags: MemoryFlags, hint: MappingHint) void {
         self.space.lock.lock();
         defer self.space.lock.unlock();
 
@@ -135,14 +159,19 @@ pub const Reservation = struct {
             const physa = if (phys_addr != 0) phys_addr + offset else phys_addr;
 
             switch (builtin.cpu.arch) {
-                .aarch64 => impl.mapPage(self.space, virta, physa, .l4K, flags, false), // TODO implement contiguous mapping
+                .aarch64 => impl.mapPage(
+                    self.space,
+                    virta,
+                    physa,
+                    .l4K,
+                    flags,
+                    hint,
+                ),
                 else => unreachable,
             }
             offset += 0x1000;
         }
     }
-
-    // fn unmap
 };
 
 pub const MemoryFlags = struct {

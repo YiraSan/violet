@@ -41,7 +41,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                                 reservation.map(addrs[0].address, .{
                                     .writable = true,
                                     .device = true,
-                                });
+                                }, .no_hint);
 
                                 const addr = reservation.address();
 

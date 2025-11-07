@@ -1,50 +1,6 @@
 const std = @import("std");
 
 pub const timer = struct {
-    /// If conditions are met, the system will give the quantum asked by the process,
-    /// if the system' charge increase the quantum will probably be reduced, the minimum being 1ms.
-    pub const Quantum = enum(u8) {
-        /// 1ms
-        ultra_light = 0x0,
-        /// 5ms
-        light = 0x1,
-        /// 10ms
-        moderate = 0x2,
-        /// 50ms
-        ///
-        /// Require a permission if used with reactive.
-        /// It is impossible to use heavy with realtime.
-        heavy = 0x3,
-        /// 100ms
-        ///
-        /// Require a permission if not used with normal and reactive.
-        /// It is impossible to use ultra_heavy with realtime.
-        ultra_heavy = 0x4,
-
-        pub fn toDelay(self: @This()) Delay {
-            return switch (self) {
-                .ultra_light => ._1ms,
-                .light => ._5ms,
-                .moderate => ._10ms,
-                .heavy => ._50ms,
-                .ultra_heavy => ._100ms,
-            };
-        }
-    };
-
-    pub const Priority = enum(u8) {
-        /// Will not be scheduled in order to reduce system charge.
-        background = 0x0,
-        /// Guarantee a minimal amount of CPU-time under massive charge.
-        normal = 0x1,
-        /// Gives the priority over normal-task, while having the same aspect as normal tasks.
-        reactive = 0x2,
-        /// Guarantee that the task is scheduled very often even under massive charge.
-        ///
-        /// Whenever a realtime task becomes ready the kernel preempts the currently running task immediately if it is not also a realtime task.
-        realtime = 0x3,
-    };
-
     /// Precision = min(Precision, Quantum).
     /// Under heavy load precision is reduced but not if the task has realtime priority.
     pub const Precision = enum(u8) {
@@ -74,20 +30,69 @@ pub const timer = struct {
         _10ms = 4,
         _50ms = 5,
         _100ms = 6,
+
+        pub fn nanoseconds(self: @This()) usize {
+            return switch (self) {
+                ._0_5ms => 500,
+                ._1ms => 1 * std.time.ns_per_ms,
+                ._5ms => 5 * std.time.ns_per_ms,
+                ._10ms => 10 * std.time.ns_per_ms,
+                ._50ms => 50 * std.time.ns_per_ms,
+                ._100ms => 100 * std.time.ns_per_ms,
+            };
+        }
     };
 };
 
-pub const task = struct {
-    pub const TaskOptions = extern struct {
-        quantum: timer.Quantum align(1) = .moderate,
-        priority: timer.Priority align(1) = .normal,
-        precision: timer.Precision align(1) = .moderate,
+pub const process = struct {
+    /// If conditions are met, the system will give the quantum asked by the process,
+    /// if the system' charge increase the quantum will probably be reduced, the minimum being 1ms.
+    pub const Quantum = enum(u8) {
+        /// 1ms
+        ultra_light = 0x0,
+        /// 5ms
+        light = 0x1,
+        /// 10ms
+        moderate = 0x2,
+        /// 50ms
+        ///
+        /// Require a permission if used with reactive.
+        /// It is impossible to use heavy with realtime.
+        heavy = 0x3,
+        /// 100ms
+        ///
+        /// Require a permission if not used with normal and reactive.
+        /// It is impossible to use ultra_heavy with realtime.
+        ultra_heavy = 0x4,
+
+        pub fn toDelay(self: @This()) timer.Delay {
+            return switch (self) {
+                .ultra_light => ._1ms,
+                .light => ._5ms,
+                .moderate => ._10ms,
+                .heavy => ._50ms,
+                .ultra_heavy => ._100ms,
+            };
+        }
+    };
+
+    pub const Priority = enum(u8) {
+        /// Will not be scheduled in order to reduce system charge.
+        background = 0x0,
+        /// Guarantee a minimal amount of CPU-time under massive charge.
+        normal = 0x1,
+        /// Gives the priority over normal-task, while having the same aspect as normal tasks.
+        reactive = 0x2,
+        /// Guarantee that the task is scheduled very often even under massive charge.
+        ///
+        /// Whenever a realtime task becomes ready the kernel preempts the currently running task immediately if it is not also a realtime task.
+        realtime = 0x3,
     };
 
     pub const ExecutionLevel = enum(u8) {
-        kernel = 0x1,
-        system = 0x2,
-        usrapp = 0x3,
+        user = 0x0,
+        system = 0x1,
+        kernel = 0xff,
     };
 
     /// If there's no receiver the signal is lost.

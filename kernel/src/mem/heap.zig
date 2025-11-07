@@ -11,25 +11,214 @@ const virt = mem.virt;
 
 // --- mem/heap.zig --- //
 
-pub fn alloc(space: *virt.Space, level: mem.PageLevel, count: u16, flags: mem.virt.MemoryFlags) u64 {
-    if (level != .l4K) @panic("todo");
-    const res = space.reserve(count);
+pub fn alloc(space: *virt.Space, level: mem.PageLevel, count: u16, flags: mem.virt.MemoryFlags, stack: bool) u64 {
+    if (level != .l4K) unreachable;
 
-    res.map(0, flags);
+    if (count == 0) return 0;
 
-    return res.address();
+    if (stack) {
+        const stack_res = space.reserve(@as(usize, @intCast(count)) + 2);
+        stack_res.map(0, flags, .heap_stack);
+
+        {
+            var mapping = space.getPage(stack_res.address()) orelse unreachable;
+            mapping.hint = .stack_begin_guard_page;
+            _ = space.setPage(stack_res.address(), mapping);
+        }
+
+        {
+            const begin_addr = stack_res.address() + 0x1000;
+            var mapping = space.getPage(begin_addr) orelse unreachable;
+            mapping.hint = .heap_begin_stack;
+            _ = space.setPage(begin_addr, mapping);
+        }
+
+        {
+            const end_page_addr = stack_res.address() + (stack_res.size << 12) - 0x1000;
+            var mapping = space.getPage(end_page_addr) orelse unreachable;
+            mapping.hint = .stack_end_guard_page;
+            _ = space.setPage(end_page_addr, mapping);
+        }
+
+        return stack_res.address() + 0x1000;
+    } else {
+        const res = space.reserve(count);
+
+        if (count > 1) {
+            res.map(0, flags, .heap_inbetween);
+
+            {
+                var mapping = space.getPage(res.address()) orelse unreachable;
+                mapping.hint = .heap_begin;
+                _ = space.setPage(res.address(), mapping);
+            }
+
+            {
+                const end_page_addr = res.address() + (res.size << 12) - 0x1000;
+                var mapping = space.getPage(end_page_addr) orelse unreachable;
+                mapping.hint = .heap_end;
+                _ = space.setPage(end_page_addr, mapping);
+            }
+        } else {
+            res.map(0, flags, .heap_single);
+        }
+
+        return res.address();
+    }
 }
 
-/// Reallocate virtually the memory somewhere else in the virtual space with more space.
-pub fn ralloc(space: *virt.Space, address: u64, new_size: u16) u64 {
-    _ = space;
-    _ = address;
-    _ = new_size;
-    unreachable;
+/// Re-allocate virtually the memory somewhere else in the virtual space with a different size by freeing exceeding memory.
+pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
+    if (new_count == 0) {
+        free(space, address);
+        return 0;
+    }
+
+    var addr = std.mem.alignBackward(u64, address, mem.PageLevel.l4K.size());
+    const nmapping = space.getPage(addr);
+
+    if (nmapping) |mapping| {
+        switch (mapping.hint) {
+            .heap_single => {
+                const reservation = space.reserve(1);
+                reservation.map(mapping.phys_addr, mapping.flags, mapping.hint);
+                space.unmapPage(addr);
+                virt.flush(addr);
+                return reservation.address();
+            },
+            .heap_begin => {
+                var reservation = space.reserve(new_count);
+                const res_addr = reservation.address();
+                reservation.size = 1;
+
+                var done: usize = 0;
+                var nmap = nmapping;
+                while (nmap) |map| {
+                    if (done < new_count) {
+                        reservation.map(map.phys_addr, map.flags, if (done == new_count - 1) .heap_end else if (done == 0) .heap_begin else .heap_inbetween);
+                    } else {
+                        if (map.phys_addr != 0) {
+                            mem.phys.freePage(map.phys_addr, map.level);
+                        }
+                    }
+
+                    done += 1;
+
+                    space.unmapPage(addr);
+                    virt.flush(addr);
+
+                    if (map.hint == .heap_end) break;
+
+                    reservation.virt += map.level.size();
+                    addr += map.level.size();
+                    nmap = space.getPage(addr);
+                }
+
+                return res_addr;
+            },
+            .heap_begin_stack => {
+                var reservation = space.reserve(new_count + 2);
+                const res_addr = reservation.address() + 0x1000;
+                reservation.size = 1;
+
+                {
+                    const guard_addr = addr - 0x1000;
+                    const guard_map = space.getPage(guard_addr).?;
+                    if (guard_map.hint != .stack_begin_guard_page) unreachable;
+                    reservation.map(guard_map.phys_addr, guard_map.flags, guard_map.hint);
+                    space.unmapPage(guard_addr);
+                    virt.flush(guard_addr);
+                    reservation.virt += guard_map.level.size();
+                }
+
+                var done: usize = 0;
+                var nmap = nmapping;
+                while (nmap) |map| {
+                    if (done == new_count) {
+                        reservation.map(0, map.flags, .stack_end_guard_page);
+                    } else if (done < new_count) {
+                        reservation.map(map.phys_addr, map.flags, map.hint);
+                    } else {
+                        if (map.phys_addr != 0) {
+                            mem.phys.freePage(map.phys_addr, map.level);
+                        }
+                    }
+
+                    done += 1;
+
+                    space.unmapPage(addr);
+                    virt.flush(addr);
+
+                    if (map.hint == .stack_end_guard_page) break;
+
+                    reservation.virt += map.level.size();
+                    addr += map.level.size();
+                    nmap = space.getPage(addr);
+                }
+
+                return res_addr;
+            },
+            else => {
+                return 0;
+            },
+        }
+    }
+
+    return 0;
 }
 
 pub fn free(space: *virt.Space, address: u64) void {
-    _ = space;
-    _ = address;
-    unreachable;
+    var addr = std.mem.alignBackward(u64, address, mem.PageLevel.l4K.size());
+    const nmapping = space.getPage(addr);
+
+    if (nmapping) |mapping| {
+        switch (mapping.hint) {
+            .heap_single => {
+                if (mapping.phys_addr != 0) {
+                    mem.phys.freePage(mapping.phys_addr, mapping.level);
+                }
+                space.unmapPage(addr);
+                virt.flush(addr);
+            },
+            .heap_begin => {
+                var nmap = nmapping;
+                while (nmap) |map| {
+                    if (map.phys_addr != 0) {
+                        mem.phys.freePage(map.phys_addr, map.level);
+                    }
+                    space.unmapPage(addr);
+                    virt.flush(addr);
+
+                    if (map.hint == .heap_end) break;
+
+                    addr += map.level.size();
+                    nmap = space.getPage(addr);
+                }
+            },
+            .heap_begin_stack => {
+                {
+                    const guard_addr = addr - 0x1000;
+                    const guard_map = space.getPage(guard_addr).?;
+                    if (guard_map.hint != .stack_begin_guard_page) unreachable;
+                    space.unmapPage(guard_addr);
+                    virt.flush(guard_addr);
+                }
+
+                var nmap = nmapping;
+                while (nmap) |map| {
+                    if (map.phys_addr != 0) {
+                        mem.phys.freePage(map.phys_addr, map.level);
+                    }
+                    space.unmapPage(addr);
+                    virt.flush(addr);
+
+                    if (map.hint == .stack_end_guard_page) break;
+
+                    addr += map.level.size();
+                    nmap = space.getPage(addr);
+                }
+            },
+            else => {},
+        }
+    }
 }
