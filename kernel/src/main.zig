@@ -53,8 +53,6 @@ export fn kernel_entry(
 
     configuration_tables = _configuration_tables[0.._configuration_number_of_entries];
 
-    mem.init() catch unreachable;
-
     mem.phys.init(memory_map, hhdm_base) catch unreachable;
 
     var xsdt_found = false;
@@ -109,7 +107,7 @@ export fn _main() noreturn {
         std.log.err("main returned with an error: {}", .{err});
     };
 
-    unreachable;
+    ark.cpu.halt();
 }
 
 fn main() !void {
@@ -121,19 +119,22 @@ fn main() !void {
     try scheduler.init();
     try arch.bootCpus();
 
-    // const process = scheduler.Process.new(.kernel);
+    const process = try scheduler.Process.create(.{
+        .execution_level = .kernel,
+    });
 
-    // _ = process.newTask(&_task0, .{});
-    // _ = process.newTask(&_task1, .{});
+    const task0 = try process.createTask(.{ .entry_point = &_task0 });
+    const task1 = try process.createTask(.{ .entry_point = &_task1 });
+
+    try scheduler.registerTask(task0);
+    try scheduler.registerTask(task1);
 
     // jump to scheduler
     arch.unmaskInterrupts();
     drivers.Timer.arm(._5ms);
-
-    ark.cpu.halt();
 }
 
-fn _task0() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn _task0(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     asm volatile ("brk #0");
 
     log.info("hello from task 0 !", .{});
@@ -147,7 +148,7 @@ fn _task0() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     unreachable;
 }
 
-fn _task1() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     asm volatile ("brk #1");
 
     log.info("hello from task 1 !", .{});

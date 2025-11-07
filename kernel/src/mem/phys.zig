@@ -563,6 +563,8 @@ pub fn allocPage(level: PageLevel, reset: bool) AllocError!u64 {
 }
 
 pub fn freePage(address: u64, level: PageLevel) void {
+    @memset(@as([*]u8, @ptrFromInt(kernel.hhdm_base + address))[0..level.size()], 0);
+
     const cpu = kernel.arch.Cpu.get();
 
     switch (level) {

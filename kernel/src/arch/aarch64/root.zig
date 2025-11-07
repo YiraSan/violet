@@ -3,6 +3,7 @@
 const std = @import("std");
 const ark = @import("ark");
 const builtin = @import("builtin");
+const basalt = @import("basalt");
 
 // --- imports --- //
 
@@ -86,7 +87,7 @@ pub fn bootCpus() !void {
     res.map(trampoline_page.phys_addr, .{
         .executable = true,
         .writable = true,
-    });
+    }, .no_hint);
 
     cpu_setup_data.ttbr0 = ttbr0_space.l0_table;
     cpu_setup_data.ttbr1 = kernel.mem.virt.kernel_space.l0_table;
@@ -244,8 +245,10 @@ pub const Cpu = struct {
 
     // -- scheduler -- //
 
-    process: ?*kernel.scheduler.Process,
-    task: ?*kernel.scheduler.Task,
+    current_task: ?*kernel.scheduler.Task,
+
+    queue_tasks: mem.Queue(*kernel.scheduler.Task),
+    cycle_done: usize,
 
     pub fn id() usize {
         switch (builtin.cpu.arch) {
@@ -274,9 +277,7 @@ pub const Cpu = struct {
     }
 };
 
-pub const ProcessContext = struct {};
-
-pub const TaskContext = struct {
+pub const Context = struct {
     // operational registers
     lr: u64,
     xregs: [30]u64,
@@ -285,53 +286,86 @@ pub const TaskContext = struct {
     fpsr: u64,
     elr_el1: u64,
     spsr_el1: ark.cpu.armv8a_64.registers.SPSR_EL1,
+    tpidr_el0: ark.cpu.armv8a_64.registers.TPIDR_EL0,
     sp: u64,
+
+    pub fn init() @This() {
+        var context: @This() = undefined;
+        context.lr = 0;
+        @memset(&context.xregs, 0);
+        @memset(&context.vregs, 0);
+        context.fpcr = 0;
+        context.fpsr = 0;
+        context.elr_el1 = 0;
+        context.spsr_el1 = .{ .mode = .el0 };
+        context.tpidr_el0 = @bitCast(@as(u64, 0));
+        context.sp = 0;
+
+        return context;
+    }
+
+    pub fn setExecutionAddress(self: *@This(), address: u64) void {
+        self.elr_el1 = address;
+    }
+
+    pub fn getExecutionAddress(self: *@This()) u64 {
+        return self.elr_el1;
+    }
+
+    pub fn setStackPointer(self: *@This(), address: u64) void {
+        self.sp = address + kernel.scheduler.Task.STACK_SIZE;
+    }
+
+    pub fn getStackPointer(self: *@This()) u64 {
+        return self.sp;
+    }
+
+    pub fn setExecutionLevel(self: *@This(), execution_level: basalt.process.ExecutionLevel) void {
+        self.spsr_el1.mode = switch (execution_level) {
+            .kernel, .system => .el1t,
+            .user => .el0,
+        };
+    }
+
+    pub fn setDataContext(self: *@This(), data_context: u64) void {
+        self.xregs[0] = data_context;
+    }
+
+    pub fn store(
+        task: *kernel.scheduler.Task,
+        arch_data: *anyopaque,
+    ) void {
+        const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
+
+        task.arch_context.lr = exception_ctx.lr;
+        task.arch_context.xregs = exception_ctx.xregs;
+        task.arch_context.vregs = exception_ctx.vregs;
+        task.arch_context.fpcr = exception_ctx.fpcr;
+        task.arch_context.fpsr = exception_ctx.fpsr;
+        task.arch_context.elr_el1 = exception_ctx.elr_el1;
+        task.arch_context.spsr_el1 = exception_ctx.spsr_el1;
+
+        task.arch_context.sp = exception.get_sp_el0();
+
+        task.arch_context.tpidr_el0 = .get();
+    }
+
+    pub fn load(
+        task: *kernel.scheduler.Task,
+        arch_data: *anyopaque,
+    ) void {
+        const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
+
+        exception_ctx.lr = task.arch_context.lr;
+        exception_ctx.xregs = task.arch_context.xregs;
+        exception_ctx.vregs = task.arch_context.vregs;
+        exception_ctx.fpcr = task.arch_context.fpcr;
+        exception_ctx.fpsr = task.arch_context.fpsr;
+        exception_ctx.elr_el1 = task.arch_context.elr_el1;
+        exception_ctx.spsr_el1 = task.arch_context.spsr_el1;
+
+        exception.set_sp_el0(task.arch_context.sp);
+
+        task.arch_context.tpidr_el0.set();
+    }
 };
-
-pub fn storeContext(
-    arch_data: *anyopaque,
-    process_ctx: ?*kernel.arch.ProcessContext,
-    task_ctx: ?*kernel.arch.TaskContext,
-) void {
-    const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
-
-    if (process_ctx) |process| {
-        _ = process;
-    }
-
-    if (task_ctx) |task| {
-        task.lr = exception_ctx.lr;
-        task.xregs = exception_ctx.xregs;
-        task.vregs = exception_ctx.vregs;
-        task.fpcr = exception_ctx.fpcr;
-        task.fpsr = exception_ctx.fpsr;
-        task.elr_el1 = exception_ctx.elr_el1;
-        task.spsr_el1 = exception_ctx.spsr_el1;
-
-        task.sp = exception.get_sp_el0();
-    }
-}
-
-pub fn loadContext(
-    arch_data: *anyopaque,
-    process_ctx: ?*kernel.arch.ProcessContext,
-    task_ctx: ?*kernel.arch.TaskContext,
-) void {
-    const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
-
-    if (process_ctx) |process| {
-        _ = process;
-    }
-
-    if (task_ctx) |task| {
-        exception_ctx.lr = task.lr;
-        exception_ctx.xregs = task.xregs;
-        exception_ctx.vregs = task.vregs;
-        exception_ctx.fpcr = task.fpcr;
-        exception_ctx.fpsr = task.fpsr;
-        exception_ctx.elr_el1 = task.elr_el1;
-        exception_ctx.spsr_el1 = task.spsr_el1;
-
-        exception.set_sp_el0(task.sp);
-    }
-}

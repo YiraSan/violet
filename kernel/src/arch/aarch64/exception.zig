@@ -49,6 +49,7 @@ var first_entry = true;
 // TODO dissociate sync_handler depending on EL0/EL1t/EL1h later
 fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
     const esr_el1 = ark.cpu.armv8a_64.registers.ESR_EL1.get();
+    const cpu = kernel.arch.Cpu.get();
 
     switch (esr_el1.ec) {
         .data_abort_lower_el, .data_abort_same_el => {
@@ -59,25 +60,24 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
 
             switch (iss.dfsc) {
                 .access_flag_lv1, .access_flag_lv2, .access_flag_lv3 => {
-                    // TODO it might be nice to not consider lowerEL same as sameEL
-                    if (far < 0xffff_8000_0000_0000) {
-                        @panic("access flag abort in userspace memory");
-                    } else {
-                        var mapping = mem.virt.kernel_space.getPage(far) orelse {
-                            @panic("this is literally impossible.");
-                        };
+                    const virt_space = if (far < 0xffff_8000_0000_0000) cpu.user_space else &mem.virt.kernel_space;
 
-                        mapping.tocommit_heap = false;
-                        mapping.phys_addr = phys.allocPage(mapping.level, true) catch @panic("no more memory uhh");
+                    var mapping = virt_space.getPage(far) orelse unreachable;
 
-                        mem.virt.kernel_space.setPage(far, mapping) orelse {
-                            @panic("uhhh ???");
-                        };
-
-                        mem.virt.flush(far);
+                    switch (mapping.hint) {
+                        .no_hint => unreachable,
+                        .heap_begin, .heap_inbetween, .heap_end, .heap_single, .heap_begin_stack, .heap_stack => {
+                            mapping.phys_addr = phys.allocPage(mapping.level, true) catch {
+                                @panic("out of memory exception");
+                            };
+                            virt_space.setPage(far, mapping) orelse unreachable;
+                            mem.virt.flush(far);
+                        },
+                        .stack_begin_guard_page, .stack_end_guard_page => {
+                            @panic("stack overflow exception");
+                        },
                     }
 
-                    // no needs to increment elr_el1 since the faulted instruction needs to be executed again.
                     return;
                 },
                 else => {

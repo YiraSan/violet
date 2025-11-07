@@ -49,7 +49,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                             reservation.map(gicd.address, .{
                                 .device = true,
                                 .writable = true,
-                            });
+                            }, .no_hint);
 
                             gicd_base = reservation.address();
 
@@ -178,7 +178,7 @@ pub fn initCpu(xsdt: *acpi.Xsdt) !void {
                                 reservation.map(gicc.address, .{
                                     .device = true,
                                     .writable = true,
-                                });
+                                }, .no_hint);
 
                                 gicc_base[interface_number] = reservation.address();
 
