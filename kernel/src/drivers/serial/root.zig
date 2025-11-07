@@ -83,7 +83,11 @@ pub const writer = std.io.Writer(
     writeHandler,
 ){ .context = undefined };
 
+var logfn_lock: mem.SpinLock = .{};
+
 pub fn print(comptime format: []const u8, args: anytype) void {
+    logfn_lock.lock();
+    defer logfn_lock.unlock();
     writer.print(format, args) catch {};
 }
 
