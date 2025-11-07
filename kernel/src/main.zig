@@ -159,6 +159,14 @@ fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
     _ = return_address;
     std.log.err("kernel panic: {s}", .{message});
+
+    // NOTE little panic handler
+    const cpu = arch.Cpu.get();
+    if (cpu.current_task) |task| {
+        task.terminate();
+        drivers.Timer.arm(._1ms);
+    }
+
     ark.cpu.halt();
 }
 
