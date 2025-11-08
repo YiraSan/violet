@@ -119,8 +119,6 @@ pub const Process = struct {
 
     /// should only be called if tasks_count == 0
     pub fn destroy(self: *@This()) void {
-        std.log.debug("process {} terminated", .{self.id});
-
         mem.heap.free(self.getVirtualSpace(), self.data_context);
 
         mem.heap.free(&mem.virt.kernel_space, @intFromPtr(self.tasks.ptr));
@@ -289,8 +287,6 @@ pub const Task = struct {
     }
 
     pub fn destroy(self: *@This()) void {
-        std.log.debug("task {} from process {} terminated", .{ self.id, self.process.id });
-
         mem.heap.free(self.process.getVirtualSpace(), self.base_stack_pointer);
 
         var process_destroy = false;
