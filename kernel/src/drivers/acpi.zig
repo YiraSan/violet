@@ -381,9 +381,23 @@ pub const Gtdt = extern struct {
     el2_virtual_flags: u32 align(1),
 };
 
+pub const McfgAllocation = extern struct {
+    address: u64 align(1),
+    segment: u16 align(1),
+    start_bus: u8 align(1),
+    end_bus: u8 align(1),
+    _reserved0: u32 align(1),
+};
+
 pub const Mcfg = extern struct {
     header: SdtHeader align(1),
-    // TODO
+    _reserved0: u64 align(1),
+    _entries: McfgAllocation align(1),
+
+    pub fn entries(self: *@This()) []McfgAllocation {
+        const count = (self.header.length - @sizeOf(u64) - @sizeOf(SdtHeader)) / @sizeOf(McfgAllocation);
+        return @as([*]McfgAllocation, @ptrCast(&self._entries))[0..count];
+    }
 };
 
 pub const Spcr = extern struct {
