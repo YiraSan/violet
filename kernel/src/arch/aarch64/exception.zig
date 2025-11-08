@@ -58,7 +58,12 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
             const far = ark.cpu.armv8a_64.registers.FAR_EL1.get().address;
             const iss = esr_el1.iss.data_abort;
 
-            log.debug("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
+            if (iss.dfsc != .access_flag_lv1 and
+                iss.dfsc != .access_flag_lv2 and
+                iss.dfsc != .access_flag_lv3)
+            {
+                log.debug("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
+            }
 
             switch (iss.dfsc) {
                 .access_flag_lv1, .access_flag_lv2, .access_flag_lv3 => {
