@@ -18,7 +18,7 @@
         "basalt",
         "bootloader",
         "kernel",
-        "libs",
+        "shared",
         "system",
         "license",
         "readme.md",
