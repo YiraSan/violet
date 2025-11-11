@@ -78,4 +78,12 @@ pub const Platform = enum {
             .riscv64_qemu => .riscv64,
         };
     }
+
+    pub fn cpuModel(self: Platform) *const std.Target.Cpu.Model {
+        return switch (self) {
+            .rpi4, .aarch64_qemu => &std.Target.aarch64.cpu.cortex_a72,
+            .rpi3 => &std.Target.aarch64.cpu.cortex_a53,
+            else => std.Target.Cpu.Model.generic(self.arch()),
+        };
+    }
 };
