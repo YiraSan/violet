@@ -415,7 +415,7 @@ pub fn init(
     const len_2m = (page_count_2m + 63) / 64;
     const len_1g = (page_count_1g + 63) / 64;
 
-    const maps_size = std.mem.alignForward(
+    const maps_page_count = std.mem.alignForward(
         u64,
         len_4k * @sizeOf(u64) +
             len_2m * @sizeOf(u64) +
@@ -423,52 +423,52 @@ pub fn init(
             page_count_2m * @sizeOf(u16) +
             page_count_1g * @sizeOf(u16) +
             page_count_1g * @sizeOf(u32) +
-            @sizeOf(u64) * 6, // headroom for alignment
+            @sizeOf(u128) * 6, // headroom for alignment
         PageLevel.l4K.size(),
-    ) >> 12;
+    ) >> PageLevel.l4K.shift();
 
     i = 0;
     while (memory_map.get(i)) |entry| : (i += 1) {
-        if (entry.type == .conventional_memory and entry.number_of_pages > maps_size) {
-            var alloc_base = std.mem.alignForward(u64, entry.physical_start, @alignOf(u64));
+        if (entry.type == .conventional_memory and entry.number_of_pages > maps_page_count) {
+            var alloc_base = hhdm_base + entry.physical_start;
 
-            bitmap_4k.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            bitmap_4k.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             bitmap_4k.len = len_4k;
             @memset(bitmap_4k, 0xffff_ffff_ffff_ffff);
 
-            alloc_base += bitmap_4k.len * @sizeOf(u64);
+            alloc_base = @intFromPtr(bitmap_4k.ptr) + bitmap_4k.len * @sizeOf(u64);
 
-            bitmap_2m.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            bitmap_2m.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             bitmap_2m.len = len_2m;
             @memset(bitmap_2m, 0);
 
-            alloc_base += bitmap_2m.len * @sizeOf(u64);
+            alloc_base = @intFromPtr(bitmap_2m.ptr) + bitmap_2m.len * @sizeOf(u64);
 
-            bitmap_1g.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            bitmap_1g.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             bitmap_1g.len = len_1g;
             @memset(bitmap_1g, 0);
+ 
+            alloc_base = @intFromPtr(bitmap_1g.ptr) + bitmap_1g.len * @sizeOf(u64);
 
-            alloc_base += bitmap_1g.len * @sizeOf(u64);
-
-            counter_2m.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            counter_2m.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             counter_2m.len = page_count_2m;
             @memset(counter_2m, 0);
 
-            alloc_base += counter_2m.len * @sizeOf(u16);
+            alloc_base = @intFromPtr(counter_2m.ptr) + counter_2m.len * @sizeOf(u16);
 
-            counter_1g.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            counter_1g.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             counter_1g.len = page_count_1g;
             @memset(counter_1g, 0);
 
-            alloc_base += counter_1g.len * @sizeOf(u16);
+            alloc_base = @intFromPtr(counter_1g.ptr) + counter_1g.len * @sizeOf(u16);
 
-            counter_1g_4k.ptr = @ptrFromInt(hhdm_base + std.mem.alignForward(u64, alloc_base, @alignOf(u64)));
+            counter_1g_4k.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             counter_1g_4k.len = page_count_1g;
             @memset(counter_1g_4k, 0);
 
-            alloc_base += counter_1g_4k.len * @sizeOf(u32);
+            alloc_base = @intFromPtr(counter_1g_4k.ptr) + counter_1g_4k.len * @sizeOf(u32);
 
-            const new_base = std.mem.alignForward(u64, alloc_base, PageLevel.l4K.size());
+            const new_base = std.mem.alignForward(usize, alloc_base - hhdm_base, PageLevel.l4K.size());
             if (entry.physical_start == base_usable_address) {
                 base_usable_address = new_base;
             }
