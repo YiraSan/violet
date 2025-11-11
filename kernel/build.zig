@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) !void {
         .os_tag = .freestanding,
         .abi = .none,
         .ofmt = .elf,
+        .cpu_model = .{ .explicit = platform.cpuModel() },
     };
 
     const target = b.resolveTargetQuery(target_query);
