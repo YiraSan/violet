@@ -16,7 +16,7 @@ const gic_v2 = @import("gic_v2.zig");
 var gic_version: enum { v2 } = undefined;
 
 pub fn init(xsdt: *acpi.Xsdt) !void {
-    switch (ark.cpu.armv8a_64.registers.ID_AA64PFR0_EL1.get().gic) {
+    switch (ark.armv8.registers.ID_AA64PFR0_EL1.load().gic) {
         .gic_cpu_not_implemented => {
             gic_version = .v2;
 

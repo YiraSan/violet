@@ -1,15 +1,33 @@
+// --- dependencies --- //
+
+const ark = @import("ark");
+const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
-const std = @import("std");
-const ark = @import("ark");
 
 const uefi = std.os.uefi;
-const hcf = ark.cpu.halt;
+const utf16 = std.unicode.utf8ToUtf16LeStringLiteral;
+
+// --- imports --- //
+
+pub const mmap = @import("mmap.zig");
+pub const phys = @import("phys.zig");
+pub const virt = @import("virt.zig");
+
+// --- main.zig --- //
 
 pub fn main() uefi.Status {
+    if (uefi.system_table.con_out) |con_out| {
+        _ = con_out.reset(true);
+        _ = con_out.clearScreen();
+        _ = con_out.outputString(utf16("violetOS-bootloader v" ++ build_options.version ++ "\r\n"));
+    }
+
     const boot_services: *uefi.tables.BootServices = uefi.system_table.boot_services orelse {
         return uefi.Status.unsupported;
     };
+
+    virt.init(boot_services);
 
     var file_system: *uefi.protocol.SimpleFileSystem = undefined;
 
@@ -63,14 +81,6 @@ pub fn main() uefi.Status {
 
     _ = root.close();
 
-    const page_allocator = ark.mem.PageAllocator{
-        .ctx = boot_services,
-        ._alloc = &_alloc,
-        ._free = &_free,
-    };
-
-    var vm = ark.mem.VirtualMemory.init(page_allocator) catch hcf();
-
     const elf_header = std.elf.Header.parse(@ptrCast(kernel_file)) catch {
         return uefi.Status.compromised_data;
     };
@@ -116,18 +126,46 @@ pub fn main() uefi.Status {
             @memset(physical_address[ph.p_filesz..ph.p_memsz], 0);
         }
 
-        const reservation = vm.kernel_space.reserve(std.mem.alignForward(usize, ph.p_memsz, 0x1000) >> 12);
-        if (reservation.address() != ph.p_vaddr) @panic("kernel bad-alignment");
+        const kernel_size = std.mem.alignForward(usize, ph.p_memsz, virt.PageLevel.l4K.size());
+        const kernel_page_count = kernel_size >> virt.PageLevel.l4K.shift();
+        const va_base = virt.last_high_addr;
+        virt.last_high_addr += kernel_size;
 
-        reservation.map_contiguous(page_allocator, @intFromPtr(physical_address), .{
-            .writable = (ph.p_flags & std.elf.PF_W) != 0,
-            .executable = (ph.p_flags & std.elf.PF_X) != 0,
-        });
+        if (va_base != ph.p_vaddr) @panic("kernel bad-alignment");
+
+        virt.mapContiguous(
+            virt.table,
+            va_base,
+            @intFromPtr(physical_address),
+            .l4K,
+            .{
+                .writable = (ph.p_flags & std.elf.PF_W) != 0,
+                .executable = (ph.p_flags & std.elf.PF_X) != 0,
+            },
+            kernel_page_count,
+        );
     }
 
     const entry_address = elf_header.entry;
 
-    var memory_map = getMemoryMap(boot_services);
+    virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
+
+    const kernel_stack_phys = phys.allocPages(16);
+    const kernel_stack_virt = virt.last_high_addr;
+    const kernel_stack_size: u64 = 16 * 0x1000; // 64 KiB
+    const kernel_stack_top = kernel_stack_virt + kernel_stack_size;
+    virt.last_high_addr += kernel_stack_size;
+
+    virt.mapContiguous(
+        virt.table,
+        kernel_stack_virt,
+        kernel_stack_phys,
+        .l4K,
+        .{ .writable = true },
+        16,
+    );
+
+    var memory_map = mmap.get(boot_services);
 
     // configure HHDM
     var i: usize = 0;
@@ -140,181 +178,204 @@ pub fn main() uefi.Status {
         }
     }
 
-    var reservation = vm.kernel_space.reserve(limit >> 12);
-    const hhdm_base = reservation.address();
+    virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
+    const hhdm_base = virt.last_high_addr;
+    virt.last_high_addr += limit;
+
+    virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
+    const hhdm_limit = virt.last_high_addr;
 
     i = 0;
     while (memory_map.get(i)) |entry| : (i += 1) {
-        reservation.virt = hhdm_base + entry.physical_start;
-        reservation.size = entry.number_of_pages;
+        const va = hhdm_base + entry.physical_start;
+
+        if (!std.mem.isAligned(va, 0x1000)) @panic("MemoryMapEntry has unaligned physical_start.");
 
         switch (entry.type) {
             .conventional_memory,
             .acpi_memory_nvs,
             .acpi_reclaim_memory,
-            .loader_code,
             .loader_data,
             .boot_services_data,
-            => reservation.map_contiguous(page_allocator, entry.physical_start, .{
-                .writable = true,
-            }),
+            .runtime_services_data,
+            => virt.mapContiguous(
+                virt.table,
+                va,
+                entry.physical_start,
+                .l4K,
+                .{ .writable = true },
+                entry.number_of_pages,
+            ),
             .memory_mapped_io,
             .memory_mapped_io_port_space,
-            => reservation.map_contiguous(page_allocator, entry.physical_start, .{
-                .device = true,
-                .writable = true,
-            }),
+            => virt.mapContiguous(
+                virt.table,
+                va,
+                entry.physical_start,
+                .l4K,
+                .{ .writable = true, .device = true },
+                entry.number_of_pages,
+            ),
             else => {},
         }
     }
 
+    virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
+
+    memory_map = mmap.get(boot_services);
+
     switch (builtin.cpu.arch) {
         .aarch64 => {
-            const ttbr1_el1 = ark.cpu.armv8a_64.registers.TTBR1_EL1{ .l0_table = @intFromPtr(vm.kernel_space.l0_table) };
+            const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
 
-            ttbr1_el1.set();
+            if (pfr0.fp == .not_implemented) {
+                @panic("FloatingPoint is required but not implemented on this CPU.");
+            }
 
-            var mair_el1 = ark.cpu.armv8a_64.registers.MAIR_EL1.get();
-            mair_el1.attr0 = ark.cpu.armv8a_64.registers.MAIR_EL1.DEVICE_nGnRnE;
-            mair_el1.attr1 = ark.cpu.armv8a_64.registers.MAIR_EL1.NORMAL_NONCACHEABLE;
-            mair_el1.attr2 = ark.cpu.armv8a_64.registers.MAIR_EL1.NORMAL_WRITETHROUGH_NONTRANSIENT;
-            mair_el1.attr3 = ark.cpu.armv8a_64.registers.MAIR_EL1.NORMAL_WRITEBACK_NONTRANSIENT;
-            mair_el1.attr4 = 0;
-            mair_el1.attr5 = 0;
-            mair_el1.attr6 = 0;
-            mair_el1.attr7 = 0;
-            mair_el1.set();
+            if (pfr0.adv_simd == .not_implemented) {
+                @panic("AdvSIMD is required but not implemented on this CPU.");
+            }
 
-            var tcr_el1 = ark.cpu.armv8a_64.registers.TCR_EL1.get();
-
-            tcr_el1.t0sz = 16;
-            tcr_el1.epd0 = false;
-            tcr_el1.irgn0 = .wb_ra_wa;
-            tcr_el1.orgn0 = .wb_ra_wa;
-            tcr_el1.sh0 = .inner_shareable;
-            tcr_el1.tg0 = ._4kb;
-
-            tcr_el1.a1 = .ttbr0_el1;
-
-            tcr_el1.t1sz = 16;
-            tcr_el1.epd1 = false;
-            tcr_el1.irgn1 = .wb_ra_wa;
-            tcr_el1.orgn1 = .wb_ra_wa;
-            tcr_el1.sh1 = .inner_shareable;
-            tcr_el1.tg1 = ._4kb;
-
-            // tcr_el1.ips = 5;
-            // tcr_el1.as = .u8;
-
-            tcr_el1.tbi0 = .used;
-            tcr_el1.tbi1 = .used;
-
-            tcr_el1.set();
-
-            asm volatile (
-                \\ dsb sy
-                \\ isb
-            );
-
-            ark.cpu.armv8a_64.pagging.flush_all();
+            const mmfr1 = ark.armv8.registers.ID_AA64MMFR1_EL1.load();
+            if (mmfr1.vh == .supported) {
+                const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
+                if (hcr_el2.e2h == .enabled) {
+                    @panic("VH extension is enabled but not supported on violetOS.");
+                }
+            }
         },
         else => unreachable,
     }
 
-    memory_map = getMemoryMap(boot_services);
-
     _ = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
 
-    const kernel_entry: *const fn (
-        _memory_map_ptr: [*]uefi.tables.MemoryDescriptor,
-        _memory_map_size: u64,
-        _memory_map_descriptor_size: u64,
-        _hhdm_base: u64,
-        _hhdm_limit: u64,
-        _configuration_tables: [*]uefi.tables.ConfigurationTable,
-        _configuration_number_of_entries: usize,
-    ) callconv(switch (builtin.cpu.arch) {
-        .aarch64 => .{ .aarch64_aapcs = .{} },
-        .riscv64 => .{ .riscv64_lp64 = .{} },
+    switch (builtin.cpu.arch) {
+        .aarch64 => {
+            var reg = ark.armv8.registers.CPACR_EL1.load();
+            reg.fpen = .el0_el1;
+            reg.store();
+
+            var sctlr = ark.armv8.registers.SCTLR_EL1 {
+                .M = true,
+                .A = false, // TODO fix kernel alignment
+            };
+            sctlr.store();
+
+            const currentEL = asm volatile ("mrs %[out], currentEL" : [out] "=r" (-> u64));
+
+            if (currentEL == 0b1100) { // EL3
+                unreachable;
+            } else if (currentEL == 0b1000) { // EL2
+                const mmfr1 = ark.armv8.registers.ID_AA64MMFR1_EL1.load();
+                if (mmfr1.vh == .supported) {
+                    const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
+                    if (hcr_el2.e2h == .enabled) {
+                        // TODO support Kernel on EL2.
+                        asm volatile ("b .");
+                    }
+                }
+
+                var hcr_el2 = ark.armv8.registers.HCR_EL2 {};
+                hcr_el2.rw = .el1_is_aa64;
+                hcr_el2.store();
+
+                var spsr = ark.armv8.registers.SPSR_EL2 { 
+                    .mode = .el1t,
+                    .d = true,
+                    .a = true,
+                    .i = true,
+                    .f = true,
+                };
+                spsr.store();
+
+                asm volatile ("msr ttbr1_el1, %[ttbr1]" :: [ttbr1] "r" (virt.table));
+                asm volatile ("msr elr_el2, %[kernel_entry]" :: [kernel_entry] "r" (entry_address));
+                asm volatile ("msr sp_el0, %[stack_top]" :: [stack_top] "r" (kernel_stack_top));
+
+                asm volatile (
+                    \\ mov x0, %[mmap_phys_ptr]
+                    \\ mov x1, %[mmap_size]
+                    \\ mov x2, %[mmap_desc_size]
+                    \\
+                    \\ mov x3, %[hhdm_base]
+                    \\ mov x4, %[hhdm_limit]
+                    \\
+                    \\ mov x5, %[config_tables_phys_ptr]
+                    \\ mov x6, %[config_tables_size]
+                    \\
+                    \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ tlbi vmalle1
+                    \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ eret
+                    :
+                    : [mmap_phys_ptr] "r" (memory_map.map),
+                      [mmap_size] "r" (memory_map.map_size),
+                      [mmap_desc_size] "r" (memory_map.descriptor_size),
+
+                      [hhdm_base] "r" (hhdm_base),
+                      [hhdm_limit] "r" (hhdm_limit),
+
+                      [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
+                      [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
+                    : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6"
+                );
+            } else if (currentEL == 0b0100) { // EL1
+                asm volatile (
+                    \\ mov x0, %[mmap_phys_ptr]
+                    \\ mov x1, %[mmap_size]
+                    \\ mov x2, %[mmap_desc_size]
+                    \\
+                    \\ mov x3, %[hhdm_base]
+                    \\ mov x4, %[hhdm_limit]
+                    \\
+                    \\ mov x5, %[config_tables_phys_ptr]
+                    \\ mov x6, %[config_tables_size]
+                    \\
+                    \\ mov x7, %[kernel_entry]
+                    \\
+                    \\ msr ttbr1_el1, %[ttbr1]
+                    \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ tlbi vmalle1
+                    \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ mov x8, #0
+                    \\ msr spsel, x8
+                    \\ mov sp, %[stack_top]
+                    \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ br x7
+                    :
+                    : [mmap_phys_ptr] "r" (memory_map.map),
+                      [mmap_size] "r" (memory_map.map_size),
+                      [mmap_desc_size] "r" (memory_map.descriptor_size),
+
+                      [hhdm_base] "r" (hhdm_base),
+                      [hhdm_limit] "r" (hhdm_limit),
+
+                      [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
+                      [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
+
+                      [kernel_entry] "r" (entry_address),
+
+                      [ttbr1] "r" (virt.table),
+
+                      [stack_top] "r" (kernel_stack_top),
+                    : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8"
+                );
+            } else { // EL0
+                unreachable;
+            }
+        },
         else => unreachable,
-    }) noreturn = @ptrFromInt(entry_address);
-
-    kernel_entry(memory_map.map, memory_map.map_size, memory_map.descriptor_size, hhdm_base, vm.kernel_space.last_addr, uefi.system_table.configuration_table, uefi.system_table.number_of_table_entries);
-
-    hcf();
-}
-
-fn _alloc(ctx: *anyopaque, count: usize) ark.mem.PageAllocator.AllocError![*]align(0x1000) u8 {
-    const boot_services: *uefi.tables.BootServices = @alignCast(@ptrCast(ctx));
-    var physical_address: [*]align(0x1000) u8 = undefined;
-    _ = boot_services.allocatePages(.allocate_any_pages, .loader_data, count, &physical_address);
-    return physical_address;
-}
-
-fn _free(ctx: *anyopaque, addr: [*]align(0x1000) u8, count: usize) void {
-    const boot_services: *uefi.tables.BootServices = @alignCast(@ptrCast(ctx));
-    _ = boot_services.freePages(addr, count);
-}
-
-const MemoryTable = struct {
-    map: [*]uefi.tables.MemoryDescriptor,
-    map_key: usize,
-    map_size: usize,
-    descriptor_size: usize,
-
-    pub fn get(self: MemoryTable, index: usize) ?*uefi.tables.MemoryDescriptor {
-        const i = self.descriptor_size * index;
-        if (i > (self.map_size - self.descriptor_size)) return null;
-        return @ptrFromInt(@intFromPtr(self.map) + i);
-    }
-};
-
-fn getMemoryMap(boot_services: *uefi.tables.BootServices) MemoryTable {
-    var map: ?[*]uefi.tables.MemoryDescriptor = null;
-    var map_size: usize = 0;
-    var map_key: usize = 0;
-
-    var descriptor_size: usize = 0;
-    var descriptor_version: u32 = undefined;
-
-    var status = boot_services.getMemoryMap(
-        &map_size,
-        map,
-        &map_key,
-        &descriptor_size,
-        &descriptor_version,
-    );
-
-    if (status != .buffer_too_small) {
-        unreachable;
     }
 
-    while (true) {
-        map_size += descriptor_size;
-        const buffer = uefi.pool_allocator.alloc(u8, map_size) catch unreachable;
-        map = @alignCast(@ptrCast(buffer.ptr));
-
-        status = boot_services.getMemoryMap(
-            &map_size,
-            map,
-            &map_key,
-            &descriptor_size,
-            &descriptor_version,
-        );
-
-        if (status == .success) break;
-        if (status == .buffer_too_small) {
-            uefi.pool_allocator.free(buffer);
-            continue;
-        }
-
-        unreachable;
-    }
-
-    return .{
-        .map = @ptrCast(map.?),
-        .map_key = map_key,
-        .map_size = map_size,
-        .descriptor_size = descriptor_size,
-    };
+    ark.cpu.halt();
 }

@@ -34,7 +34,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                                 const addrs = device.base_address_registers();
                                 const sizes = device.address_sizes();
 
-                                const page_count = std.mem.alignForward(u32, sizes[0], 0x1000);
+                                const page_count = std.mem.alignForward(u32, sizes[0], 0x1000) >> mem.PageLevel.l4K.shift();
 
                                 const reservation = virt.kernel_space.reserve(page_count);
 
@@ -45,7 +45,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 
                                 const addr = reservation.address();
 
-                                virt.flush(addr);
+                                virt.flush(addr, .l4K);
 
                                 var pl011: Pl011 = undefined;
 
@@ -77,7 +77,7 @@ fn writeHandler(_: *anyopaque, bytes: []const u8) anyerror!usize {
     return bytes.len;
 }
 
-pub const writer = std.io.Writer(
+const writer = std.io.Writer(
     *anyopaque,
     anyerror,
     writeHandler,

@@ -83,7 +83,7 @@ pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
                 const reservation = space.reserve(1);
                 reservation.map(mapping.phys_addr, mapping.flags, mapping.hint);
                 space.unmapPage(addr);
-                virt.flush(addr);
+                virt.flush(addr, .l4K);
                 return reservation.address();
             },
             .heap_begin => {
@@ -105,7 +105,7 @@ pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
                     done += 1;
 
                     space.unmapPage(addr);
-                    virt.flush(addr);
+                    virt.flush(addr, .l4K);
 
                     if (map.hint == .heap_end) break;
 
@@ -127,7 +127,7 @@ pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
                     if (guard_map.hint != .stack_begin_guard_page) unreachable;
                     reservation.map(guard_map.phys_addr, guard_map.flags, guard_map.hint);
                     space.unmapPage(guard_addr);
-                    virt.flush(guard_addr);
+                    virt.flush(guard_addr, .l4K);
                     reservation.virt += guard_map.level.size();
                 }
 
@@ -147,7 +147,7 @@ pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
                     done += 1;
 
                     space.unmapPage(addr);
-                    virt.flush(addr);
+                    virt.flush(addr, .l4K);
 
                     if (map.hint == .stack_end_guard_page) break;
 
@@ -178,7 +178,7 @@ pub fn free(space: *virt.Space, address: u64) void {
                     mem.phys.freePage(mapping.phys_addr, mapping.level);
                 }
                 space.unmapPage(addr);
-                virt.flush(addr);
+                virt.flush(addr, .l4K);
             },
             .heap_begin => {
                 var nmap = nmapping;
@@ -187,7 +187,7 @@ pub fn free(space: *virt.Space, address: u64) void {
                         mem.phys.freePage(map.phys_addr, map.level);
                     }
                     space.unmapPage(addr);
-                    virt.flush(addr);
+                    virt.flush(addr, .l4K);
 
                     if (map.hint == .heap_end) break;
 
@@ -201,7 +201,7 @@ pub fn free(space: *virt.Space, address: u64) void {
                     const guard_map = space.getPage(guard_addr).?;
                     if (guard_map.hint != .stack_begin_guard_page) unreachable;
                     space.unmapPage(guard_addr);
-                    virt.flush(guard_addr);
+                    virt.flush(guard_addr, .l4K);
                 }
 
                 var nmap = nmapping;
@@ -210,7 +210,7 @@ pub fn free(space: *virt.Space, address: u64) void {
                         mem.phys.freePage(map.phys_addr, map.level);
                     }
                     space.unmapPage(addr);
-                    virt.flush(addr);
+                    virt.flush(addr, .l4K);
 
                     if (map.hint == .stack_end_guard_page) break;
 

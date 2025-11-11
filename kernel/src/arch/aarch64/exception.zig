@@ -41,7 +41,7 @@ pub const ExceptionContext = extern struct {
     fpcr: u64,
     fpsr: u64,
     elr_el1: u64,
-    spsr_el1: ark.cpu.armv8a_64.registers.SPSR_EL1,
+    spsr_el1: ark.armv8.registers.SPSR_EL1,
 };
 
 var first_entry = true;
@@ -50,12 +50,12 @@ var first_entry = true;
 fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
     kernel.arch.maskInterrupts();
 
-    const esr_el1 = ark.cpu.armv8a_64.registers.ESR_EL1.get();
+    const esr_el1 = ark.armv8.registers.ESR_EL1.load();
     const cpu = kernel.arch.Cpu.get();
 
     switch (esr_el1.ec) {
         .data_abort_lower_el, .data_abort_same_el => {
-            const far = ark.cpu.armv8a_64.registers.FAR_EL1.get().address;
+            const far = ark.armv8.registers.loadFarEl1();
             const iss = esr_el1.iss.data_abort;
 
             if (iss.dfsc != .access_flag_lv1 and
@@ -78,7 +78,7 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
                                 @panic("out of memory exception");
                             };
                             virt_space.setPage(far, mapping) orelse unreachable;
-                            mem.virt.flush(far);
+                            mem.virt.flush(far, .l4K);
                         },
                         .stack_begin_guard_page, .stack_end_guard_page => {
                             @panic("stack overflow exception");
@@ -177,6 +177,23 @@ export const el0_serror = unexpected_exception;
 
 fn unexpected_exception(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
     log.err("unexpected exception", .{});
-    ark.cpu.armv8a_64.registers.ESR_EL1.get().dump();
+    ark.armv8.registers.ESR_EL1.load().dump();
     ark.cpu.halt();
+}
+
+comptime {
+    _ = el1t_sync;
+    _ = el1t_irq;
+    _ = el1t_fiq;
+    _ = el1t_serror;
+
+    _ = el1h_sync;
+    _ = el1h_irq;
+    _ = el1h_fiq;
+    _ = el1h_serror;
+
+    _ = el0_sync;
+    _ = el0_irq;
+    _ = el0_fiq;
+    _ = el0_serror;
 }

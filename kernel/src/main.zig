@@ -17,24 +17,30 @@ pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 
+comptime {
+    _ = arch;
+    _ = drivers;
+    _ = mem;
+    _ = scheduler;
+}
+
 // --- main.zig --- //
 
 pub var hhdm_base: u64 = undefined;
 pub var hhdm_limit: u64 = undefined;
 
-pub var boot_space: mem.virt.Space = undefined;
 pub var xsdt: *drivers.acpi.Xsdt = undefined;
 pub var memory_map: mem.MemoryMap = undefined;
 pub var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
 
 export fn kernel_entry(
-    _memory_map_ptr: [*]uefi.tables.MemoryDescriptor,
+    _memory_map_ptr: u64,
     _memory_map_size: u64,
     _memory_map_descriptor_size: u64,
     _hhdm_base: u64,
     _hhdm_limit: u64,
-    _configuration_tables: [*]uefi.tables.ConfigurationTable,
-    _configuration_number_of_entries: usize,
+    _configuration_tables: u64,
+    _configuration_number_of_entries: u64,
 ) callconv(switch (builtin.cpu.arch) {
     .aarch64 => .{ .aarch64_aapcs = .{} },
     .riscv64 => .{ .riscv64_lp64 = .{} },
@@ -42,25 +48,25 @@ export fn kernel_entry(
 }) noreturn {
     arch.maskInterrupts();
 
+    hhdm_base = _hhdm_base;
+    hhdm_limit = _hhdm_limit;
+
     memory_map = .{
-        .map = _memory_map_ptr,
+        .map = @ptrFromInt(hhdm_base + _memory_map_ptr),
         .map_size = _memory_map_size,
         .descriptor_size = _memory_map_descriptor_size,
     };
 
-    hhdm_base = _hhdm_base;
-    hhdm_limit = _hhdm_limit;
-
-    configuration_tables = _configuration_tables[0.._configuration_number_of_entries];
-
     mem.phys.init(memory_map, hhdm_base) catch unreachable;
+
+    configuration_tables = @as([*]uefi.tables.ConfigurationTable, @ptrFromInt(hhdm_base + _configuration_tables))[0.._configuration_number_of_entries];
 
     var xsdt_found = false;
     for (configuration_tables) |*entry| {
         if (entry.vendor_guid.eql(uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
             @setRuntimeSafety(false);
-            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(@intFromPtr(entry.vendor_table));
-            xsdt = @ptrFromInt(rsdp.xsdt_addr);
+            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(hhdm_base + @intFromPtr(entry.vendor_table));
+            xsdt = @ptrFromInt(hhdm_base + rsdp.xsdt_addr);
             xsdt_found = true;
         }
     }
@@ -72,37 +78,6 @@ export fn kernel_entry(
 
     mem.virt.init(hhdm_limit) catch unreachable;
 
-    boot_space = .init(.lower, switch (builtin.cpu.arch) {
-        .aarch64 => ark.cpu.armv8a_64.registers.TTBR0_EL1.get().l0_table,
-        else => unreachable,
-    });
-
-    const stack = mem.phys.allocContiguousPages(8, .l4K, false) catch unreachable;
-    const stack_top = hhdm_base + stack + (0x1000 * 8);
-
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            asm volatile (
-                \\ mov x1, #0
-                \\ msr spsel, x1
-                \\ isb
-                \\
-                \\ mov sp, %[st]
-                \\ isb
-                \\
-                \\ b _main
-                :
-                : [st] "r" (stack_top),
-                : "memory", "x1"
-            );
-        },
-        else => unreachable,
-    }
-
-    unreachable;
-}
-
-export fn _main() noreturn {
     main() catch |err| {
         std.log.err("main returned with an error: {}", .{err});
     };
@@ -115,8 +90,13 @@ fn main() !void {
 
     log.info("kernel v{s}", .{build_options.version});
 
+    log.debug("hhdm_base: 0x{x}; hhdm_limit: 0x{x};", .{hhdm_base, hhdm_limit});
+
     try arch.init(xsdt);
     try scheduler.init();
+
+    try drivers.pcie.init(xsdt);
+
     try arch.bootCpus();
 
     const process = try scheduler.Process.create(.{

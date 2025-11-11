@@ -18,6 +18,10 @@ pub const Context = impl.Context;
 
 pub const Cpu = impl.Cpu;
 
+comptime {
+    _ = impl;
+}
+
 // -- arch/root.zig -- //
 
 pub fn init(xsdt: *acpi.Xsdt) !void {

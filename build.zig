@@ -36,6 +36,14 @@ pub fn build(b: *std.Build) !void {
         });
 
         bootfs.copyFile(kernel_exe.getEmittedBin(), "/kernel.elf");
+
+        switch (platform) {
+            .rpi4 => {
+                const rpi4_uefi_dep = b.dependency("rpi4_uefi", .{});
+                bootfs.copyDirectory(rpi4_uefi_dep.path("."), "/");
+            },
+            else => {},
+        }
     }
 
     const disk_image_dep = b.dependency("dimmer", .{ .release = true });
@@ -86,21 +94,25 @@ pub fn build(b: *std.Build) !void {
             "sh", "-c",
             \\[ -f .zig-cache/RISCV64_OVMF.fd ] || curl -L -o .zig-cache/RISCV64_OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT.fd
         }),
-        else => unreachable,
+        else => b.addSystemCommand(&[_][]const u8{""}),
     };
 
     const qemu_run = switch (platform) {
         .aarch64_qemu => b.addSystemCommand(&[_][]const u8{
             // zig fmt: off
             "qemu-system-aarch64",
-            "-cpu", "max",
-            "-machine", "virt",
+            "-cpu", "cortex-a72",
+            "-machine", "virt,secure=off,virtualization=on",
             "-m", "4G",
             "-smp", "4",
             "-bios", ".zig-cache/AA64_OVMF.fd",
-            "-cdrom", "zig-out/disk.img",
+
+            "-device", "virtio-blk-pci,drive=disk0",
+            "-drive", "file=zig-out/disk.img,if=none,id=disk0,format=raw",
+
             "-device", "ramfb",
             // "-device", "virtio-gpu-pci", // TODO first support ramfb then virtio-gpu-pci
+
             "-serial", "stdio",
             "-boot", "d",
             "-no-reboot",
