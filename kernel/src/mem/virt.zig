@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const ark = @import("ark");
 
 // --- imports --- //
 
@@ -26,8 +27,8 @@ pub fn init(hhdm_limit: u64) !void {
     try impl.init(hhdm_limit);
 }
 
-pub fn flush(virt_addr: u64) void {
-    impl.flush(virt_addr);
+pub fn flush(virt_addr: u64, page_level: mem.PageLevel) void {
+    impl.flush(virt_addr, page_level);
 }
 
 pub fn flushAll() void {
@@ -170,16 +171,12 @@ pub const Reservation = struct {
                 ),
                 else => unreachable,
             }
+
+            impl.flush(virt_addr, .l4K);
+
             offset += 0x1000;
         }
     }
 };
 
-pub const MemoryFlags = struct {
-    writable: bool = false,
-    executable: bool = false,
-    user: bool = false,
-    no_cache: bool = false,
-    device: bool = false,
-    writethrough: bool = false,
-};
+pub const MemoryFlags = ark.mem.MemoryFlags;

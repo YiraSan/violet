@@ -53,7 +53,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 
                             gicd_base = reservation.address();
 
-                            virt.flush(gicd_base);
+                            virt.flush(gicd_base, .l4K);
 
                             break :xsdt_loop;
                         },
@@ -151,7 +151,7 @@ const GICC_AIAR = 0x020;
 const GICC_AEOIR = 0x024;
 
 fn getInterfaceNumber() u32 {
-    const mpidr_el1 = ark.cpu.armv8a_64.registers.MPIDR_EL1.get();
+    const mpidr_el1 = ark.armv8.registers.MPIDR_EL1.load();
     const interface_number =
         @as(u32, @intCast(mpidr_el1.aff0)) |
         (@as(u32, @intCast(mpidr_el1.aff1)) << 8) |
@@ -182,7 +182,7 @@ pub fn initCpu(xsdt: *acpi.Xsdt) !void {
 
                                 gicc_base[interface_number] = reservation.address();
 
-                                virt.flush(gicc_base[interface_number]);
+                                virt.flush(gicc_base[interface_number], .l4K);
 
                                 break :xsdt_loop;
                             }

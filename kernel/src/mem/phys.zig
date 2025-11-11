@@ -535,8 +535,6 @@ fn reloadCache() AllocError!void {
     }
 
     cpu.primary_4k_cache_pos = 0;
-
-    cpu.recycle_4k_cache_num = 0;
 }
 
 pub fn allocPage(level: PageLevel, reset: bool) AllocError!u64 {

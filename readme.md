@@ -32,19 +32,17 @@ Default to `aarch64_qemu` (see [Platform matrix](#platform_matrix) for more deta
 
 | Platform | Identifier | State |
 | -------- | ---------- | ----- |
-| QEMU<sup>1</sup> (aarch64) | `aarch64_qemu` | ✅<sup>2</sup> |
-| QEMU<sup>1</sup> (riscv64) | `riscv64_qemu` | 🗓️<sup>3</sup> |
-| Raspberry Pi 4<sup>5</sup> | `rpi4`         | 🗓️<sup>3</sup> |
-| Raspberry Pi 3<sup>6</sup> | `rpi3`         | 🗓️<sup>3</sup> |
+| QEMU (aarch64)              | `aarch64_qemu` | ✅<sup>1</sup> |
+| QEMU (riscv64)              | `riscv64_qemu` | 🗓️<sup>3</sup> |
+| Raspberry Pi 4<sup>4</sup>  | `rpi4`         | 🔨<sup>2</sup> |
+| Raspberry Pi 3<sup>5</sup>  | `rpi3`         | 🗓️<sup>3</sup> |
 
-<sup>1</sup> QEMU is used with [EDKII](https://github.com/tianocore/edk2) to bring UEFI support.
+<sup>1</sup> ✅ means "Supported".
 
-<sup>2</sup> ✅ means "Supported".
+<sup>2</sup> 🔨 means "Partially supported".
 
-<sup>3</sup> 🗓️ means "Unsupported *(Planed)*".
+<sup>3</sup> 🗓️ means "Planed".
 
-<sup>4</sup> ❌ means "Unsupported".
+<sup>4</sup> Raspberry Pi 4B, 400 and 4 CM.
 
-<sup>5</sup> Raspberry Pi 4B, 400 and 4 CM.
-
-<sup>6</sup> Raspberry Pi 3B, 3B+ and 3 CM.
+<sup>5</sup> Raspberry Pi 3B, 3B+ and 3 CM.

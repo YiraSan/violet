@@ -11,6 +11,10 @@
             .url = "git+https://github.com/zig-osdev/disk-image-step#c0411db63cfda4c42a502dda277fd10f4a751160",
             .hash = "dimmer-2.0.0-suxOkghVAgCZxYfOd33arl5jOJrnL_8hoZEnCL86IXyX",
         },
+        .rpi4_uefi = .{
+            .url = "https://github.com/pftf/RPi4/releases/download/v1.50-rc/RPi4_UEFI_Firmware_v1.50-rc.zip",
+            .hash = "N-V-__8AAOrCbAC7yYElvEZPCzGQ9QFH4SCCGq1br3vPLQFi",
+        },
     },
     .paths = .{
         "build.zig",

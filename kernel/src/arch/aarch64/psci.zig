@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const ark = @import("ark");
-const CallArgs = ark.cpu.armv8a_64.CallArgs;
+const CallArgs = ark.armv8.CallArgs;
 
 // --- imports --- //
 

@@ -27,6 +27,10 @@ jobs:
         zig build -Dplatform=aarch64_qemu -Doptimize=ReleaseSafe
         mv ./zig-out/disk.img ./violet-aarch64_qemu.img
 
+    - run: |
+        zig build -Dplatform=rpi4 -Doptimize=ReleaseSafe
+        mv ./zig-out/disk.img ./violet-rpi4.img
+
     - uses: "marvinpinto/action-automatic-releases@latest"
       with:
         repo_token: "${{ secrets.GITHUB_TOKEN }}"
@@ -35,6 +39,6 @@ jobs:
         title: "Development Build"
         files: |
           violet-aarch64_qemu.img
-          violet-aarch64_rpi4b.img
+          violet-rpi4.img
           license
           readme.md

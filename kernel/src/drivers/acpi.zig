@@ -1,4 +1,12 @@
+// --- dependencies --- //
+
 const std = @import("std");
+
+// --- imports --- //
+
+const kernel = @import("root");
+
+// --- drivers/acpi.zig --- //
 
 const RSDP_SIGNATURE = "RSD PTR ";
 const RSDT_SIGNATURE = "RSDT";
@@ -86,28 +94,30 @@ pub const XsdtIterator = struct {
         const offset = 36 + @sizeOf(u64) * self.index;
         if (offset >= self.xsdt.header.length) return null;
 
-        const sdt_header: **SdtHeader = @ptrFromInt(@intFromPtr(self.xsdt) + offset);
-        const signature = std.mem.toBytes(sdt_header.*.*.signature);
+        const sdt_header_ptrptr: **SdtHeader = @ptrFromInt(@intFromPtr(self.xsdt) + offset);
+        const sdt_header: *SdtHeader = @ptrFromInt(kernel.hhdm_base + @intFromPtr(sdt_header_ptrptr.*));
+
+        const signature = std.mem.toBytes(sdt_header.signature);
         self.index += 1;
 
         if (std.mem.eql(u8, MADT_SIGNATURE, &signature)) {
-            return Entry{ .madt = @ptrCast(sdt_header.*) };
+            return Entry{ .madt = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, FADT_SIGNATURE, &signature)) {
-            return Entry{ .fadt = @ptrCast(sdt_header.*) };
+            return Entry{ .fadt = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, PPTT_SIGNATURE, &signature)) {
-            return Entry{ .pptt = @ptrCast(sdt_header.*) };
+            return Entry{ .pptt = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, GTDT_SIGNATURE, &signature)) {
-            return Entry{ .gtdt = @ptrCast(sdt_header.*) };
+            return Entry{ .gtdt = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, MCFG_SIGNATURE, &signature)) {
-            return Entry{ .mcfg = @ptrCast(sdt_header.*) };
+            return Entry{ .mcfg = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, SPCR_SIGNATURE, &signature)) {
-            return Entry{ .spcr = @ptrCast(sdt_header.*) };
+            return Entry{ .spcr = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, DBG2_SIGNATURE, &signature)) {
-            return Entry{ .dbg2 = @ptrCast(sdt_header.*) };
+            return Entry{ .dbg2 = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, IORT_SIGNATURE, &signature)) {
-            return Entry{ .iort = @ptrCast(sdt_header.*) };
+            return Entry{ .iort = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, BGRT_SIGNATURE, &signature)) {
-            return Entry{ .bgrt = @ptrCast(sdt_header.*) };
+            return Entry{ .bgrt = @ptrCast(sdt_header) };
         }
 
         std.log.err("ACPI signature to do: {s}", .{signature});
@@ -192,7 +202,7 @@ pub const MadtIterator = struct {
             .gicd => .{ .gicd = @ptrCast(entry_header) },
             .gicc => .{ .gicc = @ptrCast(entry_header) },
             .multiprocessor_wakeup => .{ .multiprocessor_wakeup = @ptrCast(entry_header) },
-            else => next(self),
+            else => return null,
         };
     }
 };
