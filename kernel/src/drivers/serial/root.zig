@@ -2,12 +2,14 @@
 
 const std = @import("std");
 
+const log = std.log.scoped(.serial);
+
 // --- imports --- //
 
 const kernel = @import("root");
 const acpi = kernel.drivers.acpi;
 
-const Pl011 = @import("pl011.zig");
+const Pl011 = @import("uart_pl011.zig");
 
 const mem = kernel.mem;
 const virt = mem.virt;
@@ -23,41 +25,67 @@ const Impl = union(enum) {
 
 pub fn init(xsdt: *acpi.Xsdt) !void {
     var xsdt_iter = xsdt.iter();
-    xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
+
+    while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
-            .dbg2 => |dbg2| {
-                var dbg2_iter = dbg2.iter();
-                while (dbg2_iter.next()) |device| {
-                    if (device.port_type == .serial) {
-                        switch (device.port_subtype.serial) {
-                            .pl011 => {
-                                const addrs = device.base_address_registers();
-                                const sizes = device.address_sizes();
+            .spcr => |spcr| {
+                if (spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.pl011) or
+                    spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.arm_sbsa_generic) or
+                    spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.bcm2835))
+                {
+                    const reservation = virt.kernel_space.reserve(1);
 
-                                const page_count = std.mem.alignForward(u32, sizes[0], 0x1000) >> mem.PageLevel.l4K.shift();
+                    reservation.map(spcr.base_address.address, .{
+                        .writable = true,
+                        .device = true,
+                    }, .no_hint);
 
-                                const reservation = virt.kernel_space.reserve(page_count);
+                    const virt_address = reservation.address();
 
-                                reservation.map(addrs[0].address, .{
-                                    .writable = true,
-                                    .device = true,
-                                }, .no_hint);
+                    var pl011: Pl011 = .{ .peripheral_base = virt_address };
 
-                                const addr = reservation.address();
+                    pl011.disableUart();
+                    pl011.maskAllInterrupts();
 
-                                virt.flush(addr, .l4K);
+                    const nbaud_rate: ?u32 = if (spcr.preciseBaudRate()) |pbr| pbr else switch (spcr.configured_baud_rate) {
+                        .pre_configured => null,
+                        .rate_9600 => 9600,
+                        .rate_19200 => 19200,
+                        .rate_57600 => 57600,
+                        .rate_115200 => 115200,
+                    };
 
-                                var pl011: Pl011 = undefined;
+                    if (nbaud_rate) |baud_rate| {
+                        const clock_frequency = spcr.uartClockFrequency() orelse 48_000_000;
 
-                                pl011.init(addr);
+                        const baud_div = @as(f32, @floatFromInt(clock_frequency)) / @as(f32, @floatFromInt(16 * baud_rate));
 
-                                impl = .{ .pl011 = pl011 };
-                                break :xsdt_loop;
-                            },
-                            else => {},
-                        }
+                        const ibrd = @as(u16, @intFromFloat(@floor(baud_div)));
+                        const fbrd = @as(u6, @intFromFloat(@round((baud_div - @as(f32, @floatFromInt(ibrd))) * 64)));
+
+                        pl011.setIntegerBaudRate(ibrd);
+                        pl011.setFractionalBaudRate(fbrd);
                     }
+
+                    pl011.writeLineControl(.{
+                        .brk = false,
+                        .par = spcr.parity != 0,
+                        .eps = false,
+                        .stp2 = spcr.stop_bits > 1,
+                        .fen = true,
+                        .wlen = .u8,
+                        .sps = false,
+                    });
+
+                    pl011.enableReceive();
+                    pl011.enableTransmit();
+
+                    pl011.enableUart();
+
+                    impl = .{ .pl011 = pl011 };
                 }
+
+                return;
             },
             else => {},
         }
@@ -89,10 +117,4 @@ pub fn print(comptime format: []const u8, args: anytype) void {
     logfn_lock.lock();
     defer logfn_lock.unlock();
     writer.print(format, args) catch {};
-}
-
-pub fn read() ?u8 {
-    switch (impl) {
-        .null => return null,
-    }
 }
