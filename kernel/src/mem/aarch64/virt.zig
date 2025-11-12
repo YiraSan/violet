@@ -313,14 +313,14 @@ fn get_table(table_addr: u64, index: u64) ?u64 {
 
 fn ensure_table(table_addr: u64, index: u64) u64 {
     const entry: *Entry = @ptrFromInt(kernel.hhdm_base + table_addr + index * 8);
-    
+
     if (entry.valid and entry.not_a_block) {
         return entry.descriptor.table.next_level_table << 12;
     }
 
     const new_table = phys.allocPage(.l4K, true) catch @panic("unable to allocate a page_table");
 
-    entry.* = Entry {
+    entry.* = Entry{
         .valid = true,
         .not_a_block = true,
         .descriptor = .{

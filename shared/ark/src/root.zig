@@ -51,13 +51,13 @@ pub const armv8 = struct {
                 \\ hvc #0
                 : [out] "={x0}" (-> u64),
                 : [in0] "{x0}" (self.x0),
-                    [in1] "{x1}" (self.x1),
-                    [in2] "{x2}" (self.x2),
-                    [in3] "{x3}" (self.x3),
-                    [in4] "{x4}" (self.x4),
-                    [in5] "{x5}" (self.x5),
-                    [in6] "{x6}" (self.x6),
-                    [in7] "{x7}" (self.x7),
+                  [in1] "{x1}" (self.x1),
+                  [in2] "{x2}" (self.x2),
+                  [in3] "{x3}" (self.x3),
+                  [in4] "{x4}" (self.x4),
+                  [in5] "{x5}" (self.x5),
+                  [in6] "{x6}" (self.x6),
+                  [in7] "{x7}" (self.x7),
                 : "memory"
             );
         }
@@ -65,11 +65,15 @@ pub const armv8 = struct {
         pub fn secureMonitorCall(self: *@This()) u64 {
             return asm volatile (
                 \\ smc #0
-                : [out] "={x0}" (-> u64)
-                : [in0] "{x0}" (self.x0), [in1] "{x1}" (self.x1),
-                    [in2] "{x2}" (self.x2), [in3] "{x3}" (self.x3),
-                    [in4] "{x4}" (self.x4), [in5] "{x5}" (self.x5),
-                    [in6] "{x6}" (self.x6), [in7] "{x7}" (self.x7),
+                : [out] "={x0}" (-> u64),
+                : [in0] "{x0}" (self.x0),
+                  [in1] "{x1}" (self.x1),
+                  [in2] "{x2}" (self.x2),
+                  [in3] "{x3}" (self.x3),
+                  [in4] "{x4}" (self.x4),
+                  [in5] "{x5}" (self.x5),
+                  [in6] "{x6}" (self.x6),
+                  [in7] "{x7}" (self.x7),
                 : "memory"
             );
         }
@@ -102,20 +106,20 @@ pub const armv8 = struct {
 
                 /// For EL1&0 translations, if the Effective value of HCR_EL2.{NV, NV1} is {1, 1}, then
                 /// APTable[0] is treated as 0 regardless of the actual value.
-                /// 
+                ///
                 /// NOTE could be simplified by interpreting bit0 as "priviledge-only" and bit1 as "read-only".
                 ap_table: enum(u2) { // bit 61-62
                     no_effect = 0b00,
                     /// Removes UnprivRead and UnprivWrite.
-                    /// 
+                    ///
                     /// (In Stage 1) Makes it EL1_READWRITE or EL1_READONLY.
                     priviledge_only = 0b01,
                     /// Removes UnprivWrite and PrivWrite.
-                    /// 
+                    ///
                     /// (In Stage 1) Makes it EL0_READONLY or EL1_READONLY.
                     read_only = 0b10,
                     /// Removes UnprivRead, UnprivWrite, and PrivWrite.
-                    /// 
+                    ///
                     /// (In Stage 1) Makes it EL1_READONLY.
                     priviledge_read_only = 0b11,
                 } = .no_effect,
@@ -139,7 +143,7 @@ pub const armv8 = struct {
 
             permissions: packed union { // bit 6-7
                 /// Stage 1 Indirect permissions are disabled.
-                /// 
+                ///
                 /// NOTE if there's only one privilege level, then priv_rw and priv_rw_unp_rw should not be used.
                 direct: enum(u2) {
                     priv_rw = 0b00,
@@ -217,7 +221,7 @@ pub const armv8 = struct {
             _ignored2: u1 = 0, // bit 63
 
             pub fn build(phys_addr: u64, flags: mem.MemoryFlags, software_use: u4) BlockPageDescriptor {
-                var bpd = BlockPageDescriptor {
+                var bpd = BlockPageDescriptor{
                     .attr_index = if (flags.device) .device else if (flags.no_cache) .non_cacheable else if (flags.writethrough) .writethrough else .writeback,
                     .output_address = @truncate(phys_addr >> 12),
                     .access_flag = phys_addr != 0,
@@ -265,7 +269,7 @@ pub const armv8 = struct {
             }
 
             pub fn getFlags(self: BlockPageDescriptor) mem.MemoryFlags {
-                var memory_flags = mem.MemoryFlags {};
+                var memory_flags = mem.MemoryFlags{};
 
                 if (self.attr_index == .device) {
                     memory_flags.device = true;
@@ -312,83 +316,133 @@ pub const armv8 = struct {
 
     pub const registers = struct {
         pub fn loadTtbr0El1() u64 {
-            return asm volatile ("mrs %[output], ttbr0_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], ttbr0_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeTtbr0El1(l0_table: u64) void {
-            asm volatile ("msr ttbr0_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr ttbr0_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadTtbr1El1() u64 {
-            return asm volatile ("mrs %[output], ttbr1_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], ttbr1_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeTtbr1El1(l0_table: u64) void {
-            asm volatile ("msr ttbr1_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr ttbr1_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadVbarEl1() u64 {
-            return asm volatile ("mrs %[output], vbar_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], vbar_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeVbarEl1(l0_table: u64) void {
-            asm volatile ("msr vbar_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr vbar_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadVbarEl2() u64 {
-            return asm volatile ("mrs %[output], vbar_el2" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], vbar_el2"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeVbarEl2(l0_table: u64) void {
-            asm volatile ("msr vbar_el2, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr vbar_el2, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadElrEl1() u64 {
-            return asm volatile ("mrs %[output], elr_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], elr_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeElrEl1(l0_table: u64) void {
-            asm volatile ("msr elr_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr elr_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadElrEl2() u64 {
-            return asm volatile ("mrs %[output], elr_el2" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], elr_el2"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeElrEl2(l0_table: u64) void {
-            asm volatile ("msr elr_el2, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr elr_el2, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadFarEl1() u64 {
-            return asm volatile ("mrs %[output], far_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], far_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeFarEl1(l0_table: u64) void {
-            asm volatile ("msr far_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr far_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadTpidrEL0() u64 {
-            return asm volatile ("mrs %[output], tpidr_el0" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], tpidr_el0"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeTpidrEL0(l0_table: u64) void {
-            asm volatile ("msr tpidr_el0, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr tpidr_el0, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadTpidrroEL0() u64 {
-            return asm volatile ("mrs %[output], tpidrro_el0" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], tpidrro_el0"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeTpidrroEL0(l0_table: u64) void {
-            asm volatile ("msr tpidrro_el0, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr tpidrro_el0, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         pub fn loadTpidrEL1() u64 {
-            return asm volatile ("mrs %[output], tpidr_el1" : [output] "=r" (-> u64));
+            return asm volatile ("mrs %[output], tpidr_el1"
+                : [output] "=r" (-> u64),
+            );
         }
 
         pub fn storeTpidrEL1(l0_table: u64) void {
-            asm volatile ("msr tpidr_el1, %[input]" :: [input] "r" (l0_table));
+            asm volatile ("msr tpidr_el1, %[input]"
+                :
+                : [input] "r" (l0_table),
+            );
         }
 
         /// Translation Control Register (EL1)
@@ -531,28 +585,28 @@ pub const armv8 = struct {
             },
 
             /// Hardware Access flag update in stage 1 translations from EL0 and EL1.
-            /// 
+            ///
             /// When FEAT_HAFDBS is implemented
             ha: bool = false, // bit 39
 
             /// Hardware management of dirty state in stage 1 translations from EL0 and EL1.
-            /// 
+            ///
             /// When FEAT_HAFDBS is implemented
             hd: bool = false, // bit 40
 
-            /// Hierarchical Permission Disables. 
-            /// 
+            /// Hierarchical Permission Disables.
+            ///
             /// This affects the hierarchical control bits, APTable, PXNTable, and UXNTable, except NSTable, in the translation tables pointed to by TTBR0_EL1.
-            /// 
+            ///
             /// When FEAT_HPDS is implemented
             hpd0: enum(u1) { // bit 41
                 enabled = 0b0,
                 disabled = 0b1,
             } = .enabled,
-            /// Hierarchical Permission Disables. 
-            /// 
+            /// Hierarchical Permission Disables.
+            ///
             /// This affects the hierarchical control bits, APTable, PXNTable, and UXNTable, except NSTable, in the translation tables pointed to by TTBR1_EL1.
-            /// 
+            ///
             /// When FEAT_HPDS is implemented
             hpd1: enum(u1) { // bit 42
                 enabled = 0b0,
@@ -570,29 +624,29 @@ pub const armv8 = struct {
             hwu162: u1 = 0, // bit 50
 
             /// Controls the use of the top byte of instruction addresses for address matching (TTBR0_EL1).
-            /// 
+            ///
             /// When FEAT_PAuth is implemented
             tbid0: u1 = 0, // bit 51
             /// Controls the use of the top byte of instruction addresses for address matching (TTBR1_EL1).
-            /// 
+            ///
             /// When FEAT_PAuth is implemented
             tbid1: u1 = 0, // bit 52
 
             /// Non-Fault translation timing Disable when using TTBR0_EL1.
-            /// 
+            ///
             /// When FEAT_SVE is implemented
             nfd0: u1 = 0, // bit 53
             /// Non-Fault translation timing Disable when using TTBR1_EL1.
-            /// 
+            ///
             /// When FEAT_SVE is implemented
             nfd1: u1 = 0, // bit 54
 
             /// Faulting control for unprivileged access to any address translated by TTBR0_EL1.
-            /// 
+            ///
             /// When FEAT_E0PD is implemented
             e0pd0: u1 = 0, // bit 55
             /// Faulting control for unprivileged access to any address translated by TTBR1_EL1.
-            /// 
+            ///
             /// When FEAT_E0PD is implemented
             e0pd1: u1 = 0, // bit 56
 
@@ -605,29 +659,34 @@ pub const armv8 = struct {
             ds: u1 = 0, // bit 59
 
             /// Extended memory tag checking (TTBR0_EL1).
-            /// 
+            ///
             /// When FEAT_MTE_NO_ADDRESS_TAGS is implemented or FEAT_MTE_CANONICAL_TAGS is implemented
             mtx0: u1 = 0, // bit 6
             /// Extended memory tag checking (TTBR1_EL1).
-            /// 
+            ///
             /// When FEAT_MTE_NO_ADDRESS_TAGS is implemented or FEAT_MTE_CANONICAL_TAGS is implemented
             mtx1: u1 = 0, // bit 61
 
             _reserved3: u2 = 0, // bit 62-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], tcr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], tcr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr tcr_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr tcr_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
         /// Extended Translation Control Register (EL1)
         pub const TCR2_EL1 = packed struct(u64) {
-            /// Protected attribute enable. 
-            /// 
+            /// Protected attribute enable.
+            ///
             /// Enables use of bit[52] of the stage 1 translation table entries as the Protected bit, for translations using TTBRn_EL1.
             pnch: enum(u1) { // bit 0
                 contiguous_bit = 0b0,
@@ -640,11 +699,16 @@ pub const armv8 = struct {
             _todo: u62, // bit 2-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], tcr2_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], tcr2_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr tcr2_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr tcr2_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -671,11 +735,16 @@ pub const armv8 = struct {
             pub const NORMAL_NONCACHEABLE = 0b0100_0100;
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], mair_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], mair_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr mair_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr mair_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -763,11 +832,16 @@ pub const armv8 = struct {
             _todo: u44 = 0, // bit 20-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], sctlr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], sctlr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr sctlr_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr sctlr_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -833,7 +907,9 @@ pub const armv8 = struct {
             _todo: u28, // bit 35-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], id_aa64pfr0_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], id_aa64pfr0_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
         };
 
@@ -879,7 +955,9 @@ pub const armv8 = struct {
             _todo15: u4,
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], id_aa64mmfr1_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], id_aa64mmfr1_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
         };
 
@@ -902,7 +980,9 @@ pub const armv8 = struct {
             _todo15: u4,
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], id_aa64mmfr2_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], id_aa64mmfr2_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
         };
 
@@ -944,7 +1024,9 @@ pub const armv8 = struct {
             _todo15: u4,
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], id_aa64mmfr3_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], id_aa64mmfr3_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
         };
 
@@ -971,11 +1053,16 @@ pub const armv8 = struct {
             _reserved2: u32 = 0, // bit 32-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], spsr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], spsr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr spsr_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr spsr_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -1003,11 +1090,16 @@ pub const armv8 = struct {
             _reserved2: u32 = 0, // bit 32-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], spsr_el2" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], spsr_el2"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr spsr_el2, %[input]" :: [input] "r" (self));
+                asm volatile ("msr spsr_el2, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -1131,11 +1223,16 @@ pub const armv8 = struct {
             _todo: u15 = 0, // bit 49-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], hcr_el2" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], hcr_el2"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr hcr_el2, %[input]" :: [input] "r" (self));
+                asm volatile ("msr hcr_el2, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -1286,7 +1383,9 @@ pub const armv8 = struct {
             _reserved0: u8, // bit 56-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], esr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], esr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn dump(self: @This()) void {
@@ -1323,11 +1422,16 @@ pub const armv8 = struct {
             _reserved4: u32, // [32..63] Reserved (RES0)
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], cpacr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], cpacr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
 
             pub fn store(self: @This()) void {
-                asm volatile ("msr cpacr_el1, %[input]" :: [input] "r" (self));
+                asm volatile ("msr cpacr_el1, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
             }
         };
 
@@ -1350,7 +1454,9 @@ pub const armv8 = struct {
             _reserved2: u24, // bit 40-63
 
             pub fn load() @This() {
-                return asm volatile ("mrs %[output], mpidr_el1" : [output] "=r" (-> @This()));
+                return asm volatile ("mrs %[output], mpidr_el1"
+                    : [output] "=r" (-> @This()),
+                );
             }
         };
     };

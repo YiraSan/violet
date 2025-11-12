@@ -255,13 +255,15 @@ pub fn main() uefi.Status {
             reg.fpen = .el0_el1;
             reg.store();
 
-            var sctlr = ark.armv8.registers.SCTLR_EL1 {
+            var sctlr = ark.armv8.registers.SCTLR_EL1{
                 .M = true,
                 .A = false, // TODO fix kernel alignment
             };
             sctlr.store();
 
-            const currentEL = asm volatile ("mrs %[out], currentEL" : [out] "=r" (-> u64));
+            const currentEL = asm volatile ("mrs %[out], currentEL"
+                : [out] "=r" (-> u64),
+            );
 
             if (currentEL == 0b1100) { // EL3
                 unreachable;
@@ -275,11 +277,11 @@ pub fn main() uefi.Status {
                     }
                 }
 
-                var hcr_el2 = ark.armv8.registers.HCR_EL2 {};
+                var hcr_el2 = ark.armv8.registers.HCR_EL2{};
                 hcr_el2.rw = .el1_is_aa64;
                 hcr_el2.store();
 
-                var spsr = ark.armv8.registers.SPSR_EL2 { 
+                var spsr = ark.armv8.registers.SPSR_EL2{
                     .mode = .el1t,
                     .d = true,
                     .a = true,
@@ -288,9 +290,18 @@ pub fn main() uefi.Status {
                 };
                 spsr.store();
 
-                asm volatile ("msr ttbr1_el1, %[ttbr1]" :: [ttbr1] "r" (virt.table));
-                asm volatile ("msr elr_el2, %[kernel_entry]" :: [kernel_entry] "r" (entry_address));
-                asm volatile ("msr sp_el0, %[stack_top]" :: [stack_top] "r" (kernel_stack_top));
+                asm volatile ("msr ttbr1_el1, %[ttbr1]"
+                    :
+                    : [ttbr1] "r" (virt.table),
+                );
+                asm volatile ("msr elr_el2, %[kernel_entry]"
+                    :
+                    : [kernel_entry] "r" (entry_address),
+                );
+                asm volatile ("msr sp_el0, %[stack_top]"
+                    :
+                    : [stack_top] "r" (kernel_stack_top),
+                );
 
                 asm volatile (
                     \\ mov x0, %[mmap_phys_ptr]
@@ -303,11 +314,14 @@ pub fn main() uefi.Status {
                     \\ mov x5, %[config_tables_phys_ptr]
                     \\ mov x6, %[config_tables_size]
                     \\
-                    \\ dsb ish
+                    \\ dsb sy
                     \\ isb
                     \\
                     \\ tlbi vmalle1
                     \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ dsb sy
                     \\ isb
                     \\
                     \\ eret
@@ -349,6 +363,9 @@ pub fn main() uefi.Status {
                     \\ msr spsel, x8
                     \\ mov sp, %[stack_top]
                     \\ dsb ish
+                    \\ isb
+                    \\
+                    \\ dsb sy
                     \\ isb
                     \\
                     \\ br x7
