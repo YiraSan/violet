@@ -412,7 +412,68 @@ pub const Mcfg = extern struct {
 
 pub const Spcr = extern struct {
     header: SdtHeader align(1),
-    // TODO
+
+    interface_type: u8 align(1),
+    _reserved0: [3]u8 align(1),
+
+    base_address: Gas align(1),
+    interrupt_type: enum(u8) {
+        _8259 = 0x1,
+        ioapic = 0x2,
+        iosapic = 0x4,
+        gic = 0x8,
+        plic_aplic = 0x10,
+    } align(1),
+    pc_interrupt: u8 align(1),
+    interrupt: u32 align(1),
+
+    configured_baud_rate: enum(u8) {
+        pre_configured = 0,
+        rate_9600 = 3,
+        rate_19200 = 4,
+        rate_57600 = 6,
+        rate_115200 = 7,
+    } align(1),
+    parity: u8 align(1),
+    stop_bits: u8 align(1),
+    flow_control: u8 align(1),
+    terminal_type: u8 align(1),
+    language: u8 align(1),
+
+    pci_device_id: u16 align(1),
+    pci_vendor_id: u16 align(1),
+    pci_bus_number: u8 align(1),
+    pci_device_number: u8 align(1),
+    pci_function_number: u8 align(1),
+    pci_flags: u32 align(1),
+    pci_segment: u8 align(1),
+
+    uart_clock_frequency: u32 align(1),
+    precise_baud_rate: u32 align(1),
+
+    namespace_string_length: u16 align(1),
+    namespace_string_offset: u16 align(1),
+
+    pub fn uartClockFrequency(self: *Spcr) ?u32 {
+        const limit = @intFromPtr(&self.uart_clock_frequency) - @intFromPtr(self) + @sizeOf(u32);
+        if (limit > self.header.length) return null;
+        if (self.uart_clock_frequency == 0) return null;
+        return self.uart_clock_frequency;
+    }
+
+    pub fn preciseBaudRate(self: *Spcr) ?u32 {
+        const limit = @intFromPtr(&self.precise_baud_rate) - @intFromPtr(self) + @sizeOf(u32);
+        if (limit > self.header.length) return null;
+        if (self.precise_baud_rate == 0) return null;
+        return self.precise_baud_rate;
+    }
+
+    pub fn namespace_string(self: *Spcr) ?[]const u8 {
+        @setRuntimeSafety(false);
+        if (self.namespace_string_offset > self.header.length) return null;
+
+        return @as([*]const u8, @ptrFromInt(@intFromPtr(self) + self.namespace_string_offset))[0..self.namespace_string_length];
+    }
 };
 
 pub const Dbg2 = extern struct {
@@ -444,6 +505,30 @@ pub const Dbg2Iterator = struct {
     }
 };
 
+pub const Dbg2SerialPortType = enum(u16) {
+    ns16550 = 0x0,
+    ns16550_dbgp1 = 0x1,
+    max311xe_spi = 0x2,
+    pl011 = 0x3,
+    msm8x60 = 0x4,
+    ns16550_nvidia = 0x5,
+    ti_omap = 0x6,
+    apm88xxxx = 0x8,
+    msm8974 = 0x9,
+    sam5250 = 0xa,
+    intel_usif = 0xb,
+    imx6 = 0xc,
+    arm_sbsa_32bit = 0xd,
+    arm_sbsa_generic = 0xe,
+    arm_dcc = 0xf,
+    bcm2835 = 0x10,
+    sdm845_1_8432mhz = 0x11,
+    ns16550_gas = 0x12,
+    sdm845_7_372mhz = 0x13,
+    intel_lpss = 0x14,
+    riscv_sbi = 0x15,
+};
+
 pub const Dbg2DeviceInfo = extern struct {
     revision: u8 align(1),
     length: u16 align(1),
@@ -459,29 +544,7 @@ pub const Dbg2DeviceInfo = extern struct {
         net = 0x8003,
     } align(1),
     port_subtype: packed union {
-        serial: enum(u16) {
-            ns16550 = 0x0,
-            ns16550_dbgp1 = 0x1,
-            max311xe_spi = 0x2,
-            pl011 = 0x3,
-            msm8x60 = 0x4,
-            ns16550_nvidia = 0x5,
-            ti_omap = 0x6,
-            apm88xxxx = 0x8,
-            msm8974 = 0x9,
-            sam5250 = 0xa,
-            intel_usif = 0xb,
-            imx6 = 0xc,
-            arm_sbsa_32bit = 0xd,
-            arm_sbsa_generic = 0xe,
-            arm_dcc = 0xf,
-            bcm2835 = 0x10,
-            sdm845_1_8432mhz = 0x11,
-            ns16550_gas = 0x12,
-            sdm845_7_372mhz = 0x13,
-            intel_lpss = 0x14,
-            riscv_sbi = 0x15,
-        },
+        serial: Dbg2SerialPortType,
         _1394: enum(u16) {
             standard = 0x0,
         },
