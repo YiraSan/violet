@@ -447,7 +447,7 @@ pub fn init(
             bitmap_1g.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             bitmap_1g.len = len_1g;
             @memset(bitmap_1g, 0);
- 
+
             alloc_base = @intFromPtr(bitmap_1g.ptr) + bitmap_1g.len * @sizeOf(u64);
 
             counter_2m.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));

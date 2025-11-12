@@ -56,7 +56,7 @@ pub fn initCpus(xsdt: *acpi.Xsdt) !void {
     }
 
     // TODO brk so it produces a visible exception for QEMU
-    if (!gicc_found) asm volatile("brk #0");
+    if (!gicc_found) asm volatile ("brk #0");
 
     const cpu = cpus[Cpu.id()].?;
     asm volatile (
@@ -102,7 +102,7 @@ pub fn bootCpus() !void {
 
         cpu_setup_data.ttbr0 = ttbr0_space.l0_table;
     } else {
-        cpu_setup_data.ttbr0 = @bitCast(ark.armv8.registers.SPSR_EL2 {
+        cpu_setup_data.ttbr0 = @bitCast(ark.armv8.registers.SPSR_EL2{
             .mode = .el1t,
             .d = true,
             .a = true,
@@ -110,7 +110,7 @@ pub fn bootCpus() !void {
             .f = true,
         });
 
-        cpu_setup_data.hcr_el2 = @bitCast(ark.armv8.registers.HCR_EL2 {
+        cpu_setup_data.hcr_el2 = @bitCast(ark.armv8.registers.HCR_EL2{
             .rw = .el1_is_aa64,
         });
     }

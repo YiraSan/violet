@@ -90,7 +90,7 @@ fn main() !void {
 
     log.info("kernel v{s}", .{build_options.version});
 
-    log.debug("hhdm_base: 0x{x}; hhdm_limit: 0x{x};", .{hhdm_base, hhdm_limit});
+    log.debug("hhdm_base: 0x{x}; hhdm_limit: 0x{x};", .{ hhdm_base, hhdm_limit });
 
     try arch.init(xsdt);
     try scheduler.init();

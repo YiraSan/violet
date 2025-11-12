@@ -29,7 +29,7 @@ pub fn init(_: *uefi.tables.BootServices) void {
 }
 
 fn configureMAIR() void {
-    const mair_el1 = ark.armv8.registers.MAIR_EL1 {
+    const mair_el1 = ark.armv8.registers.MAIR_EL1{
         .attr0 = ark.armv8.registers.MAIR_EL1.DEVICE_nGnRnE,
         .attr1 = ark.armv8.registers.MAIR_EL1.NORMAL_NONCACHEABLE,
         .attr2 = ark.armv8.registers.MAIR_EL1.NORMAL_WRITETHROUGH_NONTRANSIENT,
@@ -44,7 +44,7 @@ fn configureMAIR() void {
 }
 
 fn configureTCR() void {
-    var tcr_el1 = ark.armv8.registers.TCR_EL1 {
+    var tcr_el1 = ark.armv8.registers.TCR_EL1{
         .t0sz = 16,
         .epd0 = false,
         .irgn0 = .wb_ra_wa,
@@ -171,7 +171,7 @@ fn ensure_table(table_addr: u64, index: u64) u64 {
 
     const new_table = phys.allocPages(1);
 
-    entry.* = Entry {
+    entry.* = Entry{
         .valid = true,
         .not_a_block = true,
         .descriptor = .{
