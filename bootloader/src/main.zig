@@ -290,19 +290,6 @@ pub fn main() uefi.Status {
                 };
                 spsr.store();
 
-                asm volatile ("msr ttbr1_el1, %[ttbr1]"
-                    :
-                    : [ttbr1] "r" (virt.table),
-                );
-                asm volatile ("msr elr_el2, %[kernel_entry]"
-                    :
-                    : [kernel_entry] "r" (entry_address),
-                );
-                asm volatile ("msr sp_el0, %[stack_top]"
-                    :
-                    : [stack_top] "r" (kernel_stack_top),
-                );
-
                 asm volatile (
                     \\ mov x0, %[mmap_phys_ptr]
                     \\ mov x1, %[mmap_size]
@@ -314,14 +301,16 @@ pub fn main() uefi.Status {
                     \\ mov x5, %[config_tables_phys_ptr]
                     \\ mov x6, %[config_tables_size]
                     \\
+                    \\ msr ttbr1_el1, %[ttbr1]
+                    \\ msr elr_el2, %[kernel_entry]
+                    \\ msr sp_el0, %[stack_top]
+                    \\
+                    \\ ic iallu
                     \\ dsb sy
                     \\ isb
                     \\
                     \\ tlbi vmalle1
                     \\ dsb ish
-                    \\ isb
-                    \\
-                    \\ dsb sy
                     \\ isb
                     \\
                     \\ eret
@@ -335,6 +324,10 @@ pub fn main() uefi.Status {
 
                       [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
                       [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
+
+                      [ttbr1] "r" (virt.table),
+                      [kernel_entry] "r" (entry_address),
+                      [stack_top] "r" (kernel_stack_top),
                     : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6"
                 );
             } else if (currentEL == 0b0100) { // EL1
@@ -349,8 +342,6 @@ pub fn main() uefi.Status {
                     \\ mov x5, %[config_tables_phys_ptr]
                     \\ mov x6, %[config_tables_size]
                     \\
-                    \\ mov x7, %[kernel_entry]
-                    \\
                     \\ msr ttbr1_el1, %[ttbr1]
                     \\ dsb ish
                     \\ isb
@@ -359,8 +350,8 @@ pub fn main() uefi.Status {
                     \\ dsb ish
                     \\ isb
                     \\
-                    \\ mov x8, #0
-                    \\ msr spsel, x8
+                    \\ mov x7, #0
+                    \\ msr spsel, x7
                     \\ mov sp, %[stack_top]
                     \\ dsb ish
                     \\ isb
@@ -368,7 +359,7 @@ pub fn main() uefi.Status {
                     \\ dsb sy
                     \\ isb
                     \\
-                    \\ br x7
+                    \\ br %[kernel_entry]
                     :
                     : [mmap_phys_ptr] "r" (memory_map.map),
                       [mmap_size] "r" (memory_map.map_size),
@@ -385,7 +376,7 @@ pub fn main() uefi.Status {
                       [ttbr1] "r" (virt.table),
 
                       [stack_top] "r" (kernel_stack_top),
-                    : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8"
+                    : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"
                 );
             } else { // EL0
                 unreachable;
