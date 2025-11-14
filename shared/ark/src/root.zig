@@ -1459,6 +1459,44 @@ pub const armv8 = struct {
                 );
             }
         };
+
+        /// Architectural Feature Trap Register (EL2)
+        pub const CPTR_EL2 = packed struct(u64) {
+            _reserved0: u8 = 0b11111111, // bit 0-7
+            /// Traps execution at EL2, EL1, and EL0 of SVE instructions and instructions that directly access the ZCR_EL2 or ZCR_EL1 System registers to EL2, 
+            /// when EL2 is enabled in the current Security state.
+            /// 
+            /// When FEAT_SVE is implemented
+            tz: bool = true, // bit 8
+            _reserved1: u1 = 0b1, // bit 9
+            /// Traps execution of instructions which access the Advanced SIMD and floating-point functionality, from both Execution states to EL2, when EL2 is enabled in the current Security state.
+            tfp: bool = true, // bit 10
+            _reserved2: u1 = 0, // bit 11
+            _reserved3: u2 = 0b11, // bit 12-13
+            _reserved4: u6 = 0, // bit 14-19
+            /// Traps System register accesses to all implemented trace registers from both Execution states to EL2, when EL2 is enabled in the current Security state.
+            tta: bool = true, // bit 20
+            _reserved5: u9 = 0, // bit 21-29
+            /// Trap Activity Monitor access.
+            /// 
+            /// When FEAT_AMUv1 is implemented
+            tam: bool = false, // bit 30
+            tcpac: bool = false, // bit 31
+            _reserved6: u32 = 0, // bit 32-63
+
+            pub fn load() @This() {
+                return asm volatile ("mrs %[output], cptr_el2"
+                    : [output] "=r" (-> @This()),
+                );
+            }
+
+            pub fn store(self: @This()) void {
+                asm volatile ("msr cptr_el2, %[input]"
+                    :
+                    : [input] "r" (self),
+                );
+            }
+        };
     };
 };
 
