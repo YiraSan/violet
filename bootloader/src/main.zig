@@ -290,6 +290,15 @@ pub fn main() uefi.Status {
                 };
                 spsr.store();
 
+                var cptr = ark.armv8.registers.CPTR_EL2 {
+                    .tz = false,
+                    .tfp = false,
+                    .tta = false,
+                    .tam = false,
+                    .tcpac = false,
+                };
+                cptr.store();
+
                 asm volatile (
                     \\ mov x0, %[mmap_phys_ptr]
                     \\ mov x1, %[mmap_size]
