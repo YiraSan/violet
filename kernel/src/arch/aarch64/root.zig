@@ -282,14 +282,14 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
 pub fn maskInterrupts() void {
     asm volatile (
-        \\ msr daifset, #0b1111
+        \\ msr daifset, #0b0011
         \\ isb
     );
 }
 
 pub fn unmaskInterrupts() void {
     asm volatile (
-        \\ msr daifclr, #0b1111
+        \\ msr daifclr, #0b0011
         \\ isb
     );
 }
