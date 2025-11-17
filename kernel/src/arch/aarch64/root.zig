@@ -43,7 +43,7 @@ pub fn initCpus(xsdt: *acpi.Xsdt) !void {
                             const mpidr: ark.armv8.registers.MPIDR_EL1 = @bitCast(gicc.mpidr);
                             if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
 
-                            const cpu_ptr: *Cpu = @ptrFromInt(kernel.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
+                            const cpu_ptr: *Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
                             cpus[mpidr.aff0] = cpu_ptr;
                             cpu_ptr.mpidr = gicc.mpidr;
                         },
@@ -55,8 +55,7 @@ pub fn initCpus(xsdt: *acpi.Xsdt) !void {
         }
     }
 
-    // TODO brk so it produces a visible exception for QEMU
-    if (!gicc_found) asm volatile ("brk #0");
+    if (!gicc_found) asm volatile ("brk #0"); // TODO brk so it produces a visible exception for QEMU
 
     const cpu = cpus[Cpu.id()].?;
     asm volatile (
@@ -101,11 +100,15 @@ pub fn bootCpus() !void {
         }, .no_hint);
 
         cpu_setup_data.ttbr0 = ttbr0_space.l0_table;
+
+        var tcr_el1 = ark.armv8.registers.TCR_EL1.load();
+        tcr_el1.epd0 = false;
+        cpu_setup_data.tcr = @bitCast(tcr_el1);
     } else {
         cpu_setup_data.ttbr0 = @bitCast(ark.armv8.registers.SPSR_EL2{
             .mode = .el1t,
-            .d = true,
-            .a = true,
+            .d = false,
+            .a = false,
             .i = true,
             .f = true,
         });
@@ -113,12 +116,15 @@ pub fn bootCpus() !void {
         cpu_setup_data.hcr_el2 = @bitCast(ark.armv8.registers.HCR_EL2{
             .rw = .el1_is_aa64,
         });
+
+        cpu_setup_data.tcr = @bitCast(ark.armv8.registers.TCR_EL1.load());
     }
 
-    cpu_setup_data.ttbr1 = kernel.mem.virt.kernel_space.l0_table;
-
-    cpu_setup_data.tcr = @bitCast(ark.armv8.registers.TCR_EL1.load());
     cpu_setup_data.mair = @bitCast(ark.armv8.registers.MAIR_EL1.load());
+
+    cpu_setup_data.sctlr_el1 = @bitCast(ark.armv8.registers.SCTLR_EL1.load());
+
+    cpu_setup_data.ttbr1 = kernel.mem.virt.kernel_space.l0_table;
 
     cpu_setup_data.entry_virt = @intFromPtr(&initSecondary);
 
@@ -126,7 +132,9 @@ pub fn bootCpus() !void {
         if (cpu_nptr) |cpu| {
             if (cpu.mpidr == Cpu.id()) continue;
 
-            cpu_setup_data.stack_top_virt = kernel.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
+            std.log.debug("booting cpu{}", .{cpu.mpidr});
+
+            cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
             cpu_setup_data.setup_done = 0;
 
             asm volatile ("dsb ish ; isb" ::: "memory");
@@ -152,6 +160,7 @@ extern var cpu_setup_data: extern struct {
     entry_virt: u64 align(1),
     setup_done: u64 align(1),
     hcr_el2: u64 align(1),
+    sctlr_el1: u64 align(1),
 };
 
 fn trampoline_el1() align(0x1000) linksection(".data") callconv(.naked) noreturn {
@@ -167,9 +176,10 @@ fn trampoline_el1() align(0x1000) linksection(".data") callconv(.naked) noreturn
         \\ ldr x4, [x0, #24] // mair
         \\ ldr x5, [x0, #32] // stack_top_virt
         \\ ldr x6, [x0, #40] // entry_virt
+        \\ ldr x8, [x0, #64] // sctlr_el1
         \\
         \\ msr mair_el1, x4
-        \\ msr tcr_el1,  x3
+        \\ msr tcr_el1, x3
         \\ msr ttbr0_el1, x1
         \\ msr ttbr1_el1, x2
         \\ dsb ish
@@ -179,9 +189,7 @@ fn trampoline_el1() align(0x1000) linksection(".data") callconv(.naked) noreturn
         \\ dsb ish
         \\ isb
         \\
-        \\ mrs x7, sctlr_el1
-        \\ orr x7, x7, #1 // enable MMU
-        \\ msr sctlr_el1, x7
+        \\ msr sctlr_el1, x8
         \\
         \\ mov x7, #0
         \\ msr spsel, x7
@@ -205,6 +213,7 @@ fn trampoline_el1() align(0x1000) linksection(".data") callconv(.naked) noreturn
         \\    .quad 0 // entry_virt
         \\    .quad 0 // setup_done
         \\    .quad 0 // hcr_el2
+        \\    .quad 0 // sctlr_el1
     );
 }
 
@@ -222,6 +231,7 @@ fn trampoline_el2() linksection(".data") callconv(.naked) noreturn {
         \\ ldr x5, [x0, #32] // stack_top_virt
         \\ ldr x6, [x0, #40] // entry_virt
         \\ ldr x7, [x0, #56] // hcr_el2
+        \\ ldr x8, [x0, #64] // sctlr_el1
         \\
         \\ msr spsr_el2, x1
         \\ msr ttbr1_el1, x2
@@ -230,16 +240,13 @@ fn trampoline_el2() linksection(".data") callconv(.naked) noreturn {
         \\ msr sp_el0, x5
         \\ msr elr_el2, x6
         \\ msr hcr_el2, x7
+        \\ msr sctlr_el1, x8
         \\ dsb ish
         \\ isb
         \\
         \\ tlbi vmalle1
         \\ dsb ish
         \\ isb
-        \\
-        \\ mrs x8, sctlr_el1
-        \\ orr x8, x8, #1 // enable MMU
-        \\ msr sctlr_el1, x8
         \\
         \\ mov x8, #1
         \\ str x8, [x0, #48]
@@ -265,9 +272,8 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
     mem.phys.initCpu() catch unreachable;
     exception.init() catch {};
-    gic.initCpu(kernel.xsdt) catch unreachable;
+    gic.initCpu(kernel.boot.xsdt) catch unreachable;
     generic_timer.enableCpu() catch unreachable;
-
     kernel.scheduler.initCpu() catch unreachable;
 
     unmaskInterrupts();
@@ -313,6 +319,8 @@ pub const Cpu = struct {
     // -- scheduler -- //
 
     current_task: ?*kernel.scheduler.Task,
+
+    idle_task: *kernel.scheduler.Task,
 
     queue_tasks: mem.Queue(*kernel.scheduler.Task),
     cycle_done: usize,

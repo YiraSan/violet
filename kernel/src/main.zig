@@ -1,4 +1,3 @@
-//! TODO make a boot/ that will contains agnostic interface in order to avoid using directly ACPI and make the kernel bootloading-agnostic. To then implement UEFI-less bootloading.
 // --- dependencies --- //
 
 const ark = @import("ark");
@@ -6,19 +5,17 @@ const build_options = @import("build_options");
 const builtin = @import("builtin");
 const std = @import("std");
 
-const uefi = std.os.uefi;
-
-const log = std.log.scoped(.main);
-
 // --- imports --- //
 
 pub const arch = @import("arch/root.zig");
+pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 
 comptime {
     _ = arch;
+    _ = boot;
     _ = drivers;
     _ = mem;
     _ = scheduler;
@@ -26,76 +23,29 @@ comptime {
 
 // --- main.zig --- //
 
-pub var hhdm_base: u64 = undefined;
-pub var hhdm_limit: u64 = undefined;
+pub fn stage0() !void {
+    try mem.phys.init();
 
-pub var xsdt: *drivers.acpi.Xsdt = undefined;
-pub var memory_map: mem.MemoryMap = undefined;
-pub var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
+    try arch.initCpus(boot.xsdt);
+    try mem.phys.initCpu();
 
-export fn kernel_entry(
-    _memory_map_ptr: u64,
-    _memory_map_size: u64,
-    _memory_map_descriptor_size: u64,
-    _hhdm_base: u64,
-    _hhdm_limit: u64,
-    _configuration_tables: u64,
-    _configuration_number_of_entries: u64,
-) callconv(switch (builtin.cpu.arch) {
-    .aarch64 => .{ .aarch64_aapcs = .{} },
-    .riscv64 => .{ .riscv64_lp64 = .{} },
-    else => unreachable,
-}) noreturn {
-    arch.maskInterrupts();
+    try mem.virt.init();
 
-    hhdm_base = _hhdm_base;
-    hhdm_limit = _hhdm_limit;
-
-    memory_map = .{
-        .map = @ptrFromInt(hhdm_base + _memory_map_ptr),
-        .map_size = _memory_map_size,
-        .descriptor_size = _memory_map_descriptor_size,
-    };
-
-    mem.phys.init(memory_map, hhdm_base) catch unreachable;
-
-    configuration_tables = @as([*]uefi.tables.ConfigurationTable, @ptrFromInt(hhdm_base + _configuration_tables))[0.._configuration_number_of_entries];
-
-    var xsdt_found = false;
-    for (configuration_tables) |*entry| {
-        if (entry.vendor_guid.eql(uefi.tables.ConfigurationTable.acpi_20_table_guid)) {
-            @setRuntimeSafety(false);
-            const rsdp: *drivers.acpi.Rsdp = @ptrFromInt(hhdm_base + @intFromPtr(entry.vendor_table));
-            xsdt = @ptrFromInt(hhdm_base + rsdp.xsdt_addr);
-            xsdt_found = true;
-        }
-    }
-
-    if (!xsdt_found) unreachable;
-
-    arch.initCpus(xsdt) catch unreachable;
-    mem.phys.initCpu() catch unreachable;
-
-    mem.virt.init(hhdm_limit) catch unreachable;
-
-    main() catch |err| {
-        std.log.err("main returned with an error: {}", .{err});
-    };
-
-    ark.cpu.halt();
+    try drivers.serial.init(boot.xsdt);
 }
 
-fn main() !void {
-    try drivers.serial.init(xsdt);
+pub fn stage1() !void {
+    std.log.info("current version is {s}", .{build_options.version});
 
-    log.info("kernel v{s}", .{build_options.version});
-
-    try arch.init(xsdt);
+    try arch.init(boot.xsdt);
     try scheduler.init();
 
-    try drivers.pcie.init(xsdt);
+    // TODO implement SMP on rpi4
+    if (build_options.platform != .rpi4) try arch.bootCpus();
+}
 
-    try arch.bootCpus();
+pub fn stage2() !void {
+    try drivers.pcie.init(boot.xsdt);
 
     const process = try scheduler.Process.create(.{
         .execution_level = .kernel,
@@ -115,7 +65,7 @@ fn main() !void {
 fn _task0(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     asm volatile ("brk #0");
 
-    log.info("hello from task 0 !", .{});
+    std.log.info("hello from task 0 !", .{});
 
     // terminate task.
     asm volatile ("svc #1");
@@ -125,7 +75,7 @@ fn _task0(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     asm volatile ("brk #1");
 
-    log.info("hello from task 1 !", .{});
+    std.log.info("hello from task 1 !", .{});
 
     // terminate task.
     asm volatile ("svc #1");
@@ -136,7 +86,7 @@ fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
     _ = return_address;
-    std.log.err("kernel panic: {s}", .{message});
+    std.log.err("panic: {s}", .{message});
 
     // NOTE little panic handler
     const cpu = arch.Cpu.get();

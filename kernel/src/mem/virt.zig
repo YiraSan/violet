@@ -23,8 +23,8 @@ const impl = switch (builtin.cpu.arch) {
 
 pub var kernel_space: Space = undefined;
 
-pub fn init(hhdm_limit: u64) !void {
-    try impl.init(hhdm_limit);
+pub fn init() !void {
+    try impl.init();
 }
 
 pub fn flush(virt_addr: u64, page_level: mem.PageLevel) void {

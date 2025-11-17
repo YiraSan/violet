@@ -33,18 +33,6 @@ pub const SpinLock = struct {
     }
 };
 
-pub const MemoryMap = struct {
-    map: [*]uefi.tables.MemoryDescriptor,
-    map_size: usize,
-    descriptor_size: usize,
-
-    pub fn get(self: MemoryMap, index: usize) ?*uefi.tables.MemoryDescriptor {
-        const i = self.descriptor_size * index;
-        if (i > (self.map_size - self.descriptor_size)) return null;
-        return @ptrFromInt(@intFromPtr(self.map) + i);
-    }
-};
-
 pub const Arc = struct {
     reference_counter: std.atomic.Value(u64) = .init(0),
 

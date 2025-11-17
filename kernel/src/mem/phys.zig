@@ -6,6 +6,7 @@ const std = @import("std");
 
 const kernel = @import("root");
 
+const boot = kernel.boot;
 const mem = kernel.mem;
 const PageLevel = mem.PageLevel;
 
@@ -225,7 +226,7 @@ fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) AllocE
                 if (is_page_available(page_index, level)) {
                     mark_page(page_index, level);
                     pages[i] = page_index << level.shift();
-                    if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.hhdm_base + pages[i]))[0..level.size()], 0);
+                    if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.boot.hhdm_base + pages[i]))[0..level.size()], 0);
                     i += 1;
                     if (i == pages.len) return;
                 }
@@ -253,7 +254,7 @@ fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) AllocE
                     if (is_page_available(page_index, level)) {
                         mark_page(page_index, level);
                         pages[i] = page_index << level.shift();
-                        if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.hhdm_base + pages[i]))[0..level.size()], 0);
+                        if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.boot.hhdm_base + pages[i]))[0..level.size()], 0);
                         i += 1;
                         if (i == pages.len) return;
                     }
@@ -298,7 +299,7 @@ fn alloc_noncontiguous_pages(pages: []u64, level: PageLevel, reset: bool) AllocE
                         if (is_page_available(page_index, level)) {
                             mark_page(page_index, level);
                             pages[i] = page_index << level.shift();
-                            if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.hhdm_base + pages[i]))[0..level.size()], 0);
+                            if (reset) @memset(@as([*]u8, @ptrFromInt(kernel.boot.hhdm_base + pages[i]))[0..level.size()], 0);
                             i += 1;
                             if (i == pages.len) return;
                         }
@@ -374,34 +375,30 @@ pub fn freeContiguousPages(address: u64, length: usize, level: PageLevel) void {
     }
 }
 
-pub fn init(
-    memory_map: mem.MemoryMap,
-    hhdm_base: u64,
-) !void {
-    var i: usize = 0;
+pub fn init() !void {
+    var memory_iter = boot.UsableMemoryIterator{};
+
     var is_base_set = false;
-    while (memory_map.get(i)) |entry| : (i += 1) {
-        if (entry.type == .conventional_memory) {
-            const original_base = entry.physical_start;
-            entry.physical_start = std.mem.alignForward(u64, entry.physical_start, PageLevel.l4K.size());
-            var entry_length = entry.number_of_pages << PageLevel.l4K.shift();
-            entry_length = entry_length - (entry.physical_start - original_base);
-            entry_length = std.mem.alignBackward(u64, entry_length, PageLevel.l4K.size());
-            entry.number_of_pages = entry_length >> PageLevel.l4K.shift();
+    while (memory_iter.next()) |entry| {
+        const original_base = entry.physical_base.*;
+        entry.physical_base.* = std.mem.alignForward(u64, entry.physical_base.*, PageLevel.l4K.size());
+        var entry_length = entry.number_of_pages.* << PageLevel.l4K.shift();
+        entry_length = entry_length - (entry.physical_base.* - original_base);
+        entry_length = std.mem.alignBackward(u64, entry_length, PageLevel.l4K.size());
+        entry.number_of_pages.* = entry_length >> PageLevel.l4K.shift();
 
-            if (is_base_set) {
-                if (entry.physical_start < base_usable_address) {
-                    base_usable_address = entry.physical_start;
-                }
-            } else {
-                is_base_set = true;
-                base_usable_address = entry.physical_start;
+        if (is_base_set) {
+            if (entry.physical_base.* < base_usable_address) {
+                base_usable_address = entry.physical_base.*;
             }
+        } else {
+            is_base_set = true;
+            base_usable_address = entry.physical_base.*;
+        }
 
-            const end_addr = entry.physical_start + entry_length;
-            if (end_addr > max_usable_address) {
-                max_usable_address = end_addr;
-            }
+        const end_addr = entry.physical_base.* + entry_length;
+        if (end_addr > max_usable_address) {
+            max_usable_address = end_addr;
         }
     }
 
@@ -427,10 +424,10 @@ pub fn init(
         PageLevel.l4K.size(),
     ) >> PageLevel.l4K.shift();
 
-    i = 0;
-    while (memory_map.get(i)) |entry| : (i += 1) {
-        if (entry.type == .conventional_memory and entry.number_of_pages > maps_page_count) {
-            var alloc_base = hhdm_base + entry.physical_start;
+    memory_iter = .{};
+    while (memory_iter.next()) |entry| {
+        if (entry.number_of_pages.* > maps_page_count) {
+            var alloc_base = boot.hhdm_base + entry.physical_base.*;
 
             bitmap_4k.ptr = @ptrFromInt(std.mem.alignForward(usize, alloc_base, @alignOf(u128)));
             bitmap_4k.len = len_4k;
@@ -468,27 +465,25 @@ pub fn init(
 
             alloc_base = @intFromPtr(counter_1g_4k.ptr) + counter_1g_4k.len * @sizeOf(u32);
 
-            const new_base = std.mem.alignForward(usize, alloc_base - hhdm_base, PageLevel.l4K.size());
-            if (entry.physical_start == base_usable_address) {
+            const new_base = std.mem.alignForward(usize, alloc_base - boot.hhdm_base, PageLevel.l4K.size());
+            if (entry.physical_base.* == base_usable_address) {
                 base_usable_address = new_base;
             }
-            entry.number_of_pages = entry.number_of_pages - (std.mem.alignForward(u64, (new_base - entry.physical_start), 0x1000) >> PageLevel.l4K.shift());
-            entry.physical_start = new_base;
+            entry.number_of_pages.* -= (std.mem.alignForward(u64, (new_base - entry.physical_base.*), 0x1000) >> PageLevel.l4K.shift());
+            entry.physical_base.* = new_base;
 
             break;
         }
     }
 
     // configure bitmap_4k
-    i = 0;
-    while (memory_map.get(i)) |entry| : (i += 1) {
-        if (entry.type == .conventional_memory) {
-            var page_index = entry.physical_start >> PageLevel.l4K.shift();
-            const page_end = page_index + entry.number_of_pages;
-            while (page_index < page_end) : (page_index += 1) {
-                write_bitmap(page_index, .l4K, false);
-                total_pages += 1;
-            }
+    memory_iter = .{};
+    while (memory_iter.next()) |entry| {
+        var page_index = entry.physical_base.* >> PageLevel.l4K.shift();
+        const page_end = page_index + entry.number_of_pages.*;
+        while (page_index < page_end) : (page_index += 1) {
+            write_bitmap(page_index, .l4K, false);
+            total_pages += 1;
         }
     }
 
@@ -561,7 +556,7 @@ pub fn allocPage(level: PageLevel, reset: bool) AllocError!u64 {
 }
 
 pub fn freePage(address: u64, level: PageLevel) void {
-    @memset(@as([*]u8, @ptrFromInt(kernel.hhdm_base + address))[0..level.size()], 0);
+    @memset(@as([*]u8, @ptrFromInt(kernel.boot.hhdm_base + address))[0..level.size()], 0);
 
     const cpu = kernel.arch.Cpu.get();
 

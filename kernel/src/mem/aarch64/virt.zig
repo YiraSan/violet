@@ -18,17 +18,18 @@ const virt = mem.virt;
 
 // --- mem/virt.zig --- //
 
-pub fn init(hhdm_limit: u64) !void {
+pub fn init() !void {
     virt.kernel_space = .init(.higher, switch (builtin.cpu.arch) {
         .aarch64 => ark.armv8.registers.loadTtbr1El1(),
         else => unreachable,
     });
 
-    virt.kernel_space.last_addr = hhdm_limit;
+    virt.kernel_space.last_addr = kernel.boot.hhdm_limit;
 }
 
 pub fn applySpace(space: *virt.Space) void {
     ark.armv8.registers.storeTtbr0El1(space.l0_table);
+    // TODO check if TTBR0 is enabled, if not, enable it in TCR
     flushAll();
 }
 
@@ -102,7 +103,7 @@ pub fn mapPage(
 
     switch (page_level) {
         .l1G => {
-            const p: *Entry = @ptrFromInt(kernel.hhdm_base + tp + l1 * 8);
+            const p: *Entry = @ptrFromInt(kernel.boot.hhdm_base + tp + l1 * 8);
             if (p.valid and p.not_a_block) {
                 free_table_recursive(p.descriptor.table.next_level_table << 12, 1);
             }
@@ -117,7 +118,7 @@ pub fn mapPage(
         },
         .l2M => {
             tp = ensure_table(tp, l1);
-            const p: *Entry = @ptrFromInt(kernel.hhdm_base + tp + l2 * 8);
+            const p: *Entry = @ptrFromInt(kernel.boot.hhdm_base + tp + l2 * 8);
             if (p.valid and p.not_a_block) {
                 free_table_recursive(p.descriptor.table.next_level_table << 12, 2);
             }
@@ -133,7 +134,7 @@ pub fn mapPage(
         .l4K => {
             tp = ensure_table(tp, l1);
             tp = ensure_table(tp, l2);
-            const p: *Entry = @ptrFromInt(kernel.hhdm_base + tp + l3 * 8);
+            const p: *Entry = @ptrFromInt(kernel.boot.hhdm_base + tp + l3 * 8);
 
             p.* = .{
                 .valid = true,
@@ -161,12 +162,12 @@ pub fn getPage(
     const l2_index = (virt_addr >> 21) & 0x1FF;
     const l3_index = (virt_addr >> 12) & 0x1FF;
 
-    const l0_entry: *Entry = @ptrFromInt(kernel.hhdm_base + space.l0_table + l0_index * 8);
+    const l0_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + space.l0_table + l0_index * 8);
     if (!l0_entry.valid) return null;
     if (!l0_entry.not_a_block) unreachable; // should not be possible since 512 GiB allocation is not permitted.
 
     const l1_table: u64 = l0_entry.descriptor.table.next_level_table << 12;
-    const l1_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l1_table + l1_index * 8);
+    const l1_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l1_table + l1_index * 8);
     if (!l1_entry.valid) return null;
 
     // 1 GiB page
@@ -177,7 +178,7 @@ pub fn getPage(
     }
 
     const l2_table: u64 = l1_entry.descriptor.table.next_level_table << 12;
-    const l2_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l2_table + l2_index * 8);
+    const l2_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l2_table + l2_index * 8);
     if (!l2_entry.valid) return null;
 
     // 2 MiB page
@@ -189,7 +190,7 @@ pub fn getPage(
 
     // 4 KiB page
     const l3_table: u64 = l2_entry.descriptor.table.next_level_table << 12;
-    const l3_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
+    const l3_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return null;
 
     var mapping = getPageMapping(l3_entry);
@@ -208,12 +209,12 @@ pub fn setPage(
     const l2_index = (virt_addr >> 21) & 0x1FF;
     const l3_index = (virt_addr >> 12) & 0x1FF;
 
-    const l0_entry: *Entry = @ptrFromInt(kernel.hhdm_base + space.l0_table + l0_index * 8);
+    const l0_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + space.l0_table + l0_index * 8);
     if (!l0_entry.valid) return null;
     if (!l0_entry.not_a_block) unreachable; // should not be possible since 512 GiB allocation is not permitted.
 
     const l1_table: u64 = l0_entry.descriptor.table.next_level_table << 12;
-    const l1_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l1_table + l1_index * 8);
+    const l1_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l1_table + l1_index * 8);
     if (!l1_entry.valid) return null;
 
     // 1 GiB page
@@ -223,7 +224,7 @@ pub fn setPage(
     }
 
     const l2_table: u64 = l1_entry.descriptor.table.next_level_table << 12;
-    const l2_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l2_table + l2_index * 8);
+    const l2_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l2_table + l2_index * 8);
     if (!l2_entry.valid) return null;
 
     // 2 MiB page
@@ -234,7 +235,7 @@ pub fn setPage(
 
     // 4 KiB page
     const l3_table: u64 = l2_entry.descriptor.table.next_level_table << 12;
-    const l3_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
+    const l3_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return null;
     setPageMapping(l3_entry, mapping);
 }
@@ -248,12 +249,12 @@ pub fn unmapPage(
     const l2_index = (virt_addr >> 21) & 0x1FF;
     const l3_index = (virt_addr >> 12) & 0x1FF;
 
-    const l0_entry: *Entry = @ptrFromInt(kernel.hhdm_base + space.l0_table + l0_index * 8);
+    const l0_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + space.l0_table + l0_index * 8);
     if (!l0_entry.valid) return;
     if (!l0_entry.not_a_block) unreachable; // should not be possible since 512 GiB allocation is not permitted.
 
     const l1_table: u64 = l0_entry.descriptor.table.next_level_table << 12;
-    const l1_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l1_table + l1_index * 8);
+    const l1_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l1_table + l1_index * 8);
     if (!l1_entry.valid) return;
 
     // 1 GiB page
@@ -263,7 +264,7 @@ pub fn unmapPage(
     }
 
     const l2_table: u64 = l1_entry.descriptor.table.next_level_table << 12;
-    const l2_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l2_table + l2_index * 8);
+    const l2_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l2_table + l2_index * 8);
     if (!l2_entry.valid) return;
 
     // 2 MiB page
@@ -274,7 +275,7 @@ pub fn unmapPage(
 
     // 4 KiB page
     const l3_table: u64 = l2_entry.descriptor.table.next_level_table << 12;
-    const l3_entry: *Entry = @ptrFromInt(kernel.hhdm_base + l3_table + l3_index * 8);
+    const l3_entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return;
     l3_entry.valid = false;
 }
@@ -302,7 +303,7 @@ pub fn getPageMapping(entry: *Entry) virt.Mapping {
 }
 
 fn get_table(table_addr: u64, index: u64) ?u64 {
-    const entry: *Entry = @ptrFromInt(kernel.hhdm_base + table_addr + index * 8);
+    const entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + table_addr + index * 8);
 
     if (entry.valid and entry.not_a_block) {
         return entry.descriptor.table.next_level_table << 12;
@@ -312,7 +313,7 @@ fn get_table(table_addr: u64, index: u64) ?u64 {
 }
 
 fn ensure_table(table_addr: u64, index: u64) u64 {
-    const entry: *Entry = @ptrFromInt(kernel.hhdm_base + table_addr + index * 8);
+    const entry: *Entry = @ptrFromInt(kernel.boot.hhdm_base + table_addr + index * 8);
 
     if (entry.valid and entry.not_a_block) {
         return entry.descriptor.table.next_level_table << 12;
@@ -335,7 +336,7 @@ fn ensure_table(table_addr: u64, index: u64) u64 {
 
 pub fn free_table_recursive(table_addr: u64, level: u8) void {
     for (0..512) |i| {
-        const e_ptr: *Entry = @ptrFromInt(kernel.hhdm_base + table_addr + i * 8);
+        const e_ptr: *Entry = @ptrFromInt(kernel.boot.hhdm_base + table_addr + i * 8);
         const entry = e_ptr.*;
 
         if (!entry.valid) continue;

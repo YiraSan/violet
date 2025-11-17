@@ -912,6 +912,44 @@ pub const armv8 = struct {
                 );
             }
         };
+        
+        /// AArch64 Memory Model Feature Register 0 (EL1)
+        pub const ID_AA64MMFR0_EL1 = packed struct(u64) {
+            /// Physical Address range supported.
+            pa_range: enum(u4) { // bit 0-3
+                @"32bits_4gb" = 0b0000,
+                @"36bits_64gb" = 0b0001,
+                @"40bits_1tb" = 0b0010,
+                @"42bits_4tb" = 0b0011,
+                @"44bits_16tb" = 0b0100,
+                @"48bits_256tb" = 0b0101,
+                /// When FEAT_LPA is implemented
+                @"52bits_4pb" = 0b0110,
+                /// When FEAT_D128 is implemented
+                @"56bits_64pb" = 0b0111,
+            },
+            _todo1: u4,
+            _todo2: u4,
+            _todo3: u4,
+            _todo4: u4,
+            _todo5: u4,
+            _todo6: u4,
+            _todo7: u4,
+            _todo8: u4,
+            _todo9: u4,
+            _todo10: u4,
+            _todo11: u4,
+            _todo12: u4,
+            _todo13: u4,
+            _todo14: u4,
+            _todo15: u4,
+
+            pub fn load() @This() {
+                return asm volatile ("mrs %[output], id_aa64mmfr0_el1"
+                    : [output] "=r" (-> @This()),
+                );
+            }
+        };
 
         pub const ID_AA64MMFR1_EL1 = packed struct(u64) {
             /// Hardware updates to Access flag and Dirty state in translation tables.
@@ -1463,9 +1501,9 @@ pub const armv8 = struct {
         /// Architectural Feature Trap Register (EL2)
         pub const CPTR_EL2 = packed struct(u64) {
             _reserved0: u8 = 0b11111111, // bit 0-7
-            /// Traps execution at EL2, EL1, and EL0 of SVE instructions and instructions that directly access the ZCR_EL2 or ZCR_EL1 System registers to EL2, 
+            /// Traps execution at EL2, EL1, and EL0 of SVE instructions and instructions that directly access the ZCR_EL2 or ZCR_EL1 System registers to EL2,
             /// when EL2 is enabled in the current Security state.
-            /// 
+            ///
             /// When FEAT_SVE is implemented
             tz: bool = true, // bit 8
             _reserved1: u1 = 0b1, // bit 9
@@ -1478,7 +1516,7 @@ pub const armv8 = struct {
             tta: bool = true, // bit 20
             _reserved5: u9 = 0, // bit 21-29
             /// Trap Activity Monitor access.
-            /// 
+            ///
             /// When FEAT_AMUv1 is implemented
             tam: bool = false, // bit 30
             tcpac: bool = false, // bit 31
