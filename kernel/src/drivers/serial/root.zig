@@ -25,7 +25,6 @@ const Impl = union(enum) {
 
 pub fn init(xsdt: *acpi.Xsdt) !void {
     var xsdt_iter = xsdt.iter();
-
     while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .spcr => |spcr| {
@@ -86,6 +85,62 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                 }
 
                 return;
+            },
+            else => {},
+        }
+    }
+
+    xsdt_iter = xsdt.iter();
+    while (xsdt_iter.next()) |xsdt_entry| {
+        switch (xsdt_entry) {
+            .dbg2 => |dbg2| {
+                var dbg2_iter = dbg2.iter();
+                while (dbg2_iter.next()) |device| {
+                    if (device.port_type == .serial) {
+                        if (device.port_subtype.serial == .pl011) {
+                            const addrs = device.base_address_registers();
+                            const sizes = device.address_sizes();
+                            const page_count = std.mem.alignForward(u32, sizes[0], 0x1000) >> mem.PageLevel.l4K.shift();
+
+                            const reservation = virt.kernel_space.reserve(page_count);
+
+                            reservation.map(addrs[0].address, .{
+                                .writable = true,
+                                .device = true,
+                            }, .no_hint);
+
+                            const addr = reservation.address();
+
+                            var pl011: Pl011 = .{ .peripheral_base = addr };
+
+                            pl011.disableUart();
+                            pl011.maskAllInterrupts();
+
+                            // 115200
+                            pl011.setIntegerBaudRate(26);
+                            pl011.setFractionalBaudRate(3);
+
+                            pl011.writeLineControl(.{
+                                .brk = false,
+                                .par = false,
+                                .eps = false,
+                                .stp2 = false,
+                                .fen = true,
+                                .wlen = .u8,
+                                .sps = false,
+                            });
+
+                            pl011.enableReceive();
+                            pl011.enableTransmit();
+
+                            pl011.enableUart();
+
+                            impl = .{ .pl011 = pl011 };
+
+                            return;
+                        }
+                    }
+                }
             },
             else => {},
         }
