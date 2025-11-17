@@ -63,7 +63,7 @@ pub fn acknowledgeTimer(arch_data: *anyopaque) void {
     } else if (cpu.current_task) |task| {
         kernel.drivers.Timer.arm(getTimerPrecision(task));
     } else {
-        idle();
+        idle(arch_data);
     }
 }
 
@@ -77,7 +77,7 @@ pub fn terminateProcess(arch_data: *anyopaque) void {
     }
 
     if (!switchTask(arch_data)) {
-        idle();
+        idle(arch_data);
     }
 }
 
@@ -91,20 +91,19 @@ pub fn terminateTask(arch_data: *anyopaque) void {
     }
 
     if (!switchTask(arch_data)) {
-        idle();
+        idle(arch_data);
     }
 }
 
-fn idle() void {
-    if (true) { // "true" corresponds to "no event to wait"
+fn idle(arch_data: *anyopaque) void {
+    const cpu = kernel.arch.Cpu.get();
+
+    kernel.arch.Context.load(cpu.idle_task, arch_data);
+
+    if (true) { // "true" means: no event to wait for
         kernel.drivers.Timer.arm(._100ms);
     } else {
-        kernel.drivers.Timer.arm(._5ms);
-    }
-
-    kernel.arch.unmaskInterrupts();
-    while (true) {
-        ark.cpu.halt();
+        // ...
     }
 }
 
@@ -135,7 +134,7 @@ fn switchTask(arch_data: *anyopaque) bool {
         }
     }
 
-    if (cpu_task_ready) {
+    if (cpu_task_ready and ntask == null) {
         ntask = cpu.queue_tasks.pop();
     }
 
@@ -157,6 +156,8 @@ fn switchTask(arch_data: *anyopaque) bool {
         cpu.cycle_done += 1;
         kernel.arch.Context.load(task, arch_data);
         kernel.drivers.Timer.arm(getTimerPrecision(task));
+        log.debug("cpu{} switched on task {}:{}", .{ cpu.mpidr, cpu.current_task.?.process.id, cpu.current_task.?.id });
+
         return true;
     } else {
         cpu.cycle_done = 0;
@@ -165,8 +166,12 @@ fn switchTask(arch_data: *anyopaque) bool {
     return false;
 }
 
+var idle_process: *Process = undefined;
+
 pub fn init() !void {
     try process.init();
+
+    idle_process = try Process.create(.{ .execution_level = .kernel }); // .kernel is used to avoid creating a virtual space.
 
     try initCpu();
 }
@@ -176,4 +181,10 @@ pub fn initCpu() !void {
     cpu.current_task = null;
     cpu.queue_tasks = .{};
     cpu.cycle_done = 0;
+    cpu.idle_task = try idle_process.createTask(.{ .entry_point = &idle_task });
+}
+
+fn idle_task(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+    // NOTE in the future this will be used to check for event that doesn't create interruption.
+    ark.cpu.halt();
 }
