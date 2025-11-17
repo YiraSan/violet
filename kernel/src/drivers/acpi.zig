@@ -29,6 +29,7 @@ const SPCR_SIGNATURE = "SPCR";
 const DBG2_SIGNATURE = "DBG2";
 const IORT_SIGNATURE = "IORT";
 const BGRT_SIGNATURE = "BGRT";
+const CSRT_SIGNATURE = "CSRT";
 
 pub const Gas = extern struct {
     address_space_id: u8 align(1),
@@ -95,7 +96,7 @@ pub const XsdtIterator = struct {
         if (offset >= self.xsdt.header.length) return null;
 
         const sdt_header_ptrptr: **SdtHeader = @ptrFromInt(@intFromPtr(self.xsdt) + offset);
-        const sdt_header: *SdtHeader = @ptrFromInt(kernel.hhdm_base + @intFromPtr(sdt_header_ptrptr.*));
+        const sdt_header: *SdtHeader = @ptrFromInt(kernel.boot.hhdm_base + @intFromPtr(sdt_header_ptrptr.*));
 
         const signature = std.mem.toBytes(sdt_header.signature);
         self.index += 1;
@@ -118,6 +119,10 @@ pub const XsdtIterator = struct {
             return Entry{ .iort = @ptrCast(sdt_header) };
         } else if (std.mem.eql(u8, BGRT_SIGNATURE, &signature)) {
             return Entry{ .bgrt = @ptrCast(sdt_header) };
+        } else if (std.mem.eql(u8, CSRT_SIGNATURE, &signature)) {
+            return Entry{ .csrt = @ptrCast(sdt_header) };
+        } else if (std.mem.eql(u8, SSDT_SIGNATURE, &signature)) {
+            return Entry{ .ssdt = @ptrCast(sdt_header) };
         }
 
         std.log.err("ACPI signature to do: {s}", .{signature});
@@ -135,6 +140,8 @@ pub const Entry = union(enum) {
     dbg2: *Dbg2,
     iort: *Iort,
     bgrt: *Bgrt,
+    csrt: *Csrt,
+    ssdt: *Ssdt,
     // TODO.
 };
 
@@ -581,6 +588,16 @@ pub const Iort = extern struct {
 };
 
 pub const Bgrt = extern struct {
+    header: SdtHeader align(1),
+    // TODO
+};
+
+pub const Csrt = extern struct {
+    header: SdtHeader align(1),
+    // TODO
+};
+
+pub const Ssdt = extern struct {
     header: SdtHeader align(1),
     // TODO
 };
