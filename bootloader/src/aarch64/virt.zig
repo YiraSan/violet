@@ -1,6 +1,7 @@
 // --- dependencies --- //
 
 const std = @import("std");
+const build_options = @import("build_options");
 
 const uefi = std.os.uefi;
 const utf16 = std.unicode.utf8ToUtf16LeStringLiteral;
@@ -38,15 +39,21 @@ fn configureMAIR() void {
     mair_el1.store();
 
     asm volatile (
+        \\ dsb ish
         \\ dsb sy
         \\ isb
     );
 }
 
 fn configureTCR() void {
+    const mmfr0 = ark.armv8.registers.ID_AA64MMFR0_EL1.load();
+    const currentEL = asm volatile ("mrs %[out], currentEL"
+        : [out] "=r" (-> u64),
+    );
+
     var tcr_el1 = ark.armv8.registers.TCR_EL1{
         .t0sz = 16,
-        .epd0 = false,
+        .epd0 = if (currentEL == 0b0100) false else true,
         .irgn0 = .wb_ra_wa,
         .orgn0 = .wb_ra_wa,
         .sh0 = .inner_shareable,
@@ -61,7 +68,19 @@ fn configureTCR() void {
         .sh1 = .inner_shareable,
         .tg1 = .@"4kb",
 
-        .ips = .@"48bits_256tb",
+        .ips = switch (build_options.platform) {
+            .rpi4 => .@"40bits_1tb",
+            else => switch (mmfr0.pa_range) {
+                .@"32bits_4gb" => .@"32bits_4gb",
+                .@"36bits_64gb" => .@"36bits_64gb",
+                .@"40bits_1tb" => .@"40bits_1tb",
+                .@"42bits_4tb" => .@"42bits_4tb",
+                .@"44bits_16tb" => .@"44bits_16tb",
+                .@"48bits_256tb" => .@"48bits_256tb",
+                .@"52bits_4pb" => .@"52bits_4pb",
+                .@"56bits_64pb" => .@"56bits_64pb",
+            }
+        },
 
         .tbi0 = .used,
         .tbi1 = .used,
@@ -78,6 +97,7 @@ fn configureTCR() void {
 
     asm volatile (
         \\ dsb sy
+        \\ dsb ish
         \\ isb
     );
 }

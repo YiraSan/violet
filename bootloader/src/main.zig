@@ -20,7 +20,7 @@ pub fn main() uefi.Status {
     if (uefi.system_table.con_out) |con_out| {
         _ = con_out.reset(true);
         _ = con_out.clearScreen();
-        _ = con_out.outputString(utf16("violetOS-bootloader v" ++ build_options.version ++ "\r\n"));
+        _ = con_out.outputString(utf16("violetOS-bootloader " ++ build_options.version ++ "\r\n"));
     }
 
     const boot_services: *uefi.tables.BootServices = uefi.system_table.boot_services orelse {
@@ -206,23 +206,11 @@ pub fn main() uefi.Status {
                 .{ .writable = true },
                 entry.number_of_pages,
             ),
-            .memory_mapped_io,
-            .memory_mapped_io_port_space,
-            => virt.mapContiguous(
-                virt.table,
-                va,
-                entry.physical_start,
-                .l4K,
-                .{ .writable = true, .device = true },
-                entry.number_of_pages,
-            ),
             else => {},
         }
     }
 
     virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
-
-    memory_map = mmap.get(boot_services);
 
     switch (builtin.cpu.arch) {
         .aarch64 => {
@@ -247,7 +235,11 @@ pub fn main() uefi.Status {
         else => unreachable,
     }
 
-    _ = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
+    status = .aborted;
+    while (status != .success) {
+        memory_map = mmap.get(boot_services);
+        status = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
+    }
 
     switch (builtin.cpu.arch) {
         .aarch64 => {
@@ -255,15 +247,18 @@ pub fn main() uefi.Status {
             reg.fpen = .el0_el1;
             reg.store();
 
-            var sctlr = ark.armv8.registers.SCTLR_EL1{
-                .M = true,
-                .A = false, // TODO fix kernel alignment
-            };
+            var sctlr = ark.armv8.registers.SCTLR_EL1.load();
+            sctlr.M = true;
+            sctlr.A = false;
+            sctlr.C = true;
+            sctlr.I = .no_effect;
             sctlr.store();
-
+ 
             const currentEL = asm volatile ("mrs %[out], currentEL"
                 : [out] "=r" (-> u64),
             );
+
+            flushAllDCache(); // NUCLEAR METHOD
 
             if (currentEL == 0b1100) { // EL3
                 unreachable;
@@ -283,14 +278,14 @@ pub fn main() uefi.Status {
 
                 var spsr = ark.armv8.registers.SPSR_EL2{
                     .mode = .el1t,
-                    .d = true,
-                    .a = true,
+                    .d = false,
+                    .a = false,
                     .i = true,
                     .f = true,
                 };
                 spsr.store();
 
-                var cptr = ark.armv8.registers.CPTR_EL2 {
+                var cptr = ark.armv8.registers.CPTR_EL2{
                     .tz = false,
                     .tfp = false,
                     .tta = false,
@@ -300,12 +295,12 @@ pub fn main() uefi.Status {
                 cptr.store();
 
                 asm volatile (
-                    \\ mov x0, %[mmap_phys_ptr]
-                    \\ mov x1, %[mmap_size]
-                    \\ mov x2, %[mmap_desc_size]
+                    \\ mov x0, %[hhdm_base]
+                    \\ mov x1, %[hhdm_limit]
                     \\
-                    \\ mov x3, %[hhdm_base]
-                    \\ mov x4, %[hhdm_limit]
+                    \\ mov x2, %[mmap_phys_ptr]
+                    \\ mov x3, %[mmap_size]
+                    \\ mov x4, %[mmap_desc_size]
                     \\
                     \\ mov x5, %[config_tables_phys_ptr]
                     \\ mov x6, %[config_tables_size]
@@ -324,12 +319,12 @@ pub fn main() uefi.Status {
                     \\
                     \\ eret
                     :
-                    : [mmap_phys_ptr] "r" (memory_map.map),
+                    : [hhdm_base] "r" (hhdm_base),
+                      [hhdm_limit] "r" (hhdm_limit),
+
+                      [mmap_phys_ptr] "r" (memory_map.map),
                       [mmap_size] "r" (memory_map.map_size),
                       [mmap_desc_size] "r" (memory_map.descriptor_size),
-
-                      [hhdm_base] "r" (hhdm_base),
-                      [hhdm_limit] "r" (hhdm_limit),
 
                       [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
                       [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
@@ -341,12 +336,17 @@ pub fn main() uefi.Status {
                 );
             } else if (currentEL == 0b0100) { // EL1
                 asm volatile (
-                    \\ mov x0, %[mmap_phys_ptr]
-                    \\ mov x1, %[mmap_size]
-                    \\ mov x2, %[mmap_desc_size]
+                    \\ msr daifset, #0b0011
+                    \\ isb
+                );
+
+                asm volatile (
+                    \\ mov x0, %[hhdm_base]
+                    \\ mov x1, %[hhdm_limit]
                     \\
-                    \\ mov x3, %[hhdm_base]
-                    \\ mov x4, %[hhdm_limit]
+                    \\ mov x2, %[mmap_phys_ptr]
+                    \\ mov x3, %[mmap_size]
+                    \\ mov x4, %[mmap_desc_size]
                     \\
                     \\ mov x5, %[config_tables_phys_ptr]
                     \\ mov x6, %[config_tables_size]
@@ -370,12 +370,12 @@ pub fn main() uefi.Status {
                     \\
                     \\ br %[kernel_entry]
                     :
-                    : [mmap_phys_ptr] "r" (memory_map.map),
+                    : [hhdm_base] "r" (hhdm_base),
+                      [hhdm_limit] "r" (hhdm_limit),
+
+                      [mmap_phys_ptr] "r" (memory_map.map),
                       [mmap_size] "r" (memory_map.map_size),
                       [mmap_desc_size] "r" (memory_map.descriptor_size),
-
-                      [hhdm_base] "r" (hhdm_base),
-                      [hhdm_limit] "r" (hhdm_limit),
 
                       [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
                       [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
@@ -395,4 +395,43 @@ pub fn main() uefi.Status {
     }
 
     ark.cpu.halt();
+}
+
+fn flushAllDCache() callconv(.{ .aarch64_aapcs = .{} }) void {
+    asm volatile (
+        \\  dmb sy
+        \\  mrs x0, clidr_el1
+        \\  and w3, w0, #0x07000000
+        \\  lsr w3, w3, #23
+        \\  cbz w3, 2f
+        \\  mov w10, #0
+        \\1:
+        \\  add w2, w10, w10, lsr #1
+        \\  msr csselr_el1, x2
+        \\  isb
+        \\  mrs x1, ccsidr_el1
+        \\  and x2, x1, #7
+        \\  add x2, x2, #4
+        \\  ubfx x4, x1, #3, #10
+        \\  clz w5, w4
+        \\  ubfx x6, x1, #13, #15
+        \\3:
+        \\  mov w7, w4
+        \\4:
+        \\  lsl w8, w7, w5
+        \\  orr w8, w8, w10, lsl #1
+        \\  lsl w9, w6, w2
+        \\  orr w8, w8, w9
+        \\  dc cisw, x8
+        \\  subs w7, w7, #1
+        \\  b.ge 4b
+        \\  subs w6, w6, #1
+        \\  b.ge 3b
+        \\  add w10, w10, #2
+        \\  cmp w3, w10
+        \\  b.gt 1b
+        \\2:
+        \\  dsb sy
+        \\  isb
+        ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "memory");
 }
