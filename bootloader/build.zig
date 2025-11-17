@@ -3,6 +3,7 @@ const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
     const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
+    const use_uefi = b.option(bool, "use_uefi", "Kernel entry point will be configured for UEFI.") orelse true;
     const optimize = b.standardOptimizeOption(.{});
 
     const target_query = std.Target.Query{
@@ -25,6 +26,7 @@ pub fn build(b: *std.Build) !void {
 
     const build_options = b.addOptions();
     build_options.addOption(basalt.Platform, "platform", platform);
+    build_options.addOption(bool, "use_uefi", use_uefi);
     build_options.addOption([]const u8, "version", try getVersion(b));
     mod.addImport("build_options", build_options.createModule());
 

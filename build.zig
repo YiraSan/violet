@@ -4,12 +4,14 @@ const basalt = @import("basalt");
 
 pub fn build(b: *std.Build) !void {
     const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
+    const use_uefi = b.option(bool, "use_uefi", "The image will be configured for UEFI.") orelse true;
     const optimize = b.standardOptimizeOption(.{});
 
     // dependencies
 
     const kernel_dep = b.dependency("kernel", .{
         .platform = platform,
+        .use_uefi = use_uefi,
         .optimize = optimize,
     });
     const kernel_exe = kernel_dep.artifact("kernel");
@@ -17,6 +19,7 @@ pub fn build(b: *std.Build) !void {
 
     const bootloader_dep = b.dependency("bootloader", .{
         .platform = platform,
+        .use_uefi = use_uefi,
         .optimize = optimize,
     });
     const bootloader_exe = bootloader_dep.artifact("bootloader");
