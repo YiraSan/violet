@@ -6,12 +6,22 @@ pub fn build(b: *std.Build) !void {
     const use_uefi = b.option(bool, "use_uefi", "Kernel entry point will be configured for UEFI.") orelse true;
     const optimize = b.standardOptimizeOption(.{});
 
+    var features_sub = std.Target.Cpu.Feature.Set.empty;
+    switch (platform.arch()) {
+        .aarch64 => {
+            features_sub.addFeature(@intFromEnum(std.Target.aarch64.Feature.neon));
+            features_sub.addFeature(@intFromEnum(std.Target.aarch64.Feature.fp_armv8));
+        },
+        else => {},
+    }
+
     const target_query = std.Target.Query{
         .cpu_arch = platform.arch(),
         .os_tag = .freestanding,
         .abi = .none,
         .ofmt = .elf,
         .cpu_model = .{ .explicit = platform.cpuModel() },
+        .cpu_features_sub = features_sub,
     };
 
     const target = b.resolveTargetQuery(target_query);
