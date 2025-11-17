@@ -1,7 +1,7 @@
 # violetOS
 
 > [!IMPORTANT]
-> This project is in early development. APIs and behavior may change significantly until v1.0.0.
+> As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time. Until we reach 1.0.0, version increments will follow development [milestones](https://github.com/YiraSan/violet/milestones) rather than strict backward compatibility.
 
 violetOS is a radically reimagined operating system that breaks with UNIX and POSIX conventions at its core. Every part of the system — from concurrency and isolation to memory layout and dependency handling — is designed to be transparent, predictable, and consistent, with performance emerging naturally from clever design and thoughtful architecture. violetOS does not imitate the past; it aims to define what an OS can be in a lightweight, robust, and unapologetically forward-looking way. 
 
@@ -20,13 +20,6 @@ zig build -Dplatform={IDENFITFIER}
 ```
 
 Default to `aarch64_qemu` (see [Platform matrix](#platform_matrix) for more details).
-
-## Roadmap
-
-> [!NOTE]
-> I'm rewriting a lot of stuff and changing the kernel-architecture. So, don't be afraid of the current state of the code (pretty crappy...)
-
-...
 
 ## Platform matrix
 
