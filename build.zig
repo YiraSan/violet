@@ -113,8 +113,7 @@ pub fn build(b: *std.Build) !void {
             "-device", "virtio-blk-pci,drive=disk0",
             "-drive", "file=zig-out/disk.img,if=none,id=disk0,format=raw",
 
-            "-device", "ramfb",
-            // "-device", "virtio-gpu-pci", // TODO first support ramfb then virtio-gpu-pci
+            "-device", "virtio-gpu-pci",
 
             "-serial", "stdio",
             "-boot", "d",
