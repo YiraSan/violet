@@ -13,18 +13,6 @@ const virt = mem.virt;
 
 const acpi = kernel.drivers.acpi;
 
-// --- MMIO accessors --- //
-
-fn mmio_read(comptime T: type, address: usize) T {
-    const ptr = @as(*volatile T, @ptrFromInt(address));
-    return @atomicLoad(T, ptr, .acquire);
-}
-
-fn mmio_write(comptime T: type, address: usize, data: T) void {
-    const ptr = @as(*volatile T, @ptrFromInt(address));
-    @atomicStore(T, ptr, data, .release);
-}
-
 // --- aarch64/gic_v2.zig --- //
 
 const MAX_IRQS = 1020;
@@ -52,8 +40,6 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
                             }, .no_hint);
 
                             gicd_base = reservation.address();
-
-                            virt.flush(gicd_base, .l4K);
 
                             break :xsdt_loop;
                         },
@@ -85,14 +71,24 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 const GICD_CTLR = 0x000;
 
 pub fn enableDistributor() void {
-    mmio_write(u32, gicd_base + GICD_CTLR, 1);
+    const ctlr: *volatile u32 = @ptrFromInt(gicd_base + GICD_CTLR);
+
+    ctlr.* = 1;
+
+    asm volatile ("dsb sy" ::: "memory");
 
     // Wait until the distributor is enabled
-    while ((mmio_read(u32, gicd_base + GICD_CTLR) & 0x1) == 0) {}
+    while ((ctlr.* & 0x1) == 0) {}
+
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 pub fn disableDistributor() void {
-    mmio_write(u32, gicd_base + GICD_CTLR, 0);
+    const ctlr: *volatile u32 = @ptrFromInt(gicd_base + GICD_CTLR);
+
+    ctlr.* = 0;
+
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 const GICD_TYPER = 0x004;
@@ -105,7 +101,11 @@ pub fn enableIRQ(irq: u32) void {
     const offset = (irq / 32) * 4;
     const bit = irq % 32;
 
-    mmio_write(u32, gicd_base + GICD_ISENABLERn + offset, (@as(u32, 1) << @intCast(bit)));
+    const isenabler: *volatile u32 = @ptrFromInt(gicd_base + GICD_ISENABLERn + offset);
+
+    isenabler.* = @as(u32, 1) << @intCast(bit);
+
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 const GICD_ICENABLERn = 0x180;
@@ -114,19 +114,27 @@ pub fn disableIRQ(irq: u32) void {
     const offset = (irq / 32) * 4;
     const bit = irq % 32;
 
-    mmio_write(u32, gicd_base + GICD_ICENABLERn + offset, (@as(u32, 1) << @intCast(bit)));
+    const icenabler: *volatile u32 = @ptrFromInt(gicd_base + GICD_ICENABLERn + offset);
+
+    icenabler.* = @as(u32, 1) << @intCast(bit);
+
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 /// Because cpu wakeups probably uses SGIs.
 fn disableAllExceptSGI() void {
     var irq: usize = 16;
     while (irq < MAX_IRQS) : (irq += 32) {
-        const offset_bytes = (irq / 32) * 4;
+        const offset = (irq / 32) * 4;
         var mask: u32 = 0xffffffff;
         if (irq == 16) mask = 0xffff0000;
 
-        mmio_write(u32, gicd_base + GICD_ICENABLERn + offset_bytes, mask);
+        const icenabler: *volatile u32 = @ptrFromInt(gicd_base + GICD_ICENABLERn + offset);
+
+        icenabler.* = mask;
     }
+
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 const GICD_ISPENDRn = 0x200;
@@ -182,8 +190,6 @@ pub fn initCpu(xsdt: *acpi.Xsdt) !void {
 
                                 gicc_base[interface_number] = reservation.address();
 
-                                virt.flush(gicc_base[interface_number], .l4K);
-
                                 break :xsdt_loop;
                             }
                         },
@@ -197,22 +203,25 @@ pub fn initCpu(xsdt: *acpi.Xsdt) !void {
         }
     }
 
+    const gicc_base_addr = gicc_base[interface_number];
+
     // Set minimum interrupt priority (lower value = higher priority)
-    mmio_write(u32, gicc_base[interface_number] + GICC_PMR, 0xF0);
+    @as(*volatile u32, @ptrFromInt(gicc_base_addr + GICC_PMR)).* = 0xf0;
+
+    asm volatile ("dsb sy" ::: "memory");
 
     // Enable Group 0 and Group 1 interrupts
-    mmio_write(u32, gicc_base[interface_number] + GICC_CTLR, 1 | (1 << 1));
+    @as(*volatile u32, @ptrFromInt(gicc_base_addr + GICC_CTLR)).* = 1;
 
-    // Wait for the CPU interface to become active
-    while ((mmio_read(u32, gicc_base[interface_number] + GICC_CTLR) & 0x3) != 0x3) {}
+    asm volatile ("dsb sy" ::: "memory");
 }
 
 pub fn acknowledge() u32 {
     const interface_number = getInterfaceNumber();
-    return mmio_read(u32, gicc_base[interface_number] + GICC_IAR);
+    return @as(*volatile u32, @ptrFromInt(gicc_base[interface_number] + GICC_IAR)).*;
 }
 
 pub fn endOfInterrupt(irq_id: u32) void {
     const interface_number = getInterfaceNumber();
-    mmio_write(u32, gicc_base[interface_number] + GICC_EOIR, irq_id);
+    @as(*volatile u32, @ptrFromInt(gicc_base[interface_number] + GICC_EOIR)).* = irq_id;
 }
