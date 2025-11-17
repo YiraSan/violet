@@ -72,8 +72,9 @@ pub fn cpuOn(mpidr: u64, entry: u64, context_id: u64) Error!void {
     })))));
 
     switch (result) {
-        // TODO is considering already-on and on-pending not an error safe ?
-        .success, .already_on, .on_pending => {},
+        .success => {},
+        .already_on => return Error.AlreadyOn,
+        .on_pending => return Error.OnPending,
         .denied => return Error.Denied,
         .disabled => return Error.Disabled,
         .internal_failure => return Error.InternalFailure,
