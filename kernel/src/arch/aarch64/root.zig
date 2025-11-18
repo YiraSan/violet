@@ -3,6 +3,7 @@
 const std = @import("std");
 const ark = @import("ark");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const basalt = @import("basalt");
 
 // --- imports --- //
@@ -78,6 +79,8 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
 var cpus: [256]?*Cpu align(@alignOf(u128)) = undefined;
 
 pub fn bootCpus() !void {
+    if (build_options.platform == .rpi4) return;
+
     const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
 
     const l0_page = try kernel.mem.phys.allocPage(.l4K, false);

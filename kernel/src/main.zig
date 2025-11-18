@@ -44,8 +44,7 @@ pub fn stage1() !void {
     try syscall.init();
     try mem.heap.init();
     try scheduler.init();
-    try arch.bootCpus();
-}
+    }
 
 pub fn stage2() !void {
     const process = try scheduler.Process.create(.{
