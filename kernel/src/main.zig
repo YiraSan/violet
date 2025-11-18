@@ -44,20 +44,23 @@ pub fn stage1() !void {
     try syscall.init();
     try mem.heap.init();
     try scheduler.init();
+
+    // scheduler tests
+    if (builtin.mode == .Debug) {
+        const process = try scheduler.Process.create(.{
+            .execution_level = .kernel,
+        });
+
+        const task0 = try process.createTask(.{ .entry_point = @intFromPtr(&_task0) });
+        const task1 = try process.createTask(.{ .entry_point = @intFromPtr(&_task1) });
+
+        try scheduler.register(task0);
+        try scheduler.register(task1);
     }
+}
 
 pub fn stage2() !void {
-    const process = try scheduler.Process.create(.{
-        .execution_level = .kernel,
-    });
-
-    const task0 = try process.createTask(.{ .entry_point = @intFromPtr(&_task0) });
-    const task1 = try process.createTask(.{ .entry_point = @intFromPtr(&_task1) });
-
-    try scheduler.register(task0);
-    try scheduler.register(task1);
-
-    // try drivers.pcie.init(boot.xsdt);
+    try arch.bootCpus();
 
     // jump to scheduler
     arch.unmaskInterrupts();
