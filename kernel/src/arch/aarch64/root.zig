@@ -27,11 +27,11 @@ comptime {
 
 // --- aarch64/root.zig --- //
 
-pub fn initCpus(xsdt: *acpi.Xsdt) !void {
+pub fn initCpus() !void {
     for (&cpus) |*cpu| cpu.* = null;
 
     var gicc_found = false;
-    var xsdt_iter = xsdt.iter();
+    var xsdt_iter = kernel.boot.xsdt.iter();
     while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .madt => |madt| {
@@ -67,12 +67,12 @@ pub fn initCpus(xsdt: *acpi.Xsdt) !void {
     );
 }
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
+pub fn init() !void {
     try exception.init();
-    try gic.init(xsdt);
-    try generic_timer.init(xsdt);
+    try gic.init();
+    try generic_timer.init();
     try generic_timer.enableCpu();
-    try psci.init(xsdt);
+    try psci.init();
 }
 
 /// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
@@ -273,7 +273,7 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
 
     mem.phys.initCpu() catch unreachable;
     exception.init() catch {};
-    gic.initCpu(kernel.boot.xsdt) catch unreachable;
+    gic.initCpu() catch unreachable;
     generic_timer.enableCpu() catch unreachable;
     kernel.scheduler.initCpu() catch unreachable;
 

@@ -25,12 +25,12 @@ comptime {
 
 // -- arch/root.zig -- //
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
-    try impl.init(xsdt);
+pub fn init() !void {
+    try impl.init();
 }
 
-pub fn initCpus(xsdt: *acpi.Xsdt) !void {
-    try impl.initCpus(xsdt);
+pub fn initCpus() !void {
+    try impl.initCpus();
 }
 
 pub fn bootCpus() !void {

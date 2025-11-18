@@ -17,8 +17,8 @@ const Timer = kernel.drivers.Timer;
 
 var gsiv: u32 = undefined;
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
-    var xsdt_iter = xsdt.iter();
+pub fn init() !void {
+    var xsdt_iter = kernel.boot.xsdt.iter();
     xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .gtdt => |gtdt| {

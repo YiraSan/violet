@@ -23,8 +23,8 @@ const GICC_SIZE = 0x1000;
 var gicd_base: u64 = undefined;
 var gicc_base: [128]u64 = undefined;
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
-    var xsdt_iter = xsdt.iter();
+pub fn init() !void {
+    var xsdt_iter = kernel.boot.xsdt.iter();
     xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .madt => |madt| {
@@ -169,10 +169,10 @@ fn getInterfaceNumber() u32 {
     return interface_number;
 }
 
-pub fn initCpu(xsdt: *acpi.Xsdt) !void {
+pub fn initCpu() !void {
     const interface_number = getInterfaceNumber();
 
-    var xsdt_iter = xsdt.iter();
+    var xsdt_iter = kernel.boot.xsdt.iter();
     xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .madt => |madt| {

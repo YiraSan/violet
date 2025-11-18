@@ -25,8 +25,8 @@ const PsciFunction = enum(u32) {
 
 var way: enum { hvc, smc } = undefined;
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
-    var xsdt_iter = xsdt.iter();
+pub fn init() !void {
+    var xsdt_iter = kernel.boot.xsdt.iter();
     while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .fadt => |fadt| {

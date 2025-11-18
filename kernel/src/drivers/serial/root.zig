@@ -23,8 +23,8 @@ const Impl = union(enum) {
     pl011: Pl011,
 };
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
-    var xsdt_iter = xsdt.iter();
+pub fn init() !void {
+    var xsdt_iter = kernel.boot.xsdt.iter();
     while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .spcr => |spcr| {
@@ -90,7 +90,7 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
         }
     }
 
-    xsdt_iter = xsdt.iter();
+    xsdt_iter = kernel.boot.xsdt.iter();
     while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .dbg2 => |dbg2| {

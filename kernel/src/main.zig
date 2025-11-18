@@ -29,18 +29,18 @@ comptime {
 pub fn stage0() !void {
     try mem.phys.init();
 
-    try arch.initCpus(boot.xsdt);
+    try arch.initCpus();
     try mem.phys.initCpu();
 
     try mem.virt.init();
 
-    try drivers.serial.init(boot.xsdt);
+    try drivers.serial.init();
 }
 
 pub fn stage1() !void {
     std.log.info("current version is {s}", .{build_options.version});
 
-    try arch.init(boot.xsdt);
+    try arch.init();
     try syscall.init();
     try mem.heap.init();
     try scheduler.init();
