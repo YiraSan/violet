@@ -1,6 +1,7 @@
 // --- dependencies --- //
 
 const ark = @import("ark");
+const basalt = @import("basalt");
 const build_options = @import("build_options");
 const builtin = @import("builtin");
 const std = @import("std");
@@ -12,6 +13,7 @@ pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
+pub const syscall = @import("syscall/root.zig");
 
 comptime {
     _ = arch;
@@ -19,6 +21,7 @@ comptime {
     _ = drivers;
     _ = mem;
     _ = scheduler;
+    _ = syscall;
 }
 
 // --- main.zig --- //
@@ -38,59 +41,56 @@ pub fn stage1() !void {
     std.log.info("current version is {s}", .{build_options.version});
 
     try arch.init(boot.xsdt);
+    try syscall.init();
+    try mem.heap.init();
     try scheduler.init();
-
-    // TODO implement SMP on rpi4
-    if (build_options.platform != .rpi4) try arch.bootCpus();
+    try arch.bootCpus();
 }
 
 pub fn stage2() !void {
-    try drivers.pcie.init(boot.xsdt);
-
     const process = try scheduler.Process.create(.{
         .execution_level = .kernel,
     });
 
-    const task0 = try process.createTask(.{ .entry_point = &_task0 });
-    const task1 = try process.createTask(.{ .entry_point = &_task1 });
+    const task0 = try process.createTask(.{ .entry_point = @intFromPtr(&_task0) });
+    const task1 = try process.createTask(.{ .entry_point = @intFromPtr(&_task1) });
 
-    try scheduler.registerTask(task0);
-    try scheduler.registerTask(task1);
+    try scheduler.register(task0);
+    try scheduler.register(task1);
+
+    // try drivers.pcie.init(boot.xsdt);
 
     // jump to scheduler
     arch.unmaskInterrupts();
     drivers.Timer.arm(._5ms);
 }
 
-fn _task0(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn _task0(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
     asm volatile ("brk #0");
 
     std.log.info("hello from task 0 !", .{});
 
-    // terminate task.
-    asm volatile ("svc #1");
-    unreachable;
+    basalt.task.terminate();
 }
 
-fn _task1(_: *[0x1000]u8) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn _task1(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
     asm volatile ("brk #1");
 
     std.log.info("hello from task 1 !", .{});
 
-    // terminate task.
-    asm volatile ("svc #1");
-    unreachable;
+    basalt.task.terminate();
 }
 
 // --- zig std features --- //
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
     _ = return_address;
+
     std.log.err("panic: {s}", .{message});
 
     // NOTE little panic handler
-    const cpu = arch.Cpu.get();
-    if (cpu.current_task) |task| {
+    const local_scheduler = scheduler.Local.get();
+    if (local_scheduler.current_task) |task| {
         task.terminate();
         drivers.Timer.arm(._1ms);
     }

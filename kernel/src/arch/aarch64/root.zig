@@ -132,8 +132,6 @@ pub fn bootCpus() !void {
         if (cpu_nptr) |cpu| {
             if (cpu.mpidr == Cpu.id()) continue;
 
-            std.log.debug("booting cpu{}", .{cpu.mpidr});
-
             cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
             cpu_setup_data.setup_done = 0;
 
@@ -316,14 +314,7 @@ pub const Cpu = struct {
 
     user_space: *mem.virt.Space,
 
-    // -- scheduler -- //
-
-    current_task: ?*kernel.scheduler.Task,
-
-    idle_task: *kernel.scheduler.Task,
-
-    queue_tasks: mem.Queue(*kernel.scheduler.Task),
-    cycle_done: usize,
+    scheduler_local: kernel.scheduler.Local,
 
     pub fn id() usize {
         switch (builtin.cpu.arch) {
@@ -348,6 +339,8 @@ pub const Cpu = struct {
         if (@sizeOf(Cpu) > mem.PageLevel.l2M.size()) @compileError("Cpu should be less than or equal to 2 MiB.");
     }
 };
+
+pub const ExceptionContext = exception.ExceptionContext;
 
 pub const Context = struct {
     // operational registers
@@ -405,10 +398,8 @@ pub const Context = struct {
 
     pub fn store(
         task: *kernel.scheduler.Task,
-        arch_data: *anyopaque,
+        exception_ctx: *kernel.arch.ExceptionContext,
     ) void {
-        const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
-
         task.arch_context.lr = exception_ctx.lr;
         task.arch_context.xregs = exception_ctx.xregs;
         task.arch_context.vregs = exception_ctx.vregs;
@@ -424,10 +415,8 @@ pub const Context = struct {
 
     pub fn load(
         task: *kernel.scheduler.Task,
-        arch_data: *anyopaque,
+        exception_ctx: *kernel.arch.ExceptionContext,
     ) void {
-        const exception_ctx: *exception.ExceptionContext = @ptrCast(@alignCast(arch_data));
-
         exception_ctx.lr = task.arch_context.lr;
         exception_ctx.xregs = task.arch_context.xregs;
         exception_ctx.vregs = task.arch_context.vregs;

@@ -15,6 +15,7 @@ const impl = switch (builtin.cpu.arch) {
 };
 
 pub const Context = impl.Context;
+pub const ExceptionContext = impl.ExceptionContext;
 
 pub const Cpu = impl.Cpu;
 

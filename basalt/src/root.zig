@@ -1,9 +1,65 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+pub const syscall = struct {
+    pub const MAX_CODE: usize = @intFromEnum(Code.task__yield) + 1;
+
+    pub const Code = enum(u64) {
+        null = 0,
+
+        process__terminate = 11,
+
+        task__terminate = 20,
+        task__yield = 21,
+    };
+
+    pub const Error = error{
+        UnknownSyscall,
+    };
+
+    pub const ErrorCode = enum(u16) {
+        unknown_syscall = 0,
+
+        pub fn toError(self: @This()) Error!void {
+            switch (self) {
+                .unknown_syscall => return Error.UnknownSyscall,
+            }
+        }
+    };
+
+    pub const Result = packed struct(u64) {
+        is_success: bool, // bit 0
+        _reserved0: u15 = 0, // bit 1-15
+        code: u16 = 0, // bit 16-31
+        _reserved1: u32 = 0, // bit 32-63
+    };
+
+    pub fn syscall0(code: Code) !void {
+        switch (builtin.cpu.arch) {
+            .aarch64 => {
+                const result = asm volatile (
+                    \\ svc #0
+                    : [output] "={x0}" (-> Result),
+                    : [code] "{x8}" (code),
+                    : "memory", "cc"
+                );
+
+                if (!result.is_success) {
+                    const error_code: ErrorCode = @enumFromInt(result.code);
+                    try error_code.toError();
+                }
+            },
+            else => unreachable,
+        }
+    }
+};
 
 pub const timer = struct {
     /// Precision = min(Precision, Quantum).
     /// Under heavy load precision is reduced but not if the task has realtime priority.
     pub const Precision = enum(u8) {
+        disabled = 0xff,
+
         /// 10ms
         low = 0x0,
         /// 5ms
@@ -19,6 +75,7 @@ pub const timer = struct {
                 .moderate => ._5ms,
                 .high => ._1ms,
                 .realtime => ._0_5ms,
+                else => unreachable,
             };
         }
     };
@@ -44,7 +101,13 @@ pub const timer = struct {
     };
 };
 
-pub const process = struct {
+pub const task = struct {
+    pub const call_conv: std.builtin.CallingConvention = switch (builtin.cpu.arch) {
+        .aarch64 => .{ .aarch64_aapcs = .{} },
+        .riscv64 => .{ .riscv64_lp64 = .{} },
+        else => unreachable,
+    };
+
     /// If conditions are met, the system will give the quantum asked by the process,
     /// if the system' charge increase the quantum will probably be reduced, the minimum being 1ms.
     pub const Quantum = enum(u8) {
@@ -89,9 +152,40 @@ pub const process = struct {
         realtime = 0x3,
     };
 
+    /// Yield current task and switch to another task.
+    pub fn yield() void {
+        _ = syscall.syscall0(.task__yield) catch {};
+    }
+
+    /// Terminate current task.
+    pub fn terminate() noreturn {
+        _ = syscall.syscall0(.task__terminate) catch {};
+        unreachable;
+    }
+
+    pub const Task = struct {
+        pub const SpawnConfig = struct {};
+
+        pub fn spawn(comptime f: anytype, config: SpawnConfig) @This() {
+            _ = f;
+            _ = config;
+            unreachable;
+        }
+    };
+};
+
+pub const event = struct {};
+
+pub const process = struct {
+    /// Terminate current process.
+    pub fn terminate() noreturn {
+        _ = syscall.syscall0(.process__terminate) catch {};
+        unreachable;
+    }
+
     pub const ExecutionLevel = enum(u8) {
         user = 0x0,
-        system = 0x1,
+        system = 0x10,
         kernel = 0xff,
     };
 
@@ -99,10 +193,6 @@ pub const process = struct {
     pub const Event = struct {
         pub const Policy = enum { one_wake, all_wake };
     };
-
-    /// Yield the current task and switch to another task of the same process.
-    /// Useful since yielding avoids an entire context switching.
-    pub fn yield() void {} // TODO
 
     pub const Future = struct {
         pub const Error = error{ Timeout, GeneralFailure, TooMuchTask };
@@ -137,21 +227,4 @@ pub const process = struct {
             unreachable;
         }
     };
-
-    pub const Task = struct {
-        pub const SpawnConfig = struct {};
-
-        pub fn spawn(comptime f: anytype, config: SpawnConfig) @This() {
-            _ = f;
-            _ = config;
-            unreachable;
-        }
-    };
-};
-
-pub const heap = struct {
-    // TODO implements at least:
-    // - DebugAllocator
-    // - SmpAllocator
-    // - ArenaAllocator
 };

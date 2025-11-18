@@ -1,6 +1,7 @@
 // --- dependencies --- //
 
 const std = @import("std");
+const basalt = @import("basalt");
 const ark = @import("ark");
 
 const log = std.log.scoped(.exception);
@@ -11,6 +12,7 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 const phys = mem.phys;
+const syscall = kernel.syscall;
 
 // --- aarch64/exception.zig --- //
 
@@ -37,14 +39,20 @@ pub const ExceptionContext = extern struct {
     lr: u64,
     _: u64 = 0, // padding
     xregs: [30]u64,
-    vregs: [32]u128,
+    vregs: [32]u128, // TODO optimize that
     fpcr: u64,
     fpsr: u64,
     elr_el1: u64,
     spsr_el1: ark.armv8.registers.SPSR_EL1,
-};
 
-var first_entry = true;
+    pub inline fn setArg(self: *@This(), index: usize, value: u64) void {
+        self.xregs[index] = value;
+    }
+
+    pub inline fn getArg(self: *@This(), index: usize) u64 {
+        return self.xregs[index];
+    }
+};
 
 // TODO dissociate sync_handler depending on EL0/EL1t/EL1h later
 fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
@@ -54,6 +62,24 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
     const cpu = kernel.arch.Cpu.get();
 
     switch (esr_el1.ec) {
+        .svc_inst_aarch64 => {
+            const code = ctx.xregs[8];
+
+            if (code < syscall.registers.len) {
+                const syscall_fn_val = syscall.registers[code];
+                if (syscall_fn_val != 0) {
+                    const syscall_fn: syscall.SyscallFn = @ptrFromInt(syscall_fn_val);
+                    return syscall_fn(ctx);
+                }
+            }
+
+            ctx.xregs[0] = @bitCast(basalt.syscall.Result{
+                .is_success = false,
+                .code = @intFromEnum(basalt.syscall.ErrorCode.unknown_syscall),
+            });
+
+            return;
+        },
         .data_abort_lower_el, .data_abort_same_el => {
             const far = ark.armv8.registers.loadFarEl1();
             const iss = esr_el1.iss.data_abort;
@@ -99,24 +125,6 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
 
             ctx.elr_el1 += 4;
             return;
-        },
-        .svc_inst_aarch64 => {
-            const iss = esr_el1.iss.svc_hvc;
-
-            switch (iss.imm16) {
-                0 => {
-                    _ = kernel.scheduler.terminateProcess(ctx);
-                    return;
-                },
-                1 => {
-                    _ = kernel.scheduler.terminateTask(ctx);
-                    return;
-                },
-                else => {
-                    // TODO specify how are returned syscall errors.
-                    @panic("bad syscall id");
-                },
-            }
         },
         else => {
             log.err("UNEXPECTED SYNCHRONOUS EXCEPTION from {s}", .{@tagName(ctx.spsr_el1.mode)});

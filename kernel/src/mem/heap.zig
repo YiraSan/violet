@@ -11,6 +11,10 @@ const virt = mem.virt;
 
 // --- mem/heap.zig --- //
 
+pub fn init() !void {
+    // TODO configure heap syscalls.
+}
+
 pub fn alloc(space: *virt.Space, level: mem.PageLevel, count: u16, flags: mem.virt.MemoryFlags, stack: bool) u64 {
     if (level != .l4K) unreachable;
 

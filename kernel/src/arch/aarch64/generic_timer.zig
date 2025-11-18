@@ -45,9 +45,11 @@ pub fn disableCpu() !void {
     gic.disableIRQ(gsiv);
 }
 
-fn callback(ctx: *exception.ExceptionContext) void {
+fn callback(ctx: *kernel.arch.ExceptionContext) void {
     disable();
-    kernel.scheduler.acknowledgeTimer(ctx);
+    if (Timer.callback) |timer_callback| {
+        timer_callback(ctx);
+    }
 }
 
 /// Reads the current system counter frequency from CNTFRQ_EL0.

@@ -167,7 +167,7 @@ pub const Process = struct {
 
     // -- Task -- //
 
-    pub fn createTask(self: *@This(), options: TaskOptions) !*Task {
+    pub fn createTask(self: *@This(), options: Task.Options) !*Task {
         if (self.state.load(.seq_cst) == .terminated) return Error.ProcessTerminated;
 
         self.tasks_lock.lock();
@@ -190,7 +190,7 @@ pub const Process = struct {
         task.quantum_elapsed_ns = 0;
 
         task.arch_context = .init();
-        task.arch_context.setExecutionAddress(@intFromPtr(options.entry_point));
+        task.arch_context.setExecutionAddress(options.entry_point);
         task.base_stack_pointer = mem.heap.alloc(
             task.process.getVirtualSpace(),
             .l4K,
@@ -241,13 +241,6 @@ pub const Process = struct {
     }
 };
 
-pub const TaskOptions = struct {
-    entry_point: Task.EntryPoint,
-    priority: basalt.process.Priority = .normal,
-    quantum: basalt.process.Quantum = .moderate,
-    timer_precision: basalt.timer.Precision = .moderate,
-};
-
 pub const TaskState = enum(u8) {
     terminated = 0x0,
     running = 0x1,
@@ -255,12 +248,12 @@ pub const TaskState = enum(u8) {
 };
 
 pub const Task = struct {
-    pub const EntryPoint = *const fn (
-        process_data_context: *[0x1000]u8,
-    ) callconv(switch (builtin.cpu.arch) {
-        .aarch64 => .{ .aarch64_aapcs = .{} },
-        else => unreachable,
-    }) noreturn;
+    pub const Options = struct {
+        entry_point: u64,
+        priority: basalt.task.Priority = .normal,
+        quantum: basalt.task.Quantum = .moderate,
+        timer_precision: basalt.timer.Precision = .moderate,
+    };
 
     pub const STACK_PAGE_COUNT = 16;
     pub const STACK_SIZE = STACK_PAGE_COUNT * mem.PageLevel.l4K.size();
@@ -270,9 +263,9 @@ pub const Task = struct {
     process: *Process,
 
     state: std.atomic.Value(TaskState),
-    priority: basalt.process.Priority,
+    priority: basalt.task.Priority,
     timer_precision: basalt.timer.Precision,
-    quantum: basalt.process.Quantum,
+    quantum: basalt.task.Quantum,
     quantum_elapsed_ns: usize,
 
     arch_context: kernel.arch.Context,
