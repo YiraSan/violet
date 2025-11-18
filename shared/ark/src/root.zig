@@ -912,7 +912,7 @@ pub const armv8 = struct {
                 );
             }
         };
-        
+
         /// AArch64 Memory Model Feature Register 0 (EL1)
         pub const ID_AA64MMFR0_EL1 = packed struct(u64) {
             /// Physical Address range supported.
