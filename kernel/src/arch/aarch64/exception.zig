@@ -69,6 +69,12 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
                 const syscall_fn_val = syscall.registers[code];
                 if (syscall_fn_val != 0) {
                     const syscall_fn: syscall.SyscallFn = @ptrFromInt(syscall_fn_val);
+
+                    ctx.xregs[0] = @bitCast(basalt.syscall.Result{
+                        .is_success = false,
+                        .code = @intFromEnum(basalt.syscall.ErrorCode.no_result),
+                    });
+
                     return syscall_fn(ctx);
                 }
             }

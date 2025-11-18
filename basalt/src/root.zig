@@ -15,14 +15,17 @@ pub const syscall = struct {
 
     pub const Error = error{
         UnknownSyscall,
+        NoResult,
     };
 
     pub const ErrorCode = enum(u16) {
         unknown_syscall = 0,
+        no_result = 1,
 
         pub fn toError(self: @This()) Error!void {
             switch (self) {
                 .unknown_syscall => return Error.UnknownSyscall,
+                .no_result => return Error.NoResult,
             }
         }
     };
