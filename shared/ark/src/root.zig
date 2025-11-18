@@ -1330,6 +1330,10 @@ pub const armv8 = struct {
                         synchronous_external_abort = 0b010000,
 
                         // TODO ...
+
+                        alignment_fault = 0b100001,
+
+                        // TODO ...
                     },
                     /// Write not Read. Indicates whether a synchronous abort was caused by an instruction writing to a memory location, or by an instruction reading from a memory location.
                     wnr: enum(u1) { // bit 6
