@@ -79,7 +79,7 @@ fn configureTCR() void {
                 .@"48bits_256tb" => .@"48bits_256tb",
                 .@"52bits_4pb" => .@"52bits_4pb",
                 .@"56bits_64pb" => .@"56bits_64pb",
-            }
+            },
         },
 
         .tbi0 = .used,

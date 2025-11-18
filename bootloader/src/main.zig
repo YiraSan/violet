@@ -253,7 +253,7 @@ pub fn main() uefi.Status {
             sctlr.C = true;
             sctlr.I = .no_effect;
             sctlr.store();
- 
+
             const currentEL = asm volatile ("mrs %[out], currentEL"
                 : [out] "=r" (-> u64),
             );
