@@ -8,6 +8,8 @@ const ark = @import("ark");
 
 // --- imports --- //
 
+const kernel = @import("root");
+
 pub const phys = @import("phys.zig");
 pub const virt = @import("virt.zig");
 pub const heap = @import("heap.zig");
@@ -18,11 +20,16 @@ pub const PageLevel = ark.mem.PageLevel;
 
 pub const SpinLock = struct {
     value: std.atomic.Value(u32) = .init(0),
+    lock_core: std.atomic.Value(usize) = .init(std.math.maxInt(usize)),
 
     pub fn lock(self: *SpinLock) void {
+        const cpu_id = kernel.arch.Cpu.id();
         while (true) {
             if (self.value.cmpxchgWeak(0, 1, .seq_cst, .seq_cst) == null) {
+                self.lock_core.store(cpu_id, .seq_cst);
                 break;
+            } else if (self.lock_core.load(.seq_cst) == cpu_id) {
+                break; // TODO investigating on the possibility that it creates issues.
             }
             std.atomic.spinLoopHint();
         }
