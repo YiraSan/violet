@@ -184,8 +184,8 @@ pub const process = struct {
     }
 
     pub const ExecutionLevel = enum(u8) {
-        user = 0x0,
-        system = 0x10,
+        user = 0x00,
+        system = 0x9f,
         kernel = 0xff,
     };
 
