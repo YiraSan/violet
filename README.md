@@ -39,3 +39,7 @@ Default to `aarch64_qemu` (see [Platform matrix](#platform_matrix) for more deta
 <sup>4</sup> Raspberry Pi 4B, 400 and 4 CM.
 
 <sup>5</sup> Raspberry Pi 3B, 3B+ and 3 CM.
+
+## License
+
+Distributed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). See [LICENSE](LICENSE) and [NOTICE](NOTICE) for more information.
