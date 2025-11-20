@@ -29,21 +29,23 @@ const Process = scheduler.Process;
 // --- scheduler/task.zig --- //
 
 const Task = @This();
+const TaskMap = mem.SlotMap(Task);
+pub const ID = TaskMap.Key;
 
 pub const STACK_PAGE_COUNT = 16; // 64 KiB
 pub const STACK_SIZE = STACK_PAGE_COUNT * mem.PageLevel.l4K.size();
 
-var tasks_map: mem.SlotMap(Task) = .{};
+var tasks_map: TaskMap = .{};
 var tasks_map_lock: mem.RwLock = .{};
 
-id: mem.SlotKey,
+id: ID,
 process: *scheduler.Process,
 
 timer_precision: basalt.timer.Precision,
 
 reference_counter: std.atomic.Value(usize),
 state: std.atomic.Value(State),
-waiting_future: ?mem.SlotKey,
+waiting_future: ?void,
 
 priority: basalt.task.Priority,
 quantum: basalt.task.Quantum,
@@ -52,10 +54,7 @@ quantum_elapsed_ns: usize,
 context: kernel.arch.TaskContext,
 stack_pointer: u64,
 
-previous_task: ?mem.SlotKey,
-next_task: ?mem.SlotKey,
-
-pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
+pub fn create(process_id: Process.ID, options: Options) !ID {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
     errdefer process.release();
 
@@ -98,13 +97,6 @@ pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
 
     _ = task_ptr.process.task_count.fetchAdd(1, .acq_rel);
 
-    // const last_task_key = task.process.last_task;
-    // if (last_task_key) |key| {
-    //     const last_task = task.acquire()
-    // }
-
-    task_ptr.process.last_task = slot_key;
-
     return slot_key;
 }
 
@@ -130,7 +122,7 @@ fn destroy(self: *Task) void {
     mem.heap.free(self.process.virtualSpace(), self.stack_pointer);
 }
 
-pub fn acquire(id: mem.SlotKey) ?*Task {
+pub fn acquire(id: ID) ?*Task {
     const lock_flags = tasks_map_lock.lockShared();
     defer tasks_map_lock.unlockShared(lock_flags);
 

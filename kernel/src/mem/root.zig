@@ -145,29 +145,19 @@ pub fn Queue(comptime T: type) type {
     };
 }
 
-pub const SlotKey = packed struct(u64) {
-    pub const NULL = SlotKey{
-        .index = 0,
-        .instance = 0,
-        .generation = 0,
-    };
-
-    index: u24,
-    /// Ignored by unsharded maps.
-    instance: u8,
-    generation: u32,
-
-    pub fn isNull(self: @This()) bool {
-        return self.generation == 0;
-    }
-};
-
-pub const SlotMapError = error{
-    ReachedMaxSlot,
-};
-
 pub fn SlotMap(comptime T: type) type {
     return struct {
+        const Error = error{
+            ReachedMaxSlot,
+        };
+
+        pub const Key = packed struct(u64) {
+            index: u24,
+            /// Ignored by unsharded maps.
+            instance: u8,
+            generation: u32,
+        };
+
         const Slot = struct {
             generation: u32,
             content: union {
@@ -190,7 +180,7 @@ pub fn SlotMap(comptime T: type) type {
         /// Grow memory by 128 objects at a time.
         fn grow(self: *@This()) !void {
             if ((self.capacity + 1) >= std.math.maxInt(u24)) {
-                return SlotMapError.ReachedMaxSlot;
+                return Error.ReachedMaxSlot;
             }
 
             const old_page_count = pageCount(self.capacity);
@@ -218,7 +208,7 @@ pub fn SlotMap(comptime T: type) type {
             }
         }
 
-        pub fn insert(self: *@This(), value: T) !SlotKey {
+        pub fn insert(self: *@This(), value: T) !Key {
             var slot_index: u24 = 0;
             var generation: u32 = 0;
 
@@ -239,7 +229,7 @@ pub fn SlotMap(comptime T: type) type {
                 slot_index = @intCast(self.len);
                 self.len += 1;
 
-                generation = 1;
+                generation = 0;
 
                 self.items[slot_index] = .{
                     .generation = generation,
@@ -256,7 +246,7 @@ pub fn SlotMap(comptime T: type) type {
             };
         }
 
-        pub fn remove(self: *@This(), key: SlotKey) void {
+        pub fn remove(self: *@This(), key: Key) void {
             if (key.index >= self.len) return;
 
             const slot = &self.items[key.index];
@@ -264,7 +254,6 @@ pub fn SlotMap(comptime T: type) type {
             if (slot.generation != key.generation) return;
 
             slot.generation +%= 1;
-            if (slot.generation == 0) slot.generation = 1;
 
             slot.content = .{ .next_free = self.free_head };
             self.free_head = key.index;
@@ -272,7 +261,7 @@ pub fn SlotMap(comptime T: type) type {
             self.count -= 1;
         }
 
-        pub fn get(self: *@This(), key: SlotKey) ?*T {
+        pub fn get(self: *@This(), key: Key) ?*T {
             if (key.index >= self.len) return null;
 
             const slot = &self.items[key.index];

@@ -24,28 +24,30 @@ const kernel = @import("root");
 const mem = kernel.mem;
 const scheduler = kernel.scheduler;
 
+const Task = scheduler.Task;
+
 // --- scheduler/process.zig --- //
 
 const Process = @This();
+const ProcessMap = mem.SlotMap(Process);
+pub const ID = ProcessMap.Key;
 
-var processes_map: mem.SlotMap(Process) = .{};
+var processes_map: ProcessMap = .{};
 var processes_map_lock: mem.RwLock = .{};
 
-id: mem.SlotKey,
+id: ID,
 execution_level: basalt.process.ExecutionLevel,
 virtual_space: ?mem.virt.Space,
 
 reference_counter: std.atomic.Value(usize),
 state: std.atomic.Value(State),
 
-/// `last_task` is protected by Task.tasks_map_lock
-last_task: ?mem.SlotKey,
 task_count: std.atomic.Value(usize),
 
 host_id: ?u8,
 host_affinity: u8,
 
-pub fn create(options: Options) !mem.SlotKey {
+pub fn create(options: Options) !ID {
     var process: Process = undefined;
     process.execution_level = options.execution_level;
 
@@ -58,7 +60,6 @@ pub fn create(options: Options) !mem.SlotKey {
     process.reference_counter = .init(0);
     process.state = .init(.alive);
 
-    process.last_task = null;
     process.task_count = .init(0);
 
     process.host_id = null;
@@ -103,7 +104,7 @@ pub fn kill(self: *Process) void {
     self._kill();
 }
 
-pub fn acquire(id: mem.SlotKey) ?*Process {
+pub fn acquire(id: ID) ?*Process {
     const lock_flags = processes_map_lock.lockShared();
     defer processes_map_lock.unlockShared(lock_flags);
 

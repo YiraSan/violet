@@ -65,7 +65,7 @@ pub fn initCpu() !void {
     local.idle_task = Task.acquire(idle_task_id) orelse unreachable;
 }
 
-pub fn register(task_id: mem.SlotKey) !void {
+pub fn register(task_id: Task.ID) !void {
     const lock_flags = incomming_tasks_lock.lockExclusive();
     defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
@@ -163,10 +163,10 @@ pub const Local = struct {
 };
 
 /// reserved to new tasks.
-var incomming_tasks: mem.Queue(mem.SlotKey) = .{};
+var incomming_tasks: mem.Queue(Task.ID) = .{};
 var incomming_tasks_lock: mem.RwLock = .{};
 
-var idle_process_id = mem.SlotKey.NULL;
+var idle_process_id: Process.ID = undefined;
 fn idle_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
     ark.cpu.halt();
 }
