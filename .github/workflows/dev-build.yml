@@ -41,4 +41,5 @@ jobs:
           violet-aarch64_qemu.img
           violet-rpi4.img
           LICENSE
+          NOTICE
           README.md
