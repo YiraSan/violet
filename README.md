@@ -1,5 +1,7 @@
 # violetOS
 
+**The post-UNIX operating system.**
+
 > [!IMPORTANT]
 > As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time. Until we reach 1.0.0, version increments will follow development [milestones](https://github.com/YiraSan/violet/milestones) rather than strict backward compatibility.
 
