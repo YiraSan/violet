@@ -53,7 +53,7 @@ pub fn create(options: Options) !mem.SlotKey {
         .lower,
         try mem.phys.allocPage(.l4K, true),
     );
-    errdefer if (&process.virtual_space) |virtual_space| virtual_space.free();
+    errdefer if (process.virtual_space != null) process.virtual_space.?.free();
 
     process.reference_counter = .init(0);
     process.state = .init(.alive);
@@ -68,7 +68,8 @@ pub fn create(options: Options) !mem.SlotKey {
     defer processes_map_lock.unlockExclusive(lock_flags);
 
     const slot_key = try processes_map.insert(process);
-    process.id = slot_key;
+    const process_ptr = processes_map.get(slot_key) orelse unreachable;
+    process_ptr.id = slot_key;
     return slot_key;
 }
 
@@ -77,11 +78,12 @@ fn destroy(self: *Process) void {
     defer processes_map_lock.unlockExclusive(lock_flags);
 
     if (self.reference_counter.load(.acquire) > 0) {
-        // could happen if someone legitimately acquired because of the rollback of someone else.
         return;
     }
 
     defer processes_map.remove(self.id);
+
+    std.log.debug("destroying process {}", .{self.id.index});
 
     if (self.virtual_space != null) {
         self.virtual_space.?.free();
@@ -106,18 +108,9 @@ pub fn acquire(id: mem.SlotKey) ?*Process {
     defer processes_map_lock.unlockShared(lock_flags);
 
     const process: *Process = processes_map.get(id) orelse return null;
+    if (process.state.load(.acquire) == .dying) return null;
 
-    if (process.reference_counter.fetchAdd(1, .acq_rel) == 0) {
-        _ = process.reference_counter.fetchSub(1, .acq_rel);
-        // no need to call .destroy() since if it was at 0 someone is already inside .destroy() waiting for processes_map to be unlocked.
-        return null;
-    }
-
-    // this case is possible if someone fetchAdd on 0 right before we tried to also fetchAdd
-    if (process.state.load(.acquire) == .dying) {
-        _ = process.reference_counter.fetchSub(1, .acq_rel);
-        return null;
-    }
+    _ = process.reference_counter.fetchAdd(1, .acq_rel);
 
     return process;
 }

@@ -93,23 +93,22 @@ pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
     const slot_key = try tasks_map.insert(task);
-    task.id = slot_key;
+    const task_ptr = tasks_map.get(slot_key) orelse unreachable;
+    task_ptr.id = slot_key;
 
-    _ = task.process.task_count.fetchAdd(1, .acq_rel);
+    _ = task_ptr.process.task_count.fetchAdd(1, .acq_rel);
 
     // const last_task_key = task.process.last_task;
     // if (last_task_key) |key| {
     //     const last_task = task.acquire()
     // }
 
-    task.process.last_task = slot_key;
+    task_ptr.process.last_task = slot_key;
 
     return slot_key;
 }
 
 pub fn kill(self: *Task) void {
-    defer self.release();
-
     self.state.store(.dying, .release);
 }
 
@@ -121,11 +120,12 @@ fn destroy(self: *Task) void {
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
     if (self.reference_counter.load(.acquire) > 0) {
-        // could happen if someone legitimately acquired because of the rollback of someone else.
         return;
     }
 
     defer tasks_map.remove(self.id);
+
+    std.log.debug("destroying task {}:{}", .{ self.process.id.index, self.id.index });
 
     mem.heap.free(self.process.virtualSpace(), self.stack_pointer);
 }
@@ -135,18 +135,9 @@ pub fn acquire(id: mem.SlotKey) ?*Task {
     defer tasks_map_lock.unlockShared(lock_flags);
 
     const task: *Task = tasks_map.get(id) orelse return null;
+    if (task.state.load(.acquire) == .dying) return null;
 
-    if (task.reference_counter.fetchAdd(1, .acq_rel) == 0) {
-        _ = task.reference_counter.fetchSub(1, .acq_rel);
-        // no need to call .destroy() since if it was at 0 someone is already inside .destroy() waiting for processes_map to be unlocked.
-        return null;
-    }
-
-    // this case is possible if someone fetchAdd on 0 right before we tried to also fetchAdd
-    if (task.state.load(.acquire) == .dying) {
-        _ = task.reference_counter.fetchSub(1, .acq_rel);
-        return null;
-    }
+    _ = task.reference_counter.fetchAdd(1, .acq_rel);
 
     return task;
 }

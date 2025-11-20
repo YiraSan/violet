@@ -34,12 +34,10 @@ pub const Task = @import("task.zig");
 // --- scheduler/root.zig --- //
 
 pub fn init() !void {
-    const idle_process_id = try Process.create(.{
+    idle_process_id = try Process.create(.{
         .execution_level = .kernel,
         .kernel_space_only = true,
     });
-
-    idle_process = Process.acquire(idle_process_id) orelse unreachable;
 
     try initCpu();
 
@@ -58,7 +56,7 @@ pub fn initCpu() !void {
     local.queue_tasks = .{};
     local.cycle_done = 0;
 
-    const idle_task_id = try Task.create(idle_process.id, .{
+    const idle_task_id = try Task.create(idle_process_id, .{
         .entry_point = @intFromPtr(&idle_task),
         .quantum = .ultra_heavy,
         .timer_precision = .disabled,
@@ -82,7 +80,7 @@ fn timerCallback(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_c
     // ignore terminated tasks
     if (local.current_task) |task| {
         if (task.isDying() or task.process.isDying()) {
-            task.kill();
+            task.release();
             local.current_task = null;
         }
     }
@@ -116,6 +114,7 @@ fn terminateProcess(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.cal
     if (local.current_task) |current_task| {
         current_task.process.kill();
         current_task.kill();
+        current_task.release();
         local.current_task = null;
     }
 
@@ -128,7 +127,7 @@ fn terminateTask(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_c
     const local = Local.get();
 
     if (local.current_task) |current_task| {
-        current_task.kill();
+        current_task.release();
         local.current_task = null;
     }
 
@@ -167,7 +166,7 @@ pub const Local = struct {
 var incomming_tasks: mem.Queue(mem.SlotKey) = .{};
 var incomming_tasks_lock: mem.RwLock = .{};
 
-var idle_process: *Process = undefined;
+var idle_process_id = mem.SlotKey.NULL;
 fn idle_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
     ark.cpu.halt();
 }
@@ -212,7 +211,7 @@ inline fn storeAndLoad(ctx: *kernel.arch.ExceptionContext, last_task: ?*Task) vo
                 kernel.drivers.Timer.arm(getTimerPrecision(current_task));
                 return;
             } else {
-                if (last.process.id != idle_process.id) {
+                if (last.process.id != idle_process_id) {
                     kernel.arch.TaskContext.store(last, ctx);
                     local.queue_tasks.append(last) catch @panic("scheduler.storeAndLoad ran out of memory");
                 }
@@ -238,7 +237,7 @@ inline fn storeAndLoad(ctx: *kernel.arch.ExceptionContext, last_task: ?*Task) vo
         task.process.virtualSpace().apply();
     }
 
-    log.debug("cpu{} switched to task {}:{}", .{ kernel.arch.Cpu.id(), task.process.id, task.id });
+    log.debug("cpu{} switched to task {}:{}", .{ kernel.arch.Cpu.id(), task.process.id.index, task.id.index });
 }
 
 inline fn getTimerPrecision(task: *Task) basalt.timer.Delay {
