@@ -17,14 +17,16 @@
         },
     },
     .paths = .{
-        "build.zig",
-        "build.zig.zon",
         "basalt",
         "bootloader",
         "kernel",
         "shared",
         "system",
+        "AUTHORS.md",
+        "build.zig",
+        "build.zig.zon",
         "LICENSE",
+        "NOTICE",
         "README.md",
     },
 }
