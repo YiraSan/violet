@@ -1,6 +1,21 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const std = @import("std");
+const basalt = @import("basalt");
 
 const log = std.log.scoped(.pcie);
 
@@ -42,13 +57,56 @@ pub const Device = struct {
     }
 };
 
+pub const BarHeader = packed struct(u32) {
+    region_type: enum(u1) {
+        memory_mapped = 0b0,
+        io_port = 0b1,
+    },
+    bar_type: enum(u2) {
+        b32 = 0b00,
+        b64 = 0b10,
+    },
+    prefetchable: bool,
+    _reserved: u28,
+};
+
+pub const Capability = extern struct {
+    /// PCI Capability Vendor ID.
+    vendor_id: u8 align(1),
+    /// PCI Capability Next Offset.
+    next_offset: u8 align(1),
+};
+
 pub const Function = extern struct {
     config_space: ConfigurationSpace align(1),
 
     pub const ConfigurationSpace = extern struct {
         vendor_id: u16 align(1),
         device_id: u16 align(1),
-        command: u16 align(1),
+        command: packed struct(u16) {
+            /// IO Space Enable.
+            iose: bool, // bit 0
+            /// Memory Space Enable.
+            mse: bool, // bit 1
+            /// Bus Master Enable.
+            bme: bool, // bit 2
+            /// Special Cycle Enable. DEPRECATED. Default to Zero.
+            sce: bool, // bit 3
+            /// Mem. Write & Invalidate Enable.
+            mwie: bool, // bit 4
+            /// VGA Palette Snoop.
+            vga: bool, // bit 5
+            /// Parity Error Response.
+            per: bool, // bit 6
+            _reserved0: u1, // bit 7
+            /// System Error Enable.
+            see: bool, // bit 8
+            /// Fast Back-to-Back Enable.
+            fbe: bool, // bit 9
+            /// Interrupt Disable.
+            id: bool, // bit 10
+            _reserved1: u5, // bit 11-15
+        } align(1),
         status: u16 align(1),
 
         revision: u8 align(1),
@@ -99,6 +157,50 @@ pub const Function = extern struct {
             miscellaneous = 0x12,
             reserved = 0xff,
         };
+
+        pub fn readBar(self: *@This(), index: usize) u64 {
+            const bar = self.bar[index];
+            const header: BarHeader = @bitCast(bar);
+
+            if (header.region_type == .memory_mapped) {
+                if (header.bar_type == .b32) {
+                    return bar & 0xfffffff0;
+                } else {
+                    const low_address = bar & 0xfffffff0;
+                    const high_address = self.bar[index + 1];
+
+                    return @as(u64, @intCast(high_address)) << 32 | low_address;
+                }
+            } else {
+                @panic("TODO BAR PCI I/O PORT");
+            }
+        }
+
+        pub fn capabilities(self: *@This()) CapabilityIter {
+            return .{
+                .config_space = self,
+                ._next = if (self.capabilities_ptr == 0) 0 else @intFromPtr(self) + self.capabilities_ptr,
+            };
+        }
+
+        pub const CapabilityIter = struct {
+            config_space: *ConfigurationSpace,
+            _next: u64,
+
+            pub fn next(self: *@This()) ?*volatile Capability {
+                if (self._next == 0) return null;
+
+                const capability: *volatile Capability = @ptrFromInt(self._next);
+
+                if (capability.next_offset == 0) {
+                    self._next = 0;
+                } else {
+                    self._next = @intFromPtr(self.config_space) + capability.next_offset;
+                }
+
+                return capability;
+            }
+        };
     };
 };
 
@@ -107,11 +209,12 @@ fn fnAddress(segment: *Segment, bus: u8, device: u5, function: u3) *Function {
 }
 
 var segments: []Segment = undefined;
+var process: *kernel.scheduler.Process = undefined;
 
-pub fn init(xsdt: *acpi.Xsdt) !void {
+pub fn init() !void {
     segments.len = 0;
 
-    var xsdt_iterator = xsdt.iter();
+    var xsdt_iterator = kernel.boot.xsdt.iter();
     while (xsdt_iterator.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .mcfg => |mcfg| {
@@ -154,6 +257,40 @@ pub fn init(xsdt: *acpi.Xsdt) !void {
     }
 
     try discoverDevices();
+
+    // PCIe task
+
+    process = try kernel.scheduler.Process.create(.{
+        .execution_level = .kernel,
+    });
+
+    const task = try process.createTask(.{
+        .entry_point = @intFromPtr(&pcie_task),
+        .timer_precision = .disabled,
+    });
+
+    try kernel.scheduler.register(task);
+}
+
+fn pcie_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+    const interface = basalt.prism.Interface.register(.{
+        .description = .{
+            .class = .reserved,
+            .sub_class = @intFromEnum(basalt.prism.Interface.ReservedSubClass.pcie),
+            .semver_major = 0,
+            .semver_minor = 1,
+            .flags = .{
+                .priviledged = true,
+            },
+        },
+    }) catch |err| {
+        std.log.err("{}", .{err});
+        unreachable;
+    };
+
+    std.log.info("{}", .{interface});
+
+    basalt.task.terminate();
 }
 
 fn discoverDevices() !void {
@@ -163,43 +300,43 @@ fn discoverDevices() !void {
             for (0..32) |device| {
                 const function0 = fnAddress(segment, @intCast(bus), @intCast(device), 0);
                 if (function0.config_space.vendor_id != 0xffff) {
-                    try handleDevice(segment, @intCast(bus), @intCast(device));
+                    // ...
                 }
             }
         }
     }
 }
 
-fn handleDevice(segment: *Segment, bus: u8, device: u5) !void {
-    const function0 = fnAddress(segment, bus, device, 0);
+// fn handleDevice(segment: *Segment, bus: u8, device: u5) !void {
+//     const function0 = fnAddress(segment, bus, device, 0);
 
-    const idevice = Device{
-        .segment = segment,
-        .bus = bus,
-        .device = device,
-    };
+//     const idevice = Device{
+//         .segment = segment,
+//         .bus = bus,
+//         .device = device,
+//     };
 
-    switch (function0.config_space.vendor_id) {
-        @intFromEnum(VendorID.@"Red Hat, Inc. 1af4") => {
-            const device_id: DeviceID.@"1af4" = @enumFromInt(function0.config_space.device_id);
-            switch (device_id) {
-                .virtio_block_device, .virtio_1_0_block_device => try kernel.drivers.virtio.block.handle(idevice),
-                else => {
-                    log.warn("({}) \"{s}\" is not implemented.", .{ idevice, @tagName(device_id) });
-                },
-            }
-        },
-        @intFromEnum(VendorID.@"Red Hat, Inc. 1b36") => {
-            const device_id: DeviceID.@"1b36" = @enumFromInt(function0.config_space.device_id);
-            switch (device_id) {
-                else => {
-                    log.warn("({}) \"{s}\" is not implemented.", .{ idevice, @tagName(device_id) });
-                },
-            }
-        },
-        else => log.warn("({}) unknown VendorID {x}", .{ idevice, function0.config_space.vendor_id }),
-    }
-}
+//     switch (function0.config_space.vendor_id) {
+//         @intFromEnum(VendorID.@"Red Hat, Inc. 1af4") => {
+//             const device_id: DeviceID.@"1af4" = @enumFromInt(function0.config_space.device_id);
+//             switch (device_id) {
+//                 .virtio_1_0_block_device => try kernel.drivers.virtio.block.handle(idevice),
+//                 else => {
+//                     log.warn("({}) \"{s}\" is not implemented.", .{ idevice, @tagName(device_id) });
+//                 },
+//             }
+//         },
+//         @intFromEnum(VendorID.@"Red Hat, Inc. 1b36") => {
+//             const device_id: DeviceID.@"1b36" = @enumFromInt(function0.config_space.device_id);
+//             switch (device_id) {
+//                 else => {
+//                     log.warn("({}) \"{s}\" is not implemented.", .{ idevice, @tagName(device_id) });
+//                 },
+//             }
+//         },
+//         else => log.warn("({}) unknown VendorID {x}", .{ idevice, function0.config_space.vendor_id }),
+//     }
+// }
 
 // --- pci.ids --- //
 

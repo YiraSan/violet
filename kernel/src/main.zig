@@ -1,3 +1,19 @@
+//! TODO Remove all @panic and unreachable that can be replaced by errors.
+
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const ark = @import("ark");
@@ -12,6 +28,7 @@ pub const arch = @import("arch/root.zig");
 pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
+pub const prism = @import("prism/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 pub const syscall = @import("syscall/root.zig");
 
@@ -20,6 +37,7 @@ comptime {
     _ = boot;
     _ = drivers;
     _ = mem;
+    _ = prism;
     _ = scheduler;
     _ = syscall;
 }
@@ -42,6 +60,8 @@ pub fn stage1() !void {
 
     try arch.init();
     try syscall.init();
+    try prism.init();
+    try prism.initCpu();
     try mem.heap.init();
     try scheduler.init();
 
@@ -60,6 +80,8 @@ pub fn stage1() !void {
 }
 
 pub fn stage2() !void {
+    try drivers.init();
+
     try arch.bootCpus();
 
     // jump to scheduler
@@ -88,6 +110,7 @@ fn _task1(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
     _ = return_address;
 
+    // TODO this could cause a deadlock on serial.
     std.log.err("panic: {s}", .{message});
 
     // NOTE little panic handler

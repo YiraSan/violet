@@ -1,3 +1,17 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const std = @import("std");
@@ -24,7 +38,37 @@ pub fn register(code: basalt.syscall.Code, syscall_fn: SyscallFn) void {
 }
 
 fn null_syscall(context: *kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void {
+    success(context);
+}
+
+pub fn success(context: *kernel.arch.ExceptionContext) void {
     context.setArg(0, @bitCast(basalt.syscall.Result{
         .is_success = true,
     }));
+}
+
+pub fn fail(context: *kernel.arch.ExceptionContext, code: basalt.syscall.ErrorCode) void {
+    context.setArg(0, @bitCast(basalt.syscall.Result{
+        .is_success = false,
+        .code = @intFromEnum(code),
+    }));
+}
+
+pub fn isAddressSafe(virt_address: u64, writable: bool) bool {
+    const local = kernel.scheduler.Local.get();
+
+    // NOTE a call done by a priviledged process is considered safe.
+
+    if (local.current_task) |current_task| {
+        if (!current_task.process.isPriviledged()) {
+            // NOTE the mapping test is done only on one page, in the future the length of the access should also be considered.
+            const mapping = current_task.process.virtualSpace().getPage(virt_address) orelse return false;
+            if (mapping.flags.device) return false;
+            if (writable and !mapping.flags.writable) return false;
+        }
+    } else {
+        @panic("syscall.isAddressSafe called outside a task !");
+    }
+
+    return true;
 }

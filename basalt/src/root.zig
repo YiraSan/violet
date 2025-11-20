@@ -1,31 +1,125 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const prism = struct {
+    pub const Interface = struct {
+        pub fn register(config: Config) !@This() {
+            try syscall.syscall1(.prism_register, @intFromPtr(&config));
+
+            return .{};
+        }
+
+        pub const Config = extern struct {
+            description: Description,
+        };
+
+        pub const Description = packed struct(u64) {
+            sub_class: u32,
+            class: Class,
+            semver_major: u10,
+            semver_minor: u10,
+            flags: packed struct(u4) {
+                priviledged: bool,
+                _reserved: u3 = 0,
+            },
+        };
+
+        pub const Class = enum(u8) {
+            block_device = 0x1,
+            network_device = 0x2,
+
+            extension = 0xfe,
+            reserved = 0xff,
+        };
+
+        pub const ExtensionSubClass = enum(u32) {};
+
+        pub const ReservedSubClass = enum(u32) {
+            pcie = 0xc038a34f,
+        };
+    };
+
+    pub const Future = packed struct(u64) {
+        id: u64,
+
+        pub const Error = error{
+            Invalid,
+            Failed,
+            Revocated,
+            Timeout,
+        };
+
+        // -- consumer -- //
+
+        /// Wait until future is completed.
+        pub fn wait(self: @This(), timeout: ?u64) Error!void {
+            _ = self;
+            _ = timeout;
+            unreachable;
+        }
+
+        // -- producer -- //
+
+        /// Signal to the consumer that the future has been completed with success or not.
+        pub fn complete(self: @This(), success: bool) Error!void {
+            _ = self;
+            _ = success;
+            unreachable;
+        }
+
+        /// Revoke the future.
+        pub fn revoke(self: @This()) Error!void {
+            _ = self;
+            unreachable;
+        }
+    };
+};
+
 pub const syscall = struct {
-    pub const MAX_CODE: usize = @intFromEnum(Code.task__yield) + 1;
+    // NOTE this have to be synchronized with Code.
+    pub const MAX_CODE: usize = 128;
 
     pub const Code = enum(u64) {
-        null = 0,
+        null = 0x00,
 
-        process__terminate = 11,
+        process_terminate = 0x10,
 
-        task__terminate = 20,
-        task__yield = 21,
+        task_terminate = 0x20,
+        task_yield = 0x21,
+
+        prism_register = 0x30,
     };
 
     pub const Error = error{
         UnknownSyscall,
         NoResult,
+        InvalidAddress,
     };
 
     pub const ErrorCode = enum(u16) {
         unknown_syscall = 0,
         no_result = 1,
+        invalid_address = 2,
 
         pub fn toError(self: @This()) Error!void {
             switch (self) {
                 .unknown_syscall => return Error.UnknownSyscall,
                 .no_result => return Error.NoResult,
+                .invalid_address => return Error.InvalidAddress,
             }
         }
     };
@@ -37,13 +131,33 @@ pub const syscall = struct {
         _reserved1: u32 = 0, // bit 32-63
     };
 
-    pub fn syscall0(code: Code) !void {
+    pub fn syscall0(code: Code) Error!void {
         switch (builtin.cpu.arch) {
             .aarch64 => {
                 const result = asm volatile (
                     \\ svc #0
                     : [output] "={x0}" (-> Result),
-                    : [code] "{x8}" (code),
+                    : [code] "{x0}" (code),
+                    : "memory", "cc"
+                );
+
+                if (!result.is_success) {
+                    const error_code: ErrorCode = @enumFromInt(result.code);
+                    try error_code.toError();
+                }
+            },
+            else => unreachable,
+        }
+    }
+
+    pub fn syscall1(code: Code, arg1: u64) Error!void {
+        switch (builtin.cpu.arch) {
+            .aarch64 => {
+                const result = asm volatile (
+                    \\ svc #0
+                    : [output] "={x0}" (-> Result),
+                    : [code] "{x0}" (code),
+                      [arg1] "{x1}" (arg1),
                     : "memory", "cc"
                 );
 
@@ -157,12 +271,12 @@ pub const task = struct {
 
     /// Yield current task and switch to another task.
     pub fn yield() void {
-        _ = syscall.syscall0(.task__yield) catch {};
+        _ = syscall.syscall0(.task_yield) catch {};
     }
 
     /// Terminate current task.
     pub fn terminate() noreturn {
-        _ = syscall.syscall0(.task__terminate) catch {};
+        _ = syscall.syscall0(.task_terminate) catch {};
         unreachable;
     }
 
@@ -177,18 +291,15 @@ pub const task = struct {
     };
 };
 
-pub const event = struct {};
-
 pub const process = struct {
     /// Terminate current process.
     pub fn terminate() noreturn {
-        _ = syscall.syscall0(.process__terminate) catch {};
+        _ = syscall.syscall0(.process_terminate) catch {};
         unreachable;
     }
 
     pub const ExecutionLevel = enum(u8) {
         user = 0x00,
-        system = 0x9f,
         kernel = 0xff,
     };
 

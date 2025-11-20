@@ -1,3 +1,17 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const std = @import("std");
@@ -44,9 +58,9 @@ pub fn initCpus() !void {
                             const mpidr: ark.armv8.registers.MPIDR_EL1 = @bitCast(gicc.mpidr);
                             if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
 
-                            const cpu_ptr: *Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
+                            const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
                             cpus[mpidr.aff0] = cpu_ptr;
-                            cpu_ptr.mpidr = gicc.mpidr;
+                            cpu_ptr.cpuid = gicc.mpidr;
                         },
                         else => {},
                     }
@@ -58,7 +72,7 @@ pub fn initCpus() !void {
 
     if (!gicc_found) asm volatile ("brk #0"); // TODO brk so it produces a visible exception for QEMU
 
-    const cpu = cpus[Cpu.id()].?;
+    const cpu = cpus[kernel.arch.Cpu.id()].?;
     asm volatile (
         \\ msr tpidr_el1, %[in]
         :
@@ -76,7 +90,7 @@ pub fn init() !void {
 }
 
 /// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
-var cpus: [256]?*Cpu align(@alignOf(u128)) = undefined;
+var cpus: [256]?*kernel.arch.Cpu align(@alignOf(u128)) = undefined;
 
 pub fn bootCpus() !void {
     if (build_options.platform == .rpi4) return;
@@ -133,14 +147,14 @@ pub fn bootCpus() !void {
 
     for (cpus) |cpu_nptr| {
         if (cpu_nptr) |cpu| {
-            if (cpu.mpidr == Cpu.id()) continue;
+            if (cpu.cpuid == kernel.arch.Cpu.id()) continue;
 
             cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
             cpu_setup_data.setup_done = 0;
 
             asm volatile ("dsb ish ; isb" ::: "memory");
 
-            try psci.cpuOn(cpu.mpidr, trampoline_addr, 0);
+            try psci.cpuOn(cpu.cpuid, trampoline_addr, 0);
 
             while (cpu_setup_data.setup_done != 1) {
                 asm volatile ("wfe");
@@ -263,7 +277,7 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     reg.fpen = .el0_el1;
     reg.store();
 
-    const cpu = cpus[Cpu.id()].?;
+    const cpu = cpus[kernel.arch.Cpu.id()].?;
     asm volatile (
         \\ msr tpidr_el1, %[in]
         :
@@ -275,6 +289,7 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     exception.init() catch {};
     gic.initCpu() catch unreachable;
     generic_timer.enableCpu() catch unreachable;
+    kernel.prism.initCpu() catch unreachable;
     kernel.scheduler.initCpu() catch unreachable;
 
     unmaskInterrupts();
@@ -301,51 +316,30 @@ pub fn unmaskInterrupts() void {
     );
 }
 
+pub fn maskAndSave() u64 {
+    return asm volatile (
+        \\ mrs %[flags], daif
+        \\ msr daifset, #0b0011
+        : [flags] "=r" (-> u64),
+        :
+        : "memory"
+    );
+}
+
+pub fn restoreSaved(saved: u64) void {
+    asm volatile (
+        \\ msr daif, %[flags]
+        :
+        : [flags] "r" (saved),
+        : "memory"
+    );
+}
+
 // TODO move arch-independent part into arch/root.zig
-
-pub const Cpu = struct {
-    mpidr: u64,
-
-    // -- physical memory -- //
-
-    primary_4k_cache: [128]u64,
-    primary_4k_cache_pos: usize,
-    recycle_4k_cache: [128]u64,
-    recycle_4k_cache_num: usize,
-
-    // -- virtual memory -- //
-
-    user_space: *mem.virt.Space,
-
-    scheduler_local: kernel.scheduler.Local,
-
-    pub fn id() usize {
-        switch (builtin.cpu.arch) {
-            .aarch64 => {
-                const mpidr = ark.armv8.registers.MPIDR_EL1.load();
-                // NOTE the primary core should not even start a core from another cluster.
-                if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) unreachable;
-                return mpidr.aff0;
-            },
-            else => unreachable,
-        }
-    }
-
-    pub fn get() *Cpu {
-        return switch (builtin.cpu.arch) {
-            .aarch64 => @ptrFromInt(ark.armv8.registers.loadTpidrEL1()),
-            else => unreachable,
-        };
-    }
-
-    comptime {
-        if (@sizeOf(Cpu) > mem.PageLevel.l2M.size()) @compileError("Cpu should be less than or equal to 2 MiB.");
-    }
-};
 
 pub const ExceptionContext = exception.ExceptionContext;
 
-pub const Context = struct {
+pub const TaskContext = struct {
     // operational registers
     lr: u64,
     xregs: [30]u64,
@@ -390,7 +384,7 @@ pub const Context = struct {
 
     pub fn setExecutionLevel(self: *@This(), execution_level: basalt.process.ExecutionLevel) void {
         self.spsr_el1.mode = switch (execution_level) {
-            .kernel, .system => .el1t,
+            .kernel => .el1t,
             .user => .el0,
         };
     }

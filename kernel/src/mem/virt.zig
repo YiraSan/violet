@@ -1,3 +1,17 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! Generally, the whole virtual memory managment needs to be entirely re-designed and re-coded from scratch.
 //! Things todo :
 //! - Instaure a limit on overcommitment.
@@ -41,7 +55,7 @@ pub const Space = struct {
     half: MemoryLocation,
     l0_table: u64,
     last_addr: u64,
-    lock: mem.SpinLock,
+    lock: mem.RwLock,
 
     /// SHOULD NEVER BE APPLIED ON KERNEL_SPACE
     /// NOTE on x86_64 this will be used to copy kernel_space onto the space
@@ -76,8 +90,8 @@ pub const Space = struct {
     }
 
     pub fn reserve(self: *@This(), count: usize) Reservation {
-        self.lock.lock();
-        defer self.lock.unlock();
+        const lock_flags = self.lock.lockExclusive();
+        defer self.lock.unlockExclusive(lock_flags);
 
         const reservation = Reservation{
             .space = self,
@@ -92,23 +106,23 @@ pub const Space = struct {
 
     /// Returns current state of a page, `null` if there's no mapping.
     pub fn getPage(self: *@This(), virt_addr: u64) ?Mapping {
-        self.lock.lock();
-        defer self.lock.unlock();
+        const lock_flags = self.lock.lockShared();
+        defer self.lock.unlockShared(lock_flags);
 
         return impl.getPage(self, virt_addr);
     }
 
     /// Returns `null` if no modification has been made.
     pub fn setPage(self: *@This(), virt_addr: u64, mapping: Mapping) ?void {
-        self.lock.lock();
-        defer self.lock.unlock();
+        const lock_flags = self.lock.lockExclusive();
+        defer self.lock.unlockExclusive(lock_flags);
 
         return impl.setPage(self, virt_addr, mapping);
     }
 
     pub fn unmapPage(self: *@This(), virt_addr: u64) void {
-        self.lock.lock();
-        defer self.lock.unlock();
+        const lock_flags = self.lock.lockExclusive();
+        defer self.lock.unlockExclusive(lock_flags);
 
         return impl.unmapPage(self, virt_addr);
     }
@@ -150,8 +164,8 @@ pub const Reservation = struct {
 
     /// if `phys_addr` == 0 it won't commit physical pages, but will commit-on-use.
     pub fn map(self: @This(), phys_addr: u64, flags: MemoryFlags, hint: MappingHint) void {
-        self.space.lock.lock();
-        defer self.space.lock.unlock();
+        const lock_flags = self.space.lock.lockExclusive();
+        defer self.space.lock.unlockExclusive(lock_flags);
 
         const virt_addr = self.address();
 

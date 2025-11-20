@@ -1,3 +1,17 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const std = @import("std");
@@ -321,8 +335,8 @@ fn free_noncontiguous_pages(pages: []u64, level: PageLevel) void {
 }
 
 pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool) AllocError!u64 {
-    phys_lock.lock();
-    defer phys_lock.unlock();
+    const lock_flags = phys_lock.lockExclusive();
+    defer phys_lock.unlockExclusive(lock_flags);
 
     if (length == 0) return 0;
 
@@ -514,7 +528,7 @@ pub fn init() !void {
     }
 }
 
-var phys_lock: mem.SpinLock = .{};
+var phys_lock: mem.RwLock = .{};
 
 pub fn initCpu() AllocError!void {
     try reloadCache();
@@ -524,8 +538,8 @@ fn reloadCache() AllocError!void {
     const cpu = kernel.arch.Cpu.get();
 
     {
-        phys_lock.lock();
-        defer phys_lock.unlock();
+        const lock_flags = phys_lock.lockExclusive();
+        defer phys_lock.unlockExclusive(lock_flags);
         try alloc_noncontiguous_pages(&cpu.primary_4k_cache, .l4K, true);
     }
 
@@ -547,8 +561,8 @@ pub fn allocPage(level: PageLevel, reset: bool) AllocError!u64 {
             return cpu.primary_4k_cache[cpu.primary_4k_cache_pos];
         },
         .l2M, .l1G => {
-            phys_lock.lock();
-            defer phys_lock.unlock();
+            const lock_flags = phys_lock.lockExclusive();
+            defer phys_lock.unlockExclusive(lock_flags);
 
             return alloc_page(level, reset);
         },
@@ -568,15 +582,15 @@ pub fn freePage(address: u64, level: PageLevel) void {
             if (cpu.recycle_4k_cache_num >= 128) {
                 cpu.recycle_4k_cache_num = 0;
 
-                phys_lock.lock();
-                defer phys_lock.unlock();
+                const lock_flags = phys_lock.lockExclusive();
+                defer phys_lock.unlockExclusive(lock_flags);
 
                 free_noncontiguous_pages(&cpu.recycle_4k_cache, .l4K);
             }
         },
         .l2M, .l1G => {
-            phys_lock.lock();
-            defer phys_lock.unlock();
+            const lock_flags = phys_lock.lockExclusive();
+            defer phys_lock.unlockExclusive(lock_flags);
 
             return free_page(address, level);
         },

@@ -1,3 +1,17 @@
+// Copyright (c) 2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // --- dependencies --- //
 
 const std = @import("std");
@@ -14,25 +28,27 @@ const kernel = @import("root");
 const mem = kernel.mem;
 const virt = mem.virt;
 
-const process = @import("process.zig");
-pub const Process = process.Process;
-pub const Task = process.Task;
+pub const Process = @import("process.zig");
+pub const Task = @import("task.zig");
 
 // --- scheduler/root.zig --- //
 
 pub fn init() !void {
-    try process.init();
+    const idle_process_id = try Process.create(.{
+        .execution_level = .kernel,
+        .kernel_space_only = true,
+    });
 
-    idle_process = try Process.create(.{ .execution_level = .kernel }); // .kernel is used to avoid creating a virtual space.
+    idle_process = Process.acquire(idle_process_id) orelse unreachable;
 
     try initCpu();
 
     kernel.drivers.Timer.callback = @ptrCast(&timerCallback);
 
-    kernel.syscall.register(.process__terminate, &terminateProcess);
+    kernel.syscall.register(.process_terminate, &terminateProcess);
 
-    kernel.syscall.register(.task__terminate, &terminateTask);
-    kernel.syscall.register(.task__yield, &yieldTask);
+    kernel.syscall.register(.task_terminate, &terminateTask);
+    kernel.syscall.register(.task_yield, &yieldTask);
 }
 
 pub fn initCpu() !void {
@@ -50,8 +66,8 @@ pub fn initCpu() !void {
 }
 
 pub fn register(task: *Task) !void {
-    incomming_tasks_lock.lock();
-    defer incomming_tasks_lock.unlock();
+    const lock_flags = incomming_tasks_lock.lockExclusive();
+    defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
     try incomming_tasks.append(task);
 }
@@ -147,7 +163,7 @@ pub const Local = struct {
 };
 
 var incomming_tasks: mem.Queue(*Task) = .{};
-var incomming_tasks_lock: mem.SpinLock = .{};
+var incomming_tasks_lock: mem.RwLock = .{};
 
 var idle_process: *Process = undefined;
 fn idle_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
@@ -165,8 +181,8 @@ inline fn chooseTask() void {
         if (local.cycle_done >= (local.queue_tasks.count() / 15 + 1) or !local_task_ready) {
             local.cycle_done = 0;
 
-            incomming_tasks_lock.lock();
-            defer incomming_tasks_lock.unlock();
+            const lock_flags = incomming_tasks_lock.lockExclusive();
+            defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
             if (incomming_tasks.count() > 0) {
                 local.current_task = incomming_tasks.pop();
