@@ -13,14 +13,10 @@
 // limitations under the License.
 
 const builtin = @import("builtin");
+const basalt = @import("basalt");
 
 const mod = @import("mod");
 
-export fn _start(local_ctx: *[4096]u8) callconv(switch (builtin.cpu.arch) {
-    .aarch64 => .{ .aarch64_aapcs = .{} },
-    .riscv64 => .{ .riscv64_lp64 = .{} },
-    else => unreachable,
-}) void {
-    _ = local_ctx;
+export fn _start() callconv(basalt.task.call_conv) void {
     mod.main() catch {};
 }
