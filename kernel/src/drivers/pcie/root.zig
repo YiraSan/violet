@@ -209,7 +209,6 @@ fn fnAddress(segment: *Segment, bus: u8, device: u5, function: u3) *Function {
 }
 
 var segments: []Segment = undefined;
-var process: *kernel.scheduler.Process = undefined;
 
 pub fn init() !void {
     segments.len = 0;
@@ -258,21 +257,22 @@ pub fn init() !void {
 
     try discoverDevices();
 
-    // PCIe task
+    // -- create a task -- //
 
-    process = try kernel.scheduler.Process.create(.{
+    const process_id = try kernel.scheduler.Process.create(.{
         .execution_level = .kernel,
+        .kernel_space_only = true,
     });
 
-    const task = try process.createTask(.{
+    const task_id = try kernel.scheduler.Task.create(process_id, .{
         .entry_point = @intFromPtr(&pcie_task),
         .timer_precision = .disabled,
     });
 
-    try kernel.scheduler.register(task);
+    try kernel.scheduler.register(task_id);
 }
 
-fn pcie_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+fn pcie_task() callconv(basalt.task.call_conv) noreturn {
     const interface = basalt.prism.Interface.register(.{
         .description = .{
             .class = .reserved,

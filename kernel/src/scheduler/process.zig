@@ -83,7 +83,9 @@ fn destroy(self: *Process) void {
 
     defer processes_map.remove(self.id);
 
-    // TODO ...
+    if (self.virtual_space != null) {
+        self.virtual_space.?.free();
+    }
 }
 
 fn _kill(self: *Process) void {
@@ -129,10 +131,10 @@ pub fn release(self: *Process) void {
 }
 
 pub fn virtualSpace(self: *Process) *mem.virt.Space {
-    if (&self.virtual_space) |virtual_space| {
-        return virtual_space;
-    } else {
+    if (self.virtual_space == null) {
         return &mem.virt.kernel_space;
+    } else {
+        return &(self.virtual_space.?);
     }
 }
 
@@ -142,6 +144,10 @@ pub fn isPriviledged(self: *Process) bool {
 
 pub fn taskCount(self: *Process) usize {
     return self.task_count.load(.acquire);
+}
+
+pub fn isDying(self: *Process) bool {
+    return self.state.load(.acquire) == .dying;
 }
 
 // ---- //

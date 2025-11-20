@@ -389,41 +389,37 @@ pub const TaskContext = struct {
         };
     }
 
-    pub fn setDataContext(self: *@This(), data_context: u64) void {
-        self.xregs[0] = data_context;
-    }
-
     pub fn store(
         task: *kernel.scheduler.Task,
         exception_ctx: *kernel.arch.ExceptionContext,
     ) void {
-        task.arch_context.lr = exception_ctx.lr;
-        task.arch_context.xregs = exception_ctx.xregs;
-        task.arch_context.vregs = exception_ctx.vregs;
-        task.arch_context.fpcr = exception_ctx.fpcr;
-        task.arch_context.fpsr = exception_ctx.fpsr;
-        task.arch_context.elr_el1 = exception_ctx.elr_el1;
-        task.arch_context.spsr_el1 = exception_ctx.spsr_el1;
+        task.context.lr = exception_ctx.lr;
+        task.context.xregs = exception_ctx.xregs;
+        task.context.vregs = exception_ctx.vregs;
+        task.context.fpcr = exception_ctx.fpcr;
+        task.context.fpsr = exception_ctx.fpsr;
+        task.context.elr_el1 = exception_ctx.elr_el1;
+        task.context.spsr_el1 = exception_ctx.spsr_el1;
 
-        task.arch_context.sp = exception.get_sp_el0();
+        task.context.sp = exception.get_sp_el0();
 
-        task.arch_context.tpidr_el0 = ark.armv8.registers.loadTpidrEL0();
+        task.context.tpidr_el0 = ark.armv8.registers.loadTpidrEL0();
     }
 
     pub fn load(
         task: *kernel.scheduler.Task,
         exception_ctx: *kernel.arch.ExceptionContext,
     ) void {
-        exception_ctx.lr = task.arch_context.lr;
-        exception_ctx.xregs = task.arch_context.xregs;
-        exception_ctx.vregs = task.arch_context.vregs;
-        exception_ctx.fpcr = task.arch_context.fpcr;
-        exception_ctx.fpsr = task.arch_context.fpsr;
-        exception_ctx.elr_el1 = task.arch_context.elr_el1;
-        exception_ctx.spsr_el1 = task.arch_context.spsr_el1;
+        exception_ctx.lr = task.context.lr;
+        exception_ctx.xregs = task.context.xregs;
+        exception_ctx.vregs = task.context.vregs;
+        exception_ctx.fpcr = task.context.fpcr;
+        exception_ctx.fpsr = task.context.fpsr;
+        exception_ctx.elr_el1 = task.context.elr_el1;
+        exception_ctx.spsr_el1 = task.context.spsr_el1;
 
-        exception.set_sp_el0(task.arch_context.sp);
+        exception.set_sp_el0(task.context.sp);
 
-        ark.armv8.registers.storeTpidrEL0(task.arch_context.tpidr_el0);
+        ark.armv8.registers.storeTpidrEL0(task.context.tpidr_el0);
     }
 };

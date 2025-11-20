@@ -30,16 +30,14 @@ const pcie = kernel.drivers.pcie;
 
 // pub const BlockDevice = struct {};
 
-var process: *kernel.scheduler.Process = undefined;
-
 pub fn init() !void {
-    process = try kernel.scheduler.Process.create(.{
-        .execution_level = .system,
-        .explicit_termination = true,
+    const process_id = try kernel.scheduler.Process.create(.{
+        .execution_level = .kernel,
+        .kernel_space_only = true,
     });
 
     try kernel.scheduler.register(
-        try process.createTask(.{
+        try kernel.scheduler.Task.create(process_id, .{
             .entry_point = @intFromPtr(&listening_task),
             .priority = .realtime,
             .quantum = .ultra_heavy,
@@ -48,7 +46,7 @@ pub fn init() !void {
     );
 }
 
-fn listening_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+fn listening_task() callconv(basalt.task.call_conv) noreturn {
     log.info("initializing ...", .{});
 
     // TODO somehow listen to new PCI device

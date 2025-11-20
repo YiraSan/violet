@@ -58,18 +58,20 @@ pub fn initCpu() !void {
     local.queue_tasks = .{};
     local.cycle_done = 0;
 
-    local.idle_task = try idle_process.createTask(.{
+    const idle_task_id = try Task.create(idle_process.id, .{
         .entry_point = @intFromPtr(&idle_task),
         .quantum = .ultra_heavy,
         .timer_precision = .disabled,
     });
+
+    local.idle_task = Task.acquire(idle_task_id) orelse unreachable;
 }
 
-pub fn register(task: *Task) !void {
+pub fn register(task_id: mem.SlotKey) !void {
     const lock_flags = incomming_tasks_lock.lockExclusive();
     defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
-    try incomming_tasks.append(task);
+    try incomming_tasks.append(task_id);
 }
 
 // --- scheduler entrypoints --- //
@@ -79,8 +81,8 @@ fn timerCallback(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_c
 
     // ignore terminated tasks
     if (local.current_task) |task| {
-        if (task.isTerminated() or task.process.isTerminated()) {
-            task.destroy();
+        if (task.isDying() or task.process.isDying()) {
+            task.kill();
             local.current_task = null;
         }
     }
@@ -112,8 +114,8 @@ fn terminateProcess(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.cal
     const local = Local.get();
 
     if (local.current_task) |current_task| {
-        current_task.process.terminate();
-        current_task.destroy();
+        current_task.process.kill();
+        current_task.kill();
         local.current_task = null;
     }
 
@@ -126,8 +128,7 @@ fn terminateTask(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_c
     const local = Local.get();
 
     if (local.current_task) |current_task| {
-        current_task.terminate();
-        current_task.destroy();
+        current_task.kill();
         local.current_task = null;
     }
 
@@ -162,7 +163,8 @@ pub const Local = struct {
     }
 };
 
-var incomming_tasks: mem.Queue(*Task) = .{};
+/// reserved to new tasks.
+var incomming_tasks: mem.Queue(mem.SlotKey) = .{};
 var incomming_tasks_lock: mem.RwLock = .{};
 
 var idle_process: *Process = undefined;
@@ -184,8 +186,13 @@ inline fn chooseTask() void {
             const lock_flags = incomming_tasks_lock.lockExclusive();
             defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
-            if (incomming_tasks.count() > 0) {
-                local.current_task = incomming_tasks.pop();
+            while (incomming_tasks.count() > 0) {
+                const incomming_task_id = incomming_tasks.pop();
+                const nincomming_task = Task.acquire(incomming_task_id);
+                if (nincomming_task) |incomming_task| {
+                    local.current_task = incomming_task;
+                    break;
+                }
             }
         }
 
@@ -205,9 +212,8 @@ inline fn storeAndLoad(ctx: *kernel.arch.ExceptionContext, last_task: ?*Task) vo
                 kernel.drivers.Timer.arm(getTimerPrecision(current_task));
                 return;
             } else {
-                last.state.store(.ready, .seq_cst);
                 if (last.process.id != idle_process.id) {
-                    kernel.arch.Context.store(last, ctx);
+                    kernel.arch.TaskContext.store(last, ctx);
                     local.queue_tasks.append(last) catch @panic("scheduler.storeAndLoad ran out of memory");
                 }
             }
@@ -224,13 +230,12 @@ inline fn storeAndLoad(ctx: *kernel.arch.ExceptionContext, last_task: ?*Task) vo
 
     const task = local.current_task.?;
 
-    task.state.store(.running, .seq_cst);
     local.current_task = task;
-    kernel.arch.Context.load(task, ctx);
+    kernel.arch.TaskContext.load(task, ctx);
     kernel.drivers.Timer.arm(getTimerPrecision(task));
 
     if (!task.process.isPriviledged()) {
-        task.process.virtual_space.apply();
+        task.process.virtualSpace().apply();
     }
 
     log.debug("cpu{} switched to task {}:{}", .{ kernel.arch.Cpu.id(), task.process.id, task.id });

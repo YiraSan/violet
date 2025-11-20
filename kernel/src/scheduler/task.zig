@@ -73,7 +73,7 @@ pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
     task.quantum_elapsed_ns = 0;
 
     task.stack_pointer = mem.heap.alloc(
-        task.process.getVirtualSpace(),
+        task.process.virtualSpace(),
         .l4K,
         STACK_PAGE_COUNT,
         .{
@@ -92,7 +92,7 @@ pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
-    const slot_key = try tasks_map.insert(process);
+    const slot_key = try tasks_map.insert(task);
     task.id = slot_key;
 
     _ = task.process.task_count.fetchAdd(1, .acq_rel);
@@ -105,6 +105,12 @@ pub fn create(process_id: mem.SlotKey, options: Options) !mem.SlotKey {
     task.process.last_task = slot_key;
 
     return slot_key;
+}
+
+pub fn kill(self: *Task) void {
+    defer self.release();
+
+    self.state.store(.dying, .release);
 }
 
 fn destroy(self: *Task) void {
@@ -121,7 +127,7 @@ fn destroy(self: *Task) void {
     // TODO ...
 }
 
-pub fn acquire(id: mem.SlotKey) ?*Process {
+pub fn acquire(id: mem.SlotKey) ?*Task {
     const lock_flags = tasks_map_lock.lockShared();
     defer tasks_map_lock.unlockShared(lock_flags);
 
@@ -147,6 +153,10 @@ pub fn release(self: *Task) void {
     if (self.reference_counter.fetchSub(1, .acq_rel) == 1) {
         self.destroy();
     }
+}
+
+pub fn isDying(self: *Task) bool {
+    return self.state.load(.acquire) == .dying;
 }
 
 // ---- //

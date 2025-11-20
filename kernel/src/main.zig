@@ -67,12 +67,13 @@ pub fn stage1() !void {
 
     // scheduler tests
     if (builtin.mode == .Debug) {
-        const process = try scheduler.Process.create(.{
+        const test_process_id = try scheduler.Process.create(.{
             .execution_level = .kernel,
+            .kernel_space_only = true,
         });
 
-        const task0 = try process.createTask(.{ .entry_point = @intFromPtr(&_task0) });
-        const task1 = try process.createTask(.{ .entry_point = @intFromPtr(&_task1) });
+        const task0 = try scheduler.Task.create(test_process_id, .{ .entry_point = @intFromPtr(&_task0) });
+        const task1 = try scheduler.Task.create(test_process_id, .{ .entry_point = @intFromPtr(&_task1) });
 
         try scheduler.register(task0);
         try scheduler.register(task1);
@@ -89,7 +90,7 @@ pub fn stage2() !void {
     drivers.Timer.arm(._5ms);
 }
 
-fn _task0(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+fn _task0() callconv(basalt.task.call_conv) noreturn {
     asm volatile ("brk #0");
 
     std.log.info("hello from task 0 !", .{});
@@ -97,7 +98,7 @@ fn _task0(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
     basalt.task.terminate();
 }
 
-fn _task1(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+fn _task1() callconv(basalt.task.call_conv) noreturn {
     asm volatile ("brk #1");
 
     std.log.info("hello from task 1 !", .{});
@@ -116,7 +117,7 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
     // NOTE little panic handler
     const local_scheduler = scheduler.Local.get();
     if (local_scheduler.current_task) |task| {
-        task.terminate();
+        task.kill();
         drivers.Timer.arm(._1ms);
     }
 
