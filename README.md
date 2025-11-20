@@ -7,16 +7,16 @@ violetOS is a radically reimagined operating system that breaks with UNIX and PO
 
 ## Requirements
 
-This project uses and is tested with Zig `0.14.1`. We recommend using [zvm](https://github.com/tristanisham/zvm) to install and manage Zig versions.
+This project uses and is tested with [Zig](https://github.com/ziglang/zig) `0.14.1`. We recommend using [zvm](https://github.com/tristanisham/zvm) to install and manage Zig versions.
 
 To run a virtual instance of violet on your computer, you will also need [QEMU](https://www.qemu.org).
 
 ## Build it yourself
 
-Thanks to [Zig](https://github.com/ziglang/zig) building and running an operating system has never been so easy. Ensure you're using a compatible Zig version, then simply type:
+Thanks to Zig, building and running an operating system has never been so easy. Ensure you're using a compatible Zig version, then simply type:
 
-```
-zig build -Dplatform={IDENFITFIER}
+```bash
+zig build -Dplatform={IDENTIFIER}
 ```
 
 Default to `aarch64_qemu` (see [Platform matrix](#platform_matrix) for more details).
@@ -32,7 +32,7 @@ Default to `aarch64_qemu` (see [Platform matrix](#platform_matrix) for more deta
 
 <sup>1</sup> ✅ means "Supported".
 
-<sup>2</sup> 🔨 means "Partially supported".
+<sup>2</sup> 🔨 means "Partially supported (WIP)".
 
 <sup>3</sup> 🗓️ means "Planed".
 
