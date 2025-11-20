@@ -114,6 +114,9 @@ pub fn kill(self: *Task) void {
 }
 
 fn destroy(self: *Task) void {
+    const process = self.process;
+    defer process.release();
+
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
@@ -124,7 +127,7 @@ fn destroy(self: *Task) void {
 
     defer tasks_map.remove(self.id);
 
-    // TODO ...
+    mem.heap.free(self.process.virtualSpace(), self.stack_pointer);
 }
 
 pub fn acquire(id: mem.SlotKey) ?*Task {
