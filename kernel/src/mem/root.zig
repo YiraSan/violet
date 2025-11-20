@@ -146,8 +146,14 @@ pub fn Queue(comptime T: type) type {
 }
 
 pub const SlotKey = packed struct(u64) {
-    id: u24,
-    /// Ignored by uninstancied SlotMap.
+    pub const NULL = SlotKey{
+        .index = 0,
+        .instance = 0,
+        .generation = 0,
+    };
+
+    index: u24,
+    /// Ignored by unsharded maps.
     instance: u8,
     generation: u32,
 
@@ -156,48 +162,148 @@ pub const SlotKey = packed struct(u64) {
     }
 };
 
+pub const SlotMapError = error{
+    ReachedMaxSlot,
+};
+
 pub fn SlotMap(comptime T: type) type {
     return struct {
+        const Slot = struct {
+            generation: u32,
+            content: union {
+                value: T,
+                next_free: ?u24,
+            },
+        };
+
+        items: [*]Slot = undefined,
+        len: u32 = 0,
+        capacity: u32 = 0,
+
+        free_head: ?u24 = null,
+        count: u32 = 0,
+
+        fn pageCount(count: usize) usize {
+            return std.mem.alignForward(usize, @sizeOf(Slot) * count, PageLevel.l4K.size()) >> PageLevel.l4K.shift();
+        }
+
+        /// Grow memory by 128 objects at a time.
+        fn grow(self: *@This()) !void {
+            if ((self.capacity + 1) >= std.math.maxInt(u24)) {
+                return SlotMapError.ReachedMaxSlot;
+            }
+
+            const old_page_count = pageCount(self.capacity);
+
+            self.capacity += 128;
+
+            const new_page_count = pageCount(self.capacity);
+
+            if (new_page_count > old_page_count) {
+                if (old_page_count == 0) {
+                    self.items = @ptrFromInt(heap.alloc(
+                        &virt.kernel_space,
+                        .l4K,
+                        @intCast(new_page_count),
+                        .{ .writable = true },
+                        false,
+                    ));
+                } else {
+                    self.items = @ptrFromInt(heap.realloc(
+                        &virt.kernel_space,
+                        @intFromPtr(self.items),
+                        @intCast(new_page_count),
+                    ));
+                }
+            }
+        }
+
         pub fn insert(self: *@This(), value: T) !SlotKey {
-            _ = self;
-            _ = value;
-            unreachable;
+            var slot_index: u24 = 0;
+            var generation: u32 = 0;
+
+            if (self.free_head) |head_idx| {
+                slot_index = head_idx;
+                const slot = &self.items[slot_index];
+
+                generation = slot.generation;
+
+                self.free_head = slot.content.next_free;
+
+                slot.content = .{ .value = value };
+            } else {
+                if (self.len == self.capacity) {
+                    try self.grow();
+                }
+
+                slot_index = @intCast(self.len);
+                self.len += 1;
+
+                generation = 1;
+
+                self.items[slot_index] = .{
+                    .generation = generation,
+                    .content = .{ .value = value },
+                };
+            }
+
+            self.count += 1;
+
+            return .{
+                .index = slot_index,
+                .instance = 0,
+                .generation = generation,
+            };
         }
 
         pub fn remove(self: *@This(), key: SlotKey) void {
-            _ = self;
-            _ = key;
-            unreachable;
+            if (key.index >= self.len) return;
+
+            const slot = &self.items[key.index];
+
+            if (slot.generation != key.generation) return;
+
+            slot.generation +%= 1;
+            if (slot.generation == 0) slot.generation = 1;
+
+            slot.content = .{ .next_free = self.free_head };
+            self.free_head = key.index;
+
+            self.count -= 1;
         }
 
         pub fn get(self: *@This(), key: SlotKey) ?*T {
-            _ = self;
-            _ = key;
-            unreachable;
+            if (key.index >= self.len) return null;
+
+            const slot = &self.items[key.index];
+
+            if (slot.generation != key.generation) return null;
+
+            return &slot.content.value;
         }
     };
 }
 
-pub fn ShardedSlotMap(comptime T: type) type {
-    _ = T;
+// pub fn ShardedSlotMap(comptime T: type) type {
+//     _ = T;
 
-    return struct {
-        instances: [256]*Instance = undefined,
-        instance_count: std.atomic.Value(usize) = .init(0),
+//     return struct {
+//         instances: [256]*Instance = undefined,
+//         instance_count: std.atomic.Value(usize) = .init(0),
 
-        pub const Instance = struct {
-            id: u8,
-        };
+//         pub const Instance = struct {
+//             id: u8,
+//         };
 
-        pub fn init(self: *@This(), instance: *Instance) void {
-            const instance_id = self.instance_count.fetchAdd(1, .seq_cst);
-            if (instance_id > 255) @panic("too much slot map");
+//         pub fn init(self: *@This(), instance: *Instance) void {
+//             const instance_id = self.instance_count.fetchAdd(1, .seq_cst);
+//             if (instance_id > 255) @panic("too much slot map");
 
-            instance.* = .{
-                .id = instance_id,
-            };
+//             instance.* = .{
+//                 .id = instance_id,
+//             };
 
-            self.instances[instance_id] = instance;
-        }
-    };
-}
+//             self.instances[instance_id] = instance;
+//         }
+//     };
+// }
