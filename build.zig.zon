@@ -24,7 +24,7 @@
         "kernel",
         "shared",
         "system",
-        "license",
-        "readme.md",
+        "LICENSE",
+        "README.md",
     },
 }
