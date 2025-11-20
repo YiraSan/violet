@@ -23,11 +23,13 @@ jobs:
         sudo apt-get update
         mkdir -p .zig-cache
 
-    - run: |
+    - name: Aarch64-QEMU (Build)
+      run: |
         zig build -Dplatform=aarch64_qemu -Doptimize=ReleaseSafe
         mv ./zig-out/disk.img ./violet-aarch64_qemu.img
 
-    - run: |
+    - name: Raspberry Pi 4 (Build)
+      run: |
         zig build -Dplatform=rpi4 -Doptimize=ReleaseSafe
         mv ./zig-out/disk.img ./violet-rpi4.img
 
