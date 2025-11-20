@@ -12,11 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// --- dependencies --- //
+
+const std = @import("std");
 const builtin = @import("builtin");
 const basalt = @import("basalt");
 
+// --- imports --- //
+
 const mod = @import("mod");
+
+// --- main.zig --- //
 
 export fn _start() callconv(basalt.task.call_conv) void {
     mod.main() catch {};
+}
+
+// --- zig std features --- //
+
+pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
+    _ = message;
+    _ = return_address;
+
+    // TODO print the message !
+
+    basalt.task.terminate();
 }
