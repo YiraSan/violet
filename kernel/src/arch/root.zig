@@ -78,7 +78,7 @@ pub const Cpu = struct {
     recycle_4k_cache_num: usize,
 
     // -- virtual memory -- //
-    user_space: *kernel.mem.virt.Space,
+    // user_space: *kernel.mem.virt.Space,
 
     scheduler_local: kernel.scheduler.Local,
     prism_local: kernel.prism.Local,

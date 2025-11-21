@@ -26,7 +26,7 @@ const acpi = kernel.drivers.acpi;
 const Pl011 = @import("uart_pl011.zig");
 
 const mem = kernel.mem;
-const virt = mem.virt;
+const vmm = mem.vmm;
 
 // --- serial/root.zig --- //
 
@@ -46,14 +46,12 @@ pub fn init() !void {
                     spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.arm_sbsa_generic) or
                     spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.bcm2835))
                 {
-                    const reservation = virt.kernel_space.reserve(1);
+                    const virt_address = try vmm.kernel_space.allocator.alloc(4096, 0, null, 0);
 
-                    reservation.map(spcr.base_address.address, .{
+                    try vmm.kernel_space.paging.map(virt_address, spcr.base_address.address, 1, .l4K, .{
+                        .type = .device,
                         .writable = true,
-                        .device = true,
-                    }, .no_hint);
-
-                    const virt_address = reservation.address();
+                    });
 
                     var pl011: Pl011 = .{ .peripheral_base = virt_address };
 
@@ -114,18 +112,17 @@ pub fn init() !void {
                         if (device.port_subtype.serial == .pl011) {
                             const addrs = device.base_address_registers();
                             const sizes = device.address_sizes();
-                            const page_count = std.mem.alignForward(u32, sizes[0], 0x1000) >> mem.PageLevel.l4K.shift();
+                            const size = std.mem.alignForward(u32, sizes[0], 0x1000);
+                            const page_count = size >> mem.PageLevel.l4K.shift();
 
-                            const reservation = virt.kernel_space.reserve(page_count);
+                            const virt_address = try vmm.kernel_space.allocator.alloc(size, 0, null, 0);
 
-                            reservation.map(addrs[0].address, .{
+                            try vmm.kernel_space.paging.map(virt_address, addrs[0].address, page_count, .l4K, .{
+                                .type = .device,
                                 .writable = true,
-                                .device = true,
-                            }, .no_hint);
+                            });
 
-                            const addr = reservation.address();
-
-                            var pl011: Pl011 = .{ .peripheral_base = addr };
+                            var pl011: Pl011 = .{ .peripheral_base = virt_address };
 
                             pl011.disableUart();
                             pl011.maskAllInterrupts();

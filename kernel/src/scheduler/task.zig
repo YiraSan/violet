@@ -24,26 +24,29 @@ const kernel = @import("root");
 const mem = kernel.mem;
 const scheduler = kernel.scheduler;
 
+const heap = mem.heap;
+const vmm = mem.vmm;
+
 const Process = scheduler.Process;
 
 // --- scheduler/task.zig --- //
 
 const Task = @This();
-const TaskMap = mem.SlotMap(Task);
-pub const ID = TaskMap.Key;
+const TaskMap = heap.SlotMap(Task);
+pub const Id = TaskMap.Key;
 
 pub const STACK_PAGE_COUNT = 16; // 64 KiB
 pub const STACK_SIZE = STACK_PAGE_COUNT * mem.PageLevel.l4K.size();
 
-var tasks_map: TaskMap = .{};
+var tasks_map: TaskMap = .init();
 var tasks_map_lock: mem.RwLock = .{};
 
-id: ID,
+id: Id,
 process: *scheduler.Process,
 
 timer_precision: basalt.timer.Precision,
 
-reference_counter: std.atomic.Value(usize),
+ref_count: std.atomic.Value(usize),
 state: std.atomic.Value(State),
 waiting_future: ?void,
 
@@ -54,7 +57,7 @@ quantum_elapsed_ns: usize,
 context: kernel.arch.TaskContext,
 stack_pointer: u64,
 
-pub fn create(process_id: Process.ID, options: Options) !ID {
+pub fn create(process_id: Process.Id, options: Options) !Id {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
     errdefer process.release();
 
@@ -63,7 +66,7 @@ pub fn create(process_id: Process.ID, options: Options) !ID {
 
     task.timer_precision = options.timer_precision;
 
-    task.reference_counter = .init(0);
+    task.ref_count = .init(0);
     task.state = .init(.ready);
     task.waiting_future = null;
 
@@ -71,17 +74,12 @@ pub fn create(process_id: Process.ID, options: Options) !ID {
     task.quantum = options.quantum;
     task.quantum_elapsed_ns = 0;
 
-    task.stack_pointer = mem.heap.alloc(
-        task.process.virtualSpace(),
-        .l4K,
-        STACK_PAGE_COUNT,
-        .{
-            .user = !task.process.isPriviledged(),
-            .writable = true,
-        },
-        true,
-    );
-    errdefer mem.heap.free(task.process.virtualSpace(), task.stack_pointer);
+    const vs = task.process.virtualSpace();
+    { // TODO GUARD PAGES !!
+        const object = try vmm.Object.create(STACK_SIZE, .{ .writable = true });
+        task.stack_pointer = try vs.map(object, STACK_SIZE, 0);
+    }
+    errdefer vs.unmap(task.stack_pointer) catch unreachable;
 
     task.context = .init();
     task.context.setExecutionAddress(options.entry_point);
@@ -108,7 +106,7 @@ fn destroy(self: *Task) void {
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
-    if (self.reference_counter.load(.acquire) > 0) {
+    if (self.ref_count.load(.acquire) > 0) {
         return;
     }
 
@@ -119,24 +117,24 @@ fn destroy(self: *Task) void {
 
     std.log.debug("destroying task {}:{}", .{ self.process.id.index, self.id.index });
 
-    mem.heap.free(self.process.virtualSpace(), self.stack_pointer);
+    self.process.virtualSpace().unmap(self.stack_pointer) catch {};
 }
 
-pub fn acquire(id: ID) ?*Task {
+pub fn acquire(id: Id) ?*Task {
     const lock_flags = tasks_map_lock.lockShared();
     defer tasks_map_lock.unlockShared(lock_flags);
 
     const task: *Task = tasks_map.get(id) orelse return null;
     if (task.state.load(.acquire) == .dying) return null;
 
-    _ = task.reference_counter.fetchAdd(1, .acq_rel);
+    _ = task.ref_count.fetchAdd(1, .acq_rel);
 
     return task;
 }
 
 /// Invalidate Process pointer.
 pub fn release(self: *Task) void {
-    if (self.reference_counter.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
         self.destroy();
     }
 }

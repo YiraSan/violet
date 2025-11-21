@@ -23,23 +23,24 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 const scheduler = kernel.scheduler;
+const heap = mem.heap;
 
 const Task = scheduler.Task;
 
 // --- scheduler/process.zig --- //
 
 const Process = @This();
-const ProcessMap = mem.SlotMap(Process);
-pub const ID = ProcessMap.Key;
+const ProcessMap = heap.SlotMap(Process);
+pub const Id = ProcessMap.Key;
 
-var processes_map: ProcessMap = .{};
+var processes_map: ProcessMap = .init();
 var processes_map_lock: mem.RwLock = .{};
 
-id: ID,
+id: Id,
 execution_level: basalt.process.ExecutionLevel,
-virtual_space: ?mem.virt.Space,
+virtual_space: mem.vmm.Space,
 
-reference_counter: std.atomic.Value(usize),
+ref_count: std.atomic.Value(usize),
 state: std.atomic.Value(State),
 
 task_count: std.atomic.Value(usize),
@@ -47,17 +48,14 @@ task_count: std.atomic.Value(usize),
 host_id: ?u8,
 host_affinity: u8,
 
-pub fn create(options: Options) !ID {
+pub fn create(options: Options) !Id {
     var process: Process = undefined;
     process.execution_level = options.execution_level;
 
-    process.virtual_space = if (options.kernel_space_only) null else .init(
-        .lower,
-        try mem.phys.allocPage(.l4K, true),
-    );
-    errdefer if (process.virtual_space != null) process.virtual_space.?.free();
+    if (!process.isPriviledged()) process.virtual_space = try .init(.lower, null, true);
+    errdefer if (!process.isPriviledged()) process.virtual_space.deinit();
 
-    process.reference_counter = .init(0);
+    process.ref_count = .init(0);
     process.state = .init(.alive);
 
     process.task_count = .init(0);
@@ -78,7 +76,7 @@ fn destroy(self: *Process) void {
     const lock_flags = processes_map_lock.lockExclusive();
     defer processes_map_lock.unlockExclusive(lock_flags);
 
-    if (self.reference_counter.load(.acquire) > 0) {
+    if (self.ref_count.load(.acquire) > 0) {
         return;
     }
 
@@ -86,8 +84,8 @@ fn destroy(self: *Process) void {
 
     std.log.debug("destroying process {}", .{self.id.index});
 
-    if (self.virtual_space != null) {
-        self.virtual_space.?.free();
+    if (!self.isPriviledged()) {
+        self.virtual_space.deinit();
     }
 }
 
@@ -104,31 +102,31 @@ pub fn kill(self: *Process) void {
     self._kill();
 }
 
-pub fn acquire(id: ID) ?*Process {
+pub fn acquire(id: Id) ?*Process {
     const lock_flags = processes_map_lock.lockShared();
     defer processes_map_lock.unlockShared(lock_flags);
 
     const process: *Process = processes_map.get(id) orelse return null;
     if (process.state.load(.acquire) == .dying) return null;
 
-    _ = process.reference_counter.fetchAdd(1, .acq_rel);
+    _ = process.ref_count.fetchAdd(1, .acq_rel);
 
     return process;
 }
 
 /// Invalidate Process pointer.
 pub fn release(self: *Process) void {
-    if (self.reference_counter.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
         self._kill();
         self.destroy();
     }
 }
 
-pub fn virtualSpace(self: *Process) *mem.virt.Space {
-    if (self.virtual_space == null) {
-        return &mem.virt.kernel_space;
+pub fn virtualSpace(self: *Process) *mem.vmm.Space {
+    if (self.isPriviledged()) {
+        return &mem.vmm.kernel_space;
     } else {
-        return &(self.virtual_space.?);
+        return &self.virtual_space;
     }
 }
 
@@ -147,8 +145,7 @@ pub fn isDying(self: *Process) bool {
 // ---- //
 
 pub const Options = struct {
-    kernel_space_only: bool = false,
-    execution_level: basalt.process.ExecutionLevel = .user,
+        execution_level: basalt.process.ExecutionLevel = .user,
 };
 
 pub const State = enum(u8) {

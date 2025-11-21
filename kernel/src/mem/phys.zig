@@ -334,7 +334,7 @@ fn free_noncontiguous_pages(pages: []u64, level: PageLevel) void {
     }
 }
 
-pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool) AllocError!u64 {
+pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool, reset: bool) AllocError!u64 {
     const lock_flags = phys_lock.lockExclusive();
     defer phys_lock.unlockExclusive(lock_flags);
 
@@ -361,7 +361,9 @@ pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool)
                 run += 1;
                 if (run == length) {
                     for (0..length) |j| {
-                        mark_page(i + j, level);
+                        const pidx = i + j;
+                        mark_page(pidx, level);
+                        if (reset) @memset(@as(*[0x1000]u8, @ptrFromInt(boot.hhdm_base + (pidx << level.shift())))[0..0x1000], 0);
                     }
                     return i << level.shift();
                 }
@@ -372,15 +374,15 @@ pub fn allocContiguousPages(length: usize, level: PageLevel, length_align: bool)
 
         return AllocError.OutOfContiguousMemory;
     } else if (length == 1) {
-        return alloc_page(level, false);
+        return alloc_page(level, reset);
     }
 
     return 0;
 }
 
 pub fn freeContiguousPages(address: u64, length: usize, level: PageLevel) void {
-    phys_lock.lock();
-    defer phys_lock.unlock();
+    const lock_flags = phys_lock.lockExclusive();
+    defer phys_lock.unlockExclusive(lock_flags);
 
     const addr = address >> level.shift();
     var offset: usize = 0;

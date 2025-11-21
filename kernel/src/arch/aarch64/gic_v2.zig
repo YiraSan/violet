@@ -23,7 +23,7 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 const phys = mem.phys;
-const virt = mem.virt;
+const vmm = mem.vmm;
 
 const acpi = kernel.drivers.acpi;
 
@@ -46,14 +46,18 @@ pub fn init() !void {
                 while (madt_iter.next()) |madt_entry| {
                     switch (madt_entry) {
                         .gicd => |gicd| {
-                            const reservation = virt.kernel_space.reserve(GICD_SIZE >> 12);
+                            const virtual_address = try vmm.kernel_space.allocator.alloc(GICD_SIZE, 0, null, 0);
+                            const page_count = GICD_SIZE >> 12;
 
-                            reservation.map(gicd.address, .{
-                                .device = true,
-                                .writable = true,
-                            }, .no_hint);
+                            try vmm.kernel_space.paging.map(
+                                virtual_address,
+                                gicd.address,
+                                page_count,
+                                .l4K,
+                                .{ .type = .device, .writable = true },
+                            );
 
-                            gicd_base = reservation.address();
+                            gicd_base = virtual_address;
 
                             break :xsdt_loop;
                         },
@@ -195,14 +199,18 @@ pub fn initCpu() !void {
                     switch (madt_entry) {
                         .gicc => |gicc| {
                             if (gicc.interface_number == interface_number) {
-                                const reservation = virt.kernel_space.reserve(GICC_SIZE >> 12);
+                                const virtual_address = try vmm.kernel_space.allocator.alloc(GICC_SIZE, 0, null, 0);
+                                const page_count = GICC_SIZE >> 12;
 
-                                reservation.map(gicc.address, .{
-                                    .device = true,
-                                    .writable = true,
-                                }, .no_hint);
+                                try vmm.kernel_space.paging.map(
+                                    virtual_address,
+                                    gicc.address,
+                                    page_count,
+                                    .l4K,
+                                    .{ .type = .device, .writable = true },
+                                );
 
-                                gicc_base[interface_number] = reservation.address();
+                                gicc_base[interface_number] = virtual_address;
 
                                 break :xsdt_loop;
                             }

@@ -50,7 +50,7 @@ pub fn stage0() !void {
     try arch.initCpus();
     try mem.phys.initCpu();
 
-    try mem.virt.init();
+    try mem.vmm.init();
 
     try drivers.serial.init();
 }
@@ -62,14 +62,12 @@ pub fn stage1() !void {
     try syscall.init();
     try prism.init();
     try prism.initCpu();
-    try mem.heap.init();
     try scheduler.init();
 
     // scheduler tests
     if (builtin.mode == .Debug) {
         const test_process_id = try scheduler.Process.create(.{
             .execution_level = .kernel,
-            .kernel_space_only = true,
         });
 
         const task0 = try scheduler.Task.create(test_process_id, .{ .entry_point = @intFromPtr(&_task0) });
@@ -81,7 +79,7 @@ pub fn stage1() !void {
 }
 
 pub fn stage2() !void {
-    try drivers.init();
+    // try drivers.init();
 
     try arch.bootCpus();
 

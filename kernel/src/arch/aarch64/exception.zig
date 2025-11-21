@@ -25,8 +25,11 @@ const log = std.log.scoped(.exception);
 const kernel = @import("root");
 
 const mem = kernel.mem;
-const phys = mem.phys;
 const syscall = kernel.syscall;
+const scheduler = kernel.scheduler;
+
+const phys = mem.phys;
+const vmm = mem.vmm;
 
 // --- aarch64/exception.zig --- //
 
@@ -73,7 +76,6 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
     kernel.arch.maskInterrupts();
 
     const esr_el1 = ark.armv8.registers.ESR_EL1.load();
-    const cpu = kernel.arch.Cpu.get();
 
     switch (esr_el1.ec) {
         .svc_inst_aarch64 => {
@@ -104,36 +106,52 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
             const far = ark.armv8.registers.loadFarEl1();
             const iss = esr_el1.iss.data_abort;
 
-            if (iss.dfsc != .access_flag_lv1 and
-                iss.dfsc != .access_flag_lv2 and
-                iss.dfsc != .access_flag_lv3)
-            {
-                log.debug("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
-            }
-
             switch (iss.dfsc) {
-                .access_flag_lv1, .access_flag_lv2, .access_flag_lv3 => {
-                    const virt_space = if (far < 0xffff_8000_0000_0000) cpu.user_space else &mem.virt.kernel_space;
+                .translation_fault_lv0,
+                .translation_fault_lv1,
+                .translation_fault_lv2,
+                .translation_fault_lv3,
+                => {
+                    const local = scheduler.Local.get();
 
-                    var mapping = virt_space.getPage(far) orelse unreachable;
+                    if (local.current_task) |current_task| {
+                        const vs = current_task.process.virtualSpace();
 
-                    switch (mapping.hint) {
-                        .no_hint => unreachable,
-                        .heap_begin, .heap_inbetween, .heap_end, .heap_single, .heap_begin_stack, .heap_stack => {
-                            mapping.phys_addr = phys.allocPage(mapping.level, true) catch {
-                                @panic("out of memory exception");
-                            };
-                            virt_space.setPage(far, mapping) orelse unreachable;
-                            mem.virt.flush(far, .l4K);
-                        },
-                        .stack_begin_guard_page, .stack_end_guard_page => {
-                            @panic("stack overflow exception");
-                        },
+                        const res = vs.resolveFault(far) catch |err| switch (err) {
+                            vmm.Space.Error.SegmentationFault => {
+                                log.err("Segmentation fault from task {}:{} on 0x{x}", .{ current_task.process.id.index, current_task.id.index, far });
+
+                                scheduler.terminateTask(ctx);
+
+                                return;
+                            },
+                            else => unreachable,
+                        };
+
+                        vs.paging.map(
+                            far,
+                            res.phys_addr,
+                            1,
+                            switch (iss.dfsc) {
+                                .translation_fault_lv0 => unreachable,
+                                .translation_fault_lv1 => .l1G,
+                                .translation_fault_lv2 => .l2M,
+                                .translation_fault_lv3 => .l4K,
+                                else => unreachable,
+                            },
+                            res.flags,
+                        ) catch |err| {
+                            log.err("failed to commit on 0x{x} at task {}:{}, {}", .{ far, current_task.process.id.index, current_task.id.index, err });
+                            ark.cpu.halt();
+                        };
+
+                        return;
+                    } else {
+                        log.debug("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
                     }
-
-                    return;
                 },
                 else => {
+                    log.debug("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
                     @panic("unimplemented data abort exception");
                 },
             }

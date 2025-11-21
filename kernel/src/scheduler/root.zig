@@ -26,7 +26,9 @@ const log = std.log.scoped(.scheduler);
 const kernel = @import("root");
 
 const mem = kernel.mem;
-const virt = mem.virt;
+
+const heap = mem.heap;
+const vmm = mem.vmm;
 
 pub const Process = @import("process.zig");
 pub const Task = @import("task.zig");
@@ -36,7 +38,6 @@ pub const Task = @import("task.zig");
 pub fn init() !void {
     idle_process_id = try Process.create(.{
         .execution_level = .kernel,
-        .kernel_space_only = true,
     });
 
     try initCpu();
@@ -53,7 +54,7 @@ pub fn initCpu() !void {
     const local = Local.get();
 
     local.current_task = null;
-    local.queue_tasks = .{};
+    local.queue_tasks = .init();
     local.cycle_done = 0;
 
     const idle_task_id = try Task.create(idle_process_id, .{
@@ -65,7 +66,7 @@ pub fn initCpu() !void {
     local.idle_task = Task.acquire(idle_task_id) orelse unreachable;
 }
 
-pub fn register(task_id: Task.ID) !void {
+pub fn register(task_id: Task.Id) !void {
     const lock_flags = incomming_tasks_lock.lockExclusive();
     defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
@@ -123,7 +124,7 @@ fn terminateProcess(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.cal
     storeAndLoad(ctx, null);
 }
 
-fn terminateTask(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void {
+pub fn terminateTask(ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void {
     const local = Local.get();
 
     if (local.current_task) |current_task| {
@@ -154,7 +155,7 @@ pub const Local = struct {
 
     idle_task: *kernel.scheduler.Task,
 
-    queue_tasks: mem.Queue(*kernel.scheduler.Task),
+    queue_tasks: heap.Queue(*kernel.scheduler.Task),
     cycle_done: usize,
 
     pub fn get() *@This() {
@@ -163,11 +164,11 @@ pub const Local = struct {
 };
 
 /// reserved to new tasks.
-var incomming_tasks: mem.Queue(Task.ID) = .{};
+var incomming_tasks: heap.Queue(Task.Id) = .init();
 var incomming_tasks_lock: mem.RwLock = .{};
 
-var idle_process_id: Process.ID = undefined;
-fn idle_task(_: *[0x1000]u8) callconv(basalt.task.call_conv) noreturn {
+var idle_process_id: Process.Id = undefined;
+fn idle_task() callconv(basalt.task.call_conv) noreturn {
     ark.cpu.halt();
 }
 
@@ -177,16 +178,15 @@ inline fn chooseTask() void {
     local.cycle_done += 1;
 
     if (local.current_task == null) {
-        const local_task_ready = local.queue_tasks.count() > 0;
+        const local_task_ready = local.queue_tasks.len() > 0;
 
-        if (local.cycle_done >= (local.queue_tasks.count() / 15 + 1) or !local_task_ready) {
+        if (local.cycle_done >= (local.queue_tasks.len() / 15 + 1) or !local_task_ready) {
             local.cycle_done = 0;
 
             const lock_flags = incomming_tasks_lock.lockExclusive();
             defer incomming_tasks_lock.unlockExclusive(lock_flags);
 
-            while (incomming_tasks.count() > 0) {
-                const incomming_task_id = incomming_tasks.pop();
+            while (incomming_tasks.pop()) |incomming_task_id| {
                 const nincomming_task = Task.acquire(incomming_task_id);
                 if (nincomming_task) |incomming_task| {
                     local.current_task = incomming_task;

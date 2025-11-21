@@ -20,223 +20,283 @@ const std = @import("std");
 
 const kernel = @import("root");
 
+const boot = kernel.boot;
 const mem = kernel.mem;
-const virt = mem.virt;
+
+const phys = mem.phys;
 
 // --- mem/heap.zig --- //
 
-pub fn init() !void {
-    // TODO configure heap syscalls.
+pub fn allocPage() ![*]u8 {
+    return @ptrFromInt(boot.hhdm_base + try phys.allocPage(.l4K, true));
 }
 
-pub fn alloc(space: *virt.Space, level: mem.PageLevel, count: u16, flags: mem.virt.MemoryFlags, stack: bool) u64 {
-    if (level != .l4K) unreachable;
+pub fn freePage(address: [*]u8) void {
+    phys.freePage(@intFromPtr(address) - boot.hhdm_base, .l4K);
+}
 
-    if (count == 0) return 0;
+pub fn allocContiguous(count: usize) ![*]u8 {
+    return @ptrFromInt(boot.hhdm_base + try phys.allocContiguousPages(count, .l4K, false, true));
+}
 
-    if (stack) {
-        const stack_res = space.reserve(@as(usize, @intCast(count)) + 2);
-        stack_res.map(0, flags, .heap_stack);
+pub fn freeContiguous(address: [*]u8, count: usize) void {
+    phys.freeContiguousPages(@intFromPtr(address) - boot.hhdm_base, count, .l4K);
+}
 
-        {
-            var mapping = space.getPage(stack_res.address()) orelse unreachable;
-            mapping.hint = .stack_begin_guard_page;
-            _ = space.setPage(stack_res.address(), mapping);
+pub fn resizeContiguous(old_address: [*]u8, old_count: usize, new_count: usize) ![*]u8 {
+    if (old_count > new_count) unreachable;
+    if (old_count == new_count) return old_address;
+
+    defer freeContiguous(old_address, old_count);
+
+    const new_address = try allocContiguous(new_count);
+
+    const byte_size = old_count << mem.PageLevel.l4K.shift();
+
+    @memcpy(new_address[0..byte_size], old_address[0..byte_size]);
+
+    return new_address;
+}
+
+// --- collections --- //
+
+pub fn List(comptime T: type) type {
+    // NOTE could be optimized by forcing T alignment on 16 (to avoid a division).
+
+    return struct {
+        const PAGE_SIZE = mem.PageLevel.l4K.size();
+
+        const ITEM_PER_PAGE = PAGE_SIZE / @sizeOf(T);
+        const PTRS_PER_PAGE = PAGE_SIZE / @sizeOf([*]T);
+
+        directory: [*][*]T = undefined,
+        directory_capacity: u32 = 0,
+        directory_len: u32 = 0,
+
+        pub fn init() @This() {
+            return .{
+                .directory = undefined,
+                .directory_capacity = 0,
+                .directory_len = 0,
+            };
         }
 
-        {
-            const begin_addr = stack_res.address() + 0x1000;
-            var mapping = space.getPage(begin_addr) orelse unreachable;
-            mapping.hint = .heap_begin_stack;
-            _ = space.setPage(begin_addr, mapping);
+        pub fn deinit(self: *@This()) void {
+            if (self.directory_capacity != 0) {
+                // TODO release all contained pages.
+
+                freeContiguous(@ptrCast(self.directory), self.directory_capacity / PTRS_PER_PAGE);
+            }
         }
 
-        {
-            const end_page_addr = stack_res.address() + (stack_res.size << 12) - 0x1000;
-            var mapping = space.getPage(end_page_addr) orelse unreachable;
-            mapping.hint = .stack_end_guard_page;
-            _ = space.setPage(end_page_addr, mapping);
+        fn ensureDirectoryCapacity(self: *@This()) !void {
+            if (self.directory_len < self.directory_capacity) return;
+
+            const old_capacity = self.directory_capacity;
+            const new_capacity = old_capacity + PTRS_PER_PAGE;
+
+            const old_capacity_pages = old_capacity / PTRS_PER_PAGE;
+            const new_capacity_pages = new_capacity / PTRS_PER_PAGE;
+
+            const new_ptr = if (old_capacity == 0)
+                try allocContiguous(new_capacity_pages)
+            else
+                try resizeContiguous(@ptrCast(self.directory), old_capacity_pages, new_capacity_pages);
+
+            self.directory = @ptrCast(@alignCast(new_ptr));
+            self.directory_capacity = @intCast(new_capacity);
         }
 
-        return stack_res.address() + 0x1000;
-    } else {
-        const res = space.reserve(count);
+        pub fn grow(self: *@This()) !void {
+            try self.ensureDirectoryCapacity();
 
-        if (count > 1) {
-            res.map(0, flags, .heap_inbetween);
+            const page = try allocPage();
 
-            {
-                var mapping = space.getPage(res.address()) orelse unreachable;
-                mapping.hint = .heap_begin;
-                _ = space.setPage(res.address(), mapping);
+            self.directory[self.directory_len] = @ptrCast(@alignCast(page));
+            self.directory_len += 1;
+        }
+
+        pub fn capacity(self: *@This()) u32 {
+            return @intCast(self.directory_len * ITEM_PER_PAGE);
+        }
+
+        pub inline fn get(self: *@This(), index: u32) *T {
+            const page_index = index / ITEM_PER_PAGE;
+            const item_index = index % ITEM_PER_PAGE;
+
+            const page = self.directory[page_index];
+            return &page[item_index];
+        }
+
+        comptime {
+            if (@sizeOf(T) > PAGE_SIZE) @compileError("List: T is too large.");
+        }
+    };
+}
+
+pub fn SlotMap(comptime T: type) type {
+    return struct {
+        pub const Key = packed struct(u64) {
+            index: u32,
+            generation: u32,
+        };
+
+        const Slot = struct {
+            generation: u32,
+            content: union {
+                value: T,
+                next_free: ?u32,
+            },
+        };
+
+        list: List(Slot),
+        len: u32,
+        free_head: ?u32,
+        count: u32,
+
+        pub fn init() @This() {
+            return .{
+                .list = .init(),
+                .len = 0,
+                .free_head = null,
+                .count = 0,
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.list.deinit();
+        }
+
+        pub fn insert(self: *@This(), value: T) !Key {
+            var slot_index: u32 = 0;
+            var generation: u32 = 0;
+
+            if (self.free_head) |head_index| {
+                slot_index = head_index;
+                const slot = self.list.get(slot_index);
+
+                generation = slot.generation;
+
+                self.free_head = slot.content.next_free;
+
+                slot.content = .{ .value = value };
+            } else {
+                if (self.len == self.list.capacity()) {
+                    try self.list.grow();
+                }
+
+                slot_index = @intCast(self.len);
+                self.len += 1;
+
+                generation = 0;
+
+                self.list.get(slot_index).* = .{
+                    .generation = generation,
+                    .content = .{ .value = value },
+                };
             }
 
-            {
-                const end_page_addr = res.address() + (res.size << 12) - 0x1000;
-                var mapping = space.getPage(end_page_addr) orelse unreachable;
-                mapping.hint = .heap_end;
-                _ = space.setPage(end_page_addr, mapping);
+            self.count += 1;
+
+            return .{
+                .index = slot_index,
+                .generation = generation,
+            };
+        }
+
+        pub fn remove(self: *@This(), key: Key) void {
+            if (key.index >= self.len) return;
+
+            const slot = self.list.get(key.index);
+
+            if (slot.generation != key.generation) return;
+
+            slot.generation +%= 1;
+
+            slot.content = .{ .next_free = self.free_head };
+            self.free_head = key.index;
+
+            self.count -= 1;
+        }
+
+        pub fn get(self: *@This(), key: Key) ?*T {
+            if (key.index >= self.len) return null;
+
+            const slot = self.list.get(key.index);
+
+            if (slot.generation != key.generation) return null;
+
+            return &slot.content.value;
+        }
+    };
+}
+
+/// First-In First-Out
+pub fn Queue(comptime T: type) type {
+    return struct {
+        list: List(T),
+        head: u32,
+        tail: u32,
+
+        pub fn init() @This() {
+            return .{
+                .list = .init(),
+                .head = 0,
+                .tail = 0,
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.list.deinit();
+        }
+
+        pub fn append(self: *@This(), item: T) !void {
+            if (self.head == self.tail) {
+                self.head = 0;
+                self.tail = 0;
             }
-        } else {
-            res.map(0, flags, .heap_single);
+
+            if (self.tail >= self.list.capacity()) {
+                try self.list.grow();
+            }
+
+            const val = self.list.get(self.tail);
+            val.* = item;
+
+            self.tail += 1;
         }
 
-        return res.address();
-    }
+        pub fn pop(self: *@This()) ?T {
+            if (self.head == self.tail) {
+                return null;
+            }
+
+            const val = self.list.get(self.head).*;
+
+            self.head += 1;
+
+            return val;
+        }
+
+        pub fn peek(self: *@This()) ?*T {
+            if (self.head == self.tail) return null;
+            return self.list.get(self.head);
+        }
+
+        pub fn len(self: *@This()) u32 {
+            return self.tail - self.head;
+        }
+
+        pub fn isEmpty(self: *@This()) bool {
+            return self.head == self.tail;
+        }
+    };
 }
 
-/// Re-allocate virtually the memory somewhere else in the virtual space with a different size by freeing exceeding memory.
-pub fn realloc(space: *virt.Space, address: u64, new_count: u16) u64 {
-    if (new_count == 0) {
-        free(space, address);
-        return 0;
-    }
+// ---- //
 
-    var addr = std.mem.alignBackward(u64, address, mem.PageLevel.l4K.size());
-    const nmapping = space.getPage(addr);
-
-    if (nmapping) |mapping| {
-        switch (mapping.hint) {
-            .heap_single => {
-                const reservation = space.reserve(1);
-                reservation.map(mapping.phys_addr, mapping.flags, mapping.hint);
-                space.unmapPage(addr);
-                virt.flush(addr, .l4K);
-                return reservation.address();
-            },
-            .heap_begin => {
-                var reservation = space.reserve(new_count);
-                const res_addr = reservation.address();
-                reservation.size = 1;
-
-                var done: usize = 0;
-                var nmap = nmapping;
-                while (nmap) |map| {
-                    if (done < new_count) {
-                        reservation.map(map.phys_addr, map.flags, if (done == new_count - 1) .heap_end else if (done == 0) .heap_begin else .heap_inbetween);
-                    } else {
-                        if (map.phys_addr != 0) {
-                            mem.phys.freePage(map.phys_addr, map.level);
-                        }
-                    }
-
-                    done += 1;
-
-                    space.unmapPage(addr);
-                    virt.flush(addr, .l4K);
-
-                    if (map.hint == .heap_end) break;
-
-                    reservation.virt += map.level.size();
-                    addr += map.level.size();
-                    nmap = space.getPage(addr);
-                }
-
-                return res_addr;
-            },
-            .heap_begin_stack => {
-                var reservation = space.reserve(new_count + 2);
-                const res_addr = reservation.address() + 0x1000;
-                reservation.size = 1;
-
-                {
-                    const guard_addr = addr - 0x1000;
-                    const guard_map = space.getPage(guard_addr).?;
-                    if (guard_map.hint != .stack_begin_guard_page) unreachable;
-                    reservation.map(guard_map.phys_addr, guard_map.flags, guard_map.hint);
-                    space.unmapPage(guard_addr);
-                    virt.flush(guard_addr, .l4K);
-                    reservation.virt += guard_map.level.size();
-                }
-
-                var done: usize = 0;
-                var nmap = nmapping;
-                while (nmap) |map| {
-                    if (done == new_count) {
-                        reservation.map(0, map.flags, .stack_end_guard_page);
-                    } else if (done < new_count) {
-                        reservation.map(map.phys_addr, map.flags, map.hint);
-                    } else {
-                        if (map.phys_addr != 0) {
-                            mem.phys.freePage(map.phys_addr, map.level);
-                        }
-                    }
-
-                    done += 1;
-
-                    space.unmapPage(addr);
-                    virt.flush(addr, .l4K);
-
-                    if (map.hint == .stack_end_guard_page) break;
-
-                    reservation.virt += map.level.size();
-                    addr += map.level.size();
-                    nmap = space.getPage(addr);
-                }
-
-                return res_addr;
-            },
-            else => {
-                return 0;
-            },
-        }
-    }
-
-    return 0;
-}
-
-pub fn free(space: *virt.Space, address: u64) void {
-    var addr = std.mem.alignBackward(u64, address, mem.PageLevel.l4K.size());
-    const nmapping = space.getPage(addr);
-
-    if (nmapping) |mapping| {
-        switch (mapping.hint) {
-            .heap_single => {
-                if (mapping.phys_addr != 0) {
-                    mem.phys.freePage(mapping.phys_addr, mapping.level);
-                }
-                space.unmapPage(addr);
-                virt.flush(addr, .l4K);
-            },
-            .heap_begin => {
-                var nmap = nmapping;
-                while (nmap) |map| {
-                    if (map.phys_addr != 0) {
-                        mem.phys.freePage(map.phys_addr, map.level);
-                    }
-                    space.unmapPage(addr);
-                    virt.flush(addr, .l4K);
-
-                    if (map.hint == .heap_end) break;
-
-                    addr += map.level.size();
-                    nmap = space.getPage(addr);
-                }
-            },
-            .heap_begin_stack => {
-                {
-                    const guard_addr = addr - 0x1000;
-                    const guard_map = space.getPage(guard_addr).?;
-                    if (guard_map.hint != .stack_begin_guard_page) unreachable;
-                    space.unmapPage(guard_addr);
-                    virt.flush(guard_addr, .l4K);
-                }
-
-                var nmap = nmapping;
-                while (nmap) |map| {
-                    if (map.phys_addr != 0) {
-                        mem.phys.freePage(map.phys_addr, map.level);
-                    }
-                    space.unmapPage(addr);
-                    virt.flush(addr, .l4K);
-
-                    if (map.hint == .stack_end_guard_page) break;
-
-                    addr += map.level.size();
-                    nmap = space.getPage(addr);
-                }
-            },
-            else => {},
-        }
-    }
+comptime {
+    _ = List;
+    _ = SlotMap;
+    _ = Queue;
 }

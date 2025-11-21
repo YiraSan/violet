@@ -58,7 +58,7 @@ pub fn initCpus() !void {
                             const mpidr: ark.armv8.registers.MPIDR_EL1 = @bitCast(gicc.mpidr);
                             if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
 
-                            const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false));
+                            const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false, true));
                             cpus[mpidr.aff0] = cpu_ptr;
                             cpu_ptr.cpuid = gicc.mpidr;
                         },
@@ -97,26 +97,23 @@ pub fn bootCpus() !void {
 
     const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
 
-    const l0_page = try kernel.mem.phys.allocPage(.l4K, false);
-    var ttbr0_space = kernel.mem.virt.Space.init(.lower, l0_page);
+    var ttbr0_space = try kernel.mem.vmm.Space.init(.lower, null, false);
+    defer ttbr0_space.deinit();
 
     const trampoline_ptr = if (pfr0.el2 == .not_implemented) @intFromPtr(&trampoline_el1) else @intFromPtr(&trampoline_el2);
-    const trampoline_page = kernel.mem.virt.kernel_space.getPage(trampoline_ptr).?;
+    const trampoline_page = kernel.mem.vmm.kernel_space.paging.get(trampoline_ptr).?;
     const trampoline_addr = trampoline_page.phys_addr | (trampoline_ptr & 0xfff);
 
     if (pfr0.el2 == .not_implemented) {
-        var res = kernel.mem.virt.Reservation{
-            .space = &ttbr0_space,
-            .virt = trampoline_page.phys_addr,
-            .size = 1,
-        };
+        try kernel.mem.vmm.kernel_space.paging.map(
+            trampoline_page.phys_addr,
+            trampoline_page.phys_addr,
+            1,
+            .l4K,
+            .{ .executable = true, .writable = true },
+        );
 
-        res.map(trampoline_page.phys_addr, .{
-            .executable = true,
-            .writable = true,
-        }, .no_hint);
-
-        cpu_setup_data.ttbr0 = ttbr0_space.l0_table;
+        cpu_setup_data.ttbr0 = ttbr0_space.paging.table_phys;
 
         var tcr_el1 = ark.armv8.registers.TCR_EL1.load();
         tcr_el1.epd0 = false;
@@ -141,7 +138,7 @@ pub fn bootCpus() !void {
 
     cpu_setup_data.sctlr_el1 = @bitCast(ark.armv8.registers.SCTLR_EL1.load());
 
-    cpu_setup_data.ttbr1 = kernel.mem.virt.kernel_space.l0_table;
+    cpu_setup_data.ttbr1 = kernel.mem.vmm.kernel_space.paging.table_phys;
 
     cpu_setup_data.entry_virt = @intFromPtr(&initSecondary);
 
@@ -162,8 +159,6 @@ pub fn bootCpus() !void {
             }
         }
     }
-
-    // TODO free PTEs
 }
 
 extern var cpu_setup_data: extern struct {

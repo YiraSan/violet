@@ -26,8 +26,8 @@ pub const serial = @import("serial/root.zig");
 pub const acpi = @import("acpi.zig");
 pub const Timer = @import("timer.zig");
 
-const pcie = @import("pcie/root.zig");
-const virtio = @import("virtio/root.zig");
+// const pcie = @import("pcie/root.zig");
+// const virtio = @import("virtio/root.zig");
 
 comptime {
     _ = serial;
@@ -35,18 +35,18 @@ comptime {
 
     _ = Timer;
 
-    _ = pcie;
-    _ = virtio;
+    // _ = pcie;
+    // _ = virtio;
 }
 
 // --- drivers/root.zig --- //
 
 pub fn init() !void {
-    try pcie.init();
+    // try pcie.init();
 
-    if (build_options.platform == .aarch64_qemu or build_options.platform == .riscv64_qemu) {
-        try virtio.init();
-    }
+    // if (build_options.platform == .aarch64_qemu or build_options.platform == .riscv64_qemu) {
+    //     try virtio.init();
+    // }
 }
 
 pub const PCIVendorDeviceMatch = struct {
