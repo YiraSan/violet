@@ -54,7 +54,7 @@ pub fn fail(context: *kernel.arch.ExceptionContext, code: basalt.syscall.ErrorCo
     }));
 }
 
-pub fn isAddressSafe(virt_address: u64, writable: bool) bool {
+pub fn isAddressSafe(virt_address: u64, size: u64, writable: bool) bool {
     const local = kernel.scheduler.Local.get();
 
     if (local.current_task) |current_task| {
@@ -62,6 +62,7 @@ pub fn isAddressSafe(virt_address: u64, writable: bool) bool {
 
         if (region) |reg| {
             if (reg.object) |object| {
+                if ((virt_address - reg.start) + reg.size < size) return false;
                 if (!object.flags.writable and writable) return false;
 
                 return true;
