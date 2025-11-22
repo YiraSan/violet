@@ -119,7 +119,7 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
 
                         const res = vs.resolveFault(far) catch |err| switch (err) {
                             vmm.Space.Error.SegmentationFault => {
-                                log.err("Segmentation fault from task {}:{} on 0x{x}", .{ current_task.process.id.index, current_task.id.index, far });
+                                log.err("segmentation fault from task {}:{} at address 0x{x}", .{ current_task.process.id.index, current_task.id.index, far });
 
                                 scheduler.terminateTask(ctx);
 
