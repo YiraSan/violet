@@ -55,24 +55,21 @@ pub fn fail(context: *kernel.arch.ExceptionContext, code: basalt.syscall.ErrorCo
 }
 
 pub fn isAddressSafe(virt_address: u64, writable: bool) bool {
-    _ = virt_address;
-    _ = writable;
-
     const local = kernel.scheduler.Local.get();
 
-    // NOTE a call done by a priviledged process is considered safe.
-
     if (local.current_task) |current_task| {
-        if (!current_task.process.isPriviledged()) {
-            // NOTE the mapping test is done only on one page, in the future the length of the access should also be considered.
-            @panic("TODO isAddressSafe");
-            // const mapping = current_task.process.virtualSpace().getPage(virt_address) orelse return false;
-            // if (mapping.flags.device) return false;
-            // if (writable and !mapping.flags.writable) return false;
+        const region = current_task.process.virtualSpace().allocator.findRegion(virt_address);
+
+        if (region) |reg| {
+            if (reg.object) |object| {
+                if (!object.flags.writable and writable) return false;
+
+                return true;
+            }
         }
     } else {
         @panic("syscall.isAddressSafe called outside a task !");
     }
 
-    return true;
+    return false;
 }
