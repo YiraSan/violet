@@ -247,7 +247,7 @@ fn ensureTable(table_phys: u64, index: u64) !u64 {
         }
     }
 
-    const new_table = try phys.allocPage(.l4K, true);
+    const new_table = try phys.allocPage(true);
 
     entry.* = Entry{
         .valid = true,

@@ -146,7 +146,7 @@ pub fn bootCpus() !void {
         if (cpu_nptr) |cpu| {
             if (cpu.cpuid == kernel.arch.Cpu.id()) continue;
 
-            cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocPage(.l2M, false) + mem.PageLevel.l2M.size();
+            cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocContiguous(64, false) + mem.PageLevel.l4K.size() * 64;
             cpu_setup_data.setup_done = 0;
 
             asm volatile ("dsb ish ; isb" ::: "memory");
