@@ -30,6 +30,8 @@ const arch = kernel.arch;
 const boot = kernel.boot;
 const drivers = kernel.drivers;
 
+const PAGE_SIZE = kernel.mem.PageLevel.l4K.size();
+
 // --- boot/uefi/root.zig --- //
 
 var memory_map: MemoryMap = undefined;
@@ -106,20 +108,36 @@ const MemoryMap = struct {
 
 // --- boot implementation --- //
 
-pub const UsableMemoryIterator = struct {
+pub const UnusedMemoryIterator = struct {
     index: usize = 0,
 
     pub fn next(self: *@This()) ?boot.MemoryEntry {
-        var current_entry = memory_map.get(self.index) orelse return null;
-        self.index += 1;
-        while (current_entry.type != .conventional_memory) {
-            current_entry = memory_map.get(self.index) orelse return null;
+        while (true) {
+            const current_entry = memory_map.get(self.index) orelse return null;
             self.index += 1;
-        }
 
-        return boot.MemoryEntry{
-            .physical_base = &current_entry.physical_start,
-            .number_of_pages = &current_entry.number_of_pages,
-        };
+            if (current_entry.type != .conventional_memory) {
+                continue;
+            }
+
+            const raw_start = current_entry.physical_start;
+            const aligned_start = std.mem.alignForward(usize, raw_start, PAGE_SIZE);
+            var valid_pages = current_entry.number_of_pages;
+
+            if (aligned_start > raw_start) {
+                if (valid_pages > 0) {
+                    valid_pages -= 1;
+                }
+            }
+
+            if (valid_pages == 0) {
+                continue;
+            }
+
+            return boot.MemoryEntry{
+                .physical_base = aligned_start,
+                .number_of_pages = valid_pages,
+            };
+        }
     }
 };

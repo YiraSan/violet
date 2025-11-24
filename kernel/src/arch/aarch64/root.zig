@@ -58,7 +58,7 @@ pub fn initCpus() !void {
                             const mpidr: ark.armv8.registers.MPIDR_EL1 = @bitCast(gicc.mpidr);
                             if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
 
-                            const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguousPages(1, .l2M, false, true));
+                            const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguous(64, true));
                             cpus[mpidr.aff0] = cpu_ptr;
                             cpu_ptr.cpuid = gicc.mpidr;
                         },

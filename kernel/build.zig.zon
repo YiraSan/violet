@@ -6,6 +6,7 @@
     .dependencies = .{
         .basalt = .{ .path = "../basalt/" },
         .ark = .{ .path = "../shared/ark/" },
+        .whba = .{ .path = "../shared/whba" },
     },
     .paths = .{
         "build.zig",

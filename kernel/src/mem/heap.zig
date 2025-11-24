@@ -15,6 +15,7 @@
 // --- dependencies --- //
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // --- imports --- //
 
@@ -28,32 +29,32 @@ const phys = mem.phys;
 // --- mem/heap.zig --- //
 
 pub fn allocPage() ![*]u8 {
-    return @ptrFromInt(boot.hhdm_base + try phys.allocPage(.l4K, true));
+    return @ptrFromInt(boot.hhdm_base + try phys.allocPage(true));
 }
 
 pub fn freePage(address: [*]u8) void {
-    phys.freePage(@intFromPtr(address) - boot.hhdm_base, .l4K);
+    phys.freePage(@intFromPtr(address) - boot.hhdm_base);
 }
 
 pub fn allocContiguous(count: usize) ![*]u8 {
-    return @ptrFromInt(boot.hhdm_base + try phys.allocContiguousPages(count, .l4K, false, true));
+    return @ptrFromInt(boot.hhdm_base + try phys.allocContiguous(count, true));
 }
 
 pub fn freeContiguous(address: [*]u8, count: usize) void {
-    phys.freeContiguousPages(@intFromPtr(address) - boot.hhdm_base, count, .l4K);
+    phys.freeContiguous(@intFromPtr(address) - boot.hhdm_base, count);
 }
 
 pub fn resizeContiguous(old_address: [*]u8, old_count: usize, new_count: usize) ![*]u8 {
     if (old_count > new_count) unreachable;
     if (old_count == new_count) return old_address;
 
-    defer freeContiguous(old_address, old_count);
-
     const new_address = try allocContiguous(new_count);
 
     const byte_size = old_count << mem.PageLevel.l4K.shift();
 
     @memcpy(new_address[0..byte_size], old_address[0..byte_size]);
+
+    freeContiguous(old_address, old_count);
 
     return new_address;
 }
@@ -83,7 +84,10 @@ pub fn List(comptime T: type) type {
 
         pub fn deinit(self: *@This()) void {
             if (self.directory_capacity != 0) {
-                // TODO release all contained pages.
+                var i: usize = 0;
+                while (i < self.directory_len) : (i += 1) {
+                    freePage(@ptrCast(self.directory[i]));
+                }
 
                 freeContiguous(@ptrCast(self.directory), self.directory_capacity / PTRS_PER_PAGE);
             }
@@ -116,16 +120,25 @@ pub fn List(comptime T: type) type {
             self.directory_len += 1;
         }
 
+        pub fn ensureTotalCapacity(self: *@This(), total_items: u64) !void {
+            while (self.capacity() < total_items) {
+                try self.grow();
+            }
+        }
+
         pub fn capacity(self: *@This()) u32 {
             return @intCast(self.directory_len * ITEM_PER_PAGE);
         }
 
         pub inline fn get(self: *@This(), index: u32) *T {
+            if (builtin.mode == .Debug) {
+                if (index >= self.capacity()) @panic("List: index out of bounds");
+            }
+
             const page_index = index / ITEM_PER_PAGE;
             const item_index = index % ITEM_PER_PAGE;
 
-            const page = self.directory[page_index];
-            return &page[item_index];
+            return &self.directory[page_index][item_index];
         }
 
         comptime {
@@ -175,10 +188,11 @@ pub fn SlotMap(comptime T: type) type {
                 slot_index = head_index;
                 const slot = self.list.get(slot_index);
 
-                generation = slot.generation;
+                generation = slot.generation +% 1;
 
                 self.free_head = slot.content.next_free;
 
+                slot.generation = generation;
                 slot.content = .{ .value = value };
             } else {
                 if (self.len == self.list.capacity()) {
@@ -206,24 +220,22 @@ pub fn SlotMap(comptime T: type) type {
 
         pub fn remove(self: *@This(), key: Key) void {
             if (key.index >= self.len) return;
-
             const slot = self.list.get(key.index);
 
+            if (slot.generation % 2 != 0) return;
             if (slot.generation != key.generation) return;
 
             slot.generation +%= 1;
-
             slot.content = .{ .next_free = self.free_head };
             self.free_head = key.index;
-
             self.count -= 1;
         }
 
         pub fn get(self: *@This(), key: Key) ?*T {
             if (key.index >= self.len) return null;
-
             const slot = self.list.get(key.index);
 
+            if (slot.generation % 2 != 0) return null;
             if (slot.generation != key.generation) return null;
 
             return &slot.content.value;

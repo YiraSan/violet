@@ -59,6 +59,13 @@ pub fn build(b: *std.Build) !void {
     const ark_mod = ark_dep.module("ark");
     kernel_mod.addImport("ark", ark_mod);
 
+    const whba_dep = b.dependency("whba", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const whba_mod = whba_dep.module("whba");
+    kernel_mod.addImport("whba", whba_mod);
+
     const basalt_dep = b.dependency("basalt", .{
         .target = target,
         .optimize = optimize,

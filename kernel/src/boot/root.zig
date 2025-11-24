@@ -36,12 +36,13 @@ comptime {
 pub var hhdm_base: u64 = 0;
 pub var hhdm_limit: u64 = 0;
 
+/// Everything has to be page-aligned.
 pub const MemoryEntry = struct {
-    physical_base: *u64,
-    number_of_pages: *u64,
+    physical_base: u64,
+    number_of_pages: u64,
 };
 
-pub const UsableMemoryIterator = adapter.UsableMemoryIterator;
+pub const UnusedMemoryIterator = adapter.UnusedMemoryIterator;
 
 /// TODO temp structure
 pub var xsdt: *kernel.drivers.acpi.Xsdt = undefined;

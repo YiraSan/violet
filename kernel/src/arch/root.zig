@@ -71,15 +71,7 @@ pub fn restoreSaved(saved: u64) void {
 pub const Cpu = struct {
     cpuid: u64,
 
-    // -- physical memory -- //
-    primary_4k_cache: [128]u64,
-    primary_4k_cache_pos: usize,
-    recycle_4k_cache: [128]u64,
-    recycle_4k_cache_num: usize,
-
-    // -- virtual memory -- //
-    // user_space: *kernel.mem.virt.Space,
-
+    phys_local: kernel.mem.phys.Local,
     scheduler_local: kernel.scheduler.Local,
     prism_local: kernel.prism.Local,
 
@@ -103,6 +95,6 @@ pub const Cpu = struct {
     }
 
     comptime {
-        if (@sizeOf(Cpu) > kernel.mem.PageLevel.l2M.size()) @compileError("Cpu should be less than or equal to 2 MiB.");
+        if (@sizeOf(Cpu) > 256 * 1024) @compileError("Cpu should be less than or equal to 256 KiB.");
     }
 };
