@@ -209,7 +209,9 @@ pub fn main() uefi.Status {
             .conventional_memory,
             .acpi_memory_nvs,
             .acpi_reclaim_memory,
+            .loader_code,
             .loader_data,
+            .boot_services_code,
             .boot_services_data,
             .runtime_services_data,
             => virt.mapContiguous(

@@ -116,7 +116,15 @@ pub const UnusedMemoryIterator = struct {
             const current_entry = memory_map.get(self.index) orelse return null;
             self.index += 1;
 
-            if (current_entry.type != .conventional_memory) {
+            const is_usable = switch (current_entry.type) {
+                .conventional_memory,
+                .loader_code,
+                .boot_services_code,
+                .boot_services_data => true,
+                else => false,
+            };
+
+            if (!is_usable) {
                 continue;
             }
 
