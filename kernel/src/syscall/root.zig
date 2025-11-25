@@ -60,15 +60,18 @@ pub fn isAddressSafe(virt_address: u64, T: type, writable: bool) bool {
     if (!std.mem.isAligned(virt_address, @alignOf(T))) return false;
 
     if (local.current_task) |current_task| {
-        const region = current_task.process.virtualSpace().allocator.findRegion(virt_address);
+        const vs = current_task.process.virtualSpace();
+        const lock_flags = vs.allocator.lock.lockShared();
+        defer vs.allocator.lock.unlockShared(lock_flags);
 
-        if (region) |reg| {
-            if (reg.object) |object| {
-                if ((virt_address - reg.start) + reg.size < @sizeOf(T)) return false;
-                if (!object.flags.writable and writable) return false;
+        const region_id = vs.allocator.regions.find(virt_address) orelse return false;
+        const region = vs.allocator.regions.get(region_id).?;
 
-                return true;
-            }
+        if (region.object) |object| {
+            if (region.end - virt_address < @sizeOf(T)) return false;
+            if (!object.flags.writable and writable) return false;
+
+            return true;
         }
     } else {
         @panic("syscall.isAddressSafe called outside a task !");

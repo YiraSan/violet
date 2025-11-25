@@ -43,210 +43,182 @@ pub fn init() !void {
 pub const Allocator = struct {
     pub const Error = error{
         OutOfVirtualMemory,
-        NotPageAligned,
+        InvalidAlignment,
         OutOfRange,
         AddressAlreadyInUse,
         InvalidAddress,
     };
 
     const Region = struct {
-        pub const Map = heap.SlotMap(Region);
-        pub const Id = Map.Key;
-
         start: u64,
-        size: u64,
+        end: u64,
 
         object: ?*Object,
         offset: u64,
+        flags: ?Object.Flags,
 
-        next_sorted: ?Id,
+        const Tree = heap.RedBlackTree(u64, Region, compareRegion);
+
+        fn compareRegion(address: u64, region: Region) std.math.Order {
+            if (address < region.start) return .lt;
+            if (address >= region.end) return .gt;
+            return .eq;
+        }
     };
 
-    const PAGE_SIZE = mem.PageLevel.l4K.size();
-
-    pub const LOWER_BASE: u64 = 0x0000_0000_0001_0000; // 64 KiB
+    pub const LOWER_BASE: u64 = 0x0000_0000_0001_0000;
     pub const LOWER_LIMIT: u64 = 0x0000_FFFF_FFFF_FFFF;
-    // HIGHER_BASE == HHDM_LIMIT
     pub const HIGHER_LIMIT: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
     base: u64,
     limit: u64,
-
-    regions: Region.Map,
-    head: ?Region.Id,
-
+    regions: Region.Tree,
     lock: mem.RwLock,
+
+    cached_hole_start: u64,
 
     pub fn init(base: u64, limit: u64) @This() {
         return .{
             .base = base,
             .limit = limit,
             .regions = .init(),
-            .head = null,
             .lock = .{},
+            .cached_hole_start = 0,
         };
     }
 
     pub fn deinit(self: *@This()) void {
-        var curr = self.head;
-        while (curr) |id| {
-            if (self.regions.get(id)) |reg| {
-                if (reg.object) |object| object.release();
-                curr = reg.next_sorted;
-            } else {
-                break;
-            }
+        var curr_id = self.regions.first();
+        while (curr_id) |id| {
+            const region = self.regions.get(id).?;
+            if (region.object) |object| object.release();
+            curr_id = self.regions.next(id);
         }
-
         self.regions.deinit();
     }
 
-    // lock_shared !!!!
-    pub fn findRegion(self: *@This(), addr: u64) ?*Region {
-        var curr = self.head;
-        while (curr) |id| {
-            const region = self.regions.get(id).?;
-            if (addr >= region.start and addr < region.start + region.size) {
-                return region;
-            }
-            if (region.start > addr) break;
-            curr = region.next_sorted;
-        }
-        return null;
-    }
-
-    pub fn alloc(self: *@This(), size: u64, align_size: u64, object: ?*Object, offset: u64) !u64 {
+    pub fn alloc(self: *@This(), size: u64, alignment: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !u64 {
         if (size == 0) return 0;
 
         const lock_flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(lock_flags);
 
-        const actual_align = @max(align_size, PAGE_SIZE);
-        const actual_size = std.mem.alignForward(u64, size, PAGE_SIZE);
+        const actual_align = @max(alignment, mem.PageLevel.l4K.size());
+        const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
 
-        var current_candidate = std.mem.alignForward(u64, self.base, actual_align);
+        var candidate_start = std.mem.alignForward(u64, self.base, actual_align);
 
-        var prev_id: ?Region.Id = null;
-        var curr_id = self.head;
+        var curr_id = self.regions.first();
 
         while (curr_id) |id| {
             const region = self.regions.get(id).?;
 
-            if (current_candidate + actual_size <= region.start) {
-                break;
+            if (region.end <= candidate_start) {
+                curr_id = self.regions.next(id);
+                continue;
             }
 
-            const next_possible = region.start + region.size;
-            current_candidate = std.mem.alignForward(u64, next_possible, actual_align);
+            if (candidate_start + actual_size <= region.start) {
+                if (candidate_start + actual_size <= self.limit) {
+                    break;
+                }
+            }
 
-            prev_id = id;
-            curr_id = region.next_sorted;
+            candidate_start = std.mem.alignForward(u64, region.end, actual_align);
+
+            curr_id = self.regions.next(id);
         }
 
-        const end_addr, const overflowed = @addWithOverflow(current_candidate, actual_size);
-        if (overflowed == 1 or end_addr > self.limit) return Error.OutOfVirtualMemory;
+        const end_addr, const overflowed = @addWithOverflow(candidate_start, actual_size);
+
+        if (overflowed == 1 or end_addr > self.limit) {
+            return Error.OutOfVirtualMemory;
+        }
 
         const new_region = Region{
-            .start = current_candidate,
-            .size = actual_size,
-            .next_sorted = curr_id,
+            .start = candidate_start,
+            .end = candidate_start + actual_size,
             .object = object,
             .offset = offset,
+            .flags = flags,
         };
 
-        const new_id = try self.regions.insert(new_region);
+        _ = try self.regions.insert(candidate_start, new_region);
 
-        if (prev_id) |p_id| {
-            self.regions.get(p_id).?.next_sorted = new_id;
-        } else {
-            self.head = new_id;
-        }
+        self.cached_hole_start = candidate_start + actual_size;
 
-        return current_candidate;
+        return candidate_start;
     }
 
-    pub fn allocAt(self: *@This(), address: u64, size: u64, object: ?*Object, offset: u64) !void {
+    pub fn allocAt(self: *@This(), address: u64, size: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !void {
+        if (size == 0) return;
+
+        if (!std.mem.isAligned(address, mem.PageLevel.l4K.size())) return Error.InvalidAlignment;
+
+        const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
+
+        const end_addr, const overflowed = @addWithOverflow(address, actual_size);
+        if (overflowed == 1 or end_addr > self.limit or address < self.base) {
+            return Error.OutOfRange;
+        }
+
         const lock_flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(lock_flags);
 
-        if (!std.mem.isAligned(address, PAGE_SIZE)) {
-            return Error.NotPageAligned;
-        }
-
-        const actual_size = std.mem.alignForward(u64, size, PAGE_SIZE);
-
-        const req_end, const overflowed = @addWithOverflow(address, actual_size);
-        if (overflowed or req_end > self.limit) return Error.OutOfRange;
-        if (address < self.base) return Error.OutOfRange;
-        if (size == 0) return;
-
-        var prev_id: ?Region.Id = null;
-        var curr_id = self.head;
+        var curr_id = self.regions.first();
 
         while (curr_id) |id| {
             const region = self.regions.get(id).?;
 
-            const region_end = region.start + region.size;
-
-            if (address < region_end and req_end > region.start) {
-                return Error.AddressAlreadyInUse;
+            if (region.end <= address) {
+                curr_id = self.regions.next(id);
+                continue;
             }
 
-            if (region.start >= req_end) {
+            if (region.start >= end_addr) {
                 break;
             }
 
-            prev_id = id;
-            curr_id = region.next_sorted;
+            return Error.AddressAlreadyInUse;
         }
 
         const new_region = Region{
             .start = address,
-            .size = actual_size,
-            .next_sorted = curr_id,
+            .end = end_addr,
             .object = object,
             .offset = offset,
+            .flags = flags,
         };
 
-        const new_id = try self.regions.insert(new_region);
-
-        if (prev_id) |p_id| {
-            self.regions.get(p_id).?.next_sorted = new_id;
-        } else {
-            self.head = new_id;
-        }
+        _ = try self.regions.insert(address, new_region);
     }
 
     pub fn free(self: *@This(), address: u64) !struct { object: ?*Object, size: u64 } {
         const lock_flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(lock_flags);
 
-        var prev_id: ?Region.Id = null;
-        var curr_id = self.head;
+        const region_id = self.regions.find(address) orelse return Error.InvalidAddress;
 
-        while (curr_id) |id| {
-            const region = self.regions.get(id).?;
+        const region_ptr = self.regions.get(region_id).?;
 
-            if (region.start == address) {
-                if (prev_id) |p_id| {
-                    self.regions.get(p_id).?.next_sorted = region.next_sorted;
-                } else {
-                    self.head = region.next_sorted;
-                }
-
-                self.regions.remove(id);
-                return .{ .object = region.object, .size = region.size };
-            }
-
-            if (region.start > address) {
-                return Error.InvalidAddress;
-            }
-
-            prev_id = id;
-            curr_id = region.next_sorted;
+        if (region_ptr.start != address) {
+            return Error.InvalidAddress;
         }
 
-        return Error.InvalidAddress;
+        if (region_ptr.object) |object| {
+            object.release();
+        }
+
+        const region = self.regions.remove(region_id).?;
+
+        if (address < self.cached_hole_start) {
+            self.cached_hole_start = address;
+        }
+
+        return .{
+            .object = region.object,
+            .size = region.end - region.start,
+        };
     }
 };
 
@@ -275,7 +247,7 @@ pub const Paging = struct {
 
     pub fn init(table_phys: ?u64) !@This() {
         return .{
-            .table_phys = table_phys orelse try phys.allocPage(.l4K, true),
+            .table_phys = table_phys orelse try phys.allocPage(true),
         };
     }
 
@@ -377,11 +349,12 @@ pub const Space = struct {
         object_id: Object.Id,
         size: u64,
         offset: u64,
+        flags: ?Object.Flags,
     ) !u64 {
         const object = Object.acquire(object_id) orelse return Error.InvalidObject;
         errdefer object.release();
 
-        const vaddr = try self.allocator.alloc(size, PAGE_SIZE, object, offset);
+        const vaddr = try self.allocator.alloc(size, PAGE_SIZE, object, offset, flags);
 
         return vaddr;
     }
@@ -396,23 +369,25 @@ pub const Space = struct {
         const lock_flags = self.allocator.lock.lockShared();
         defer self.allocator.lock.unlockShared(lock_flags);
 
-        const region = self.allocator.findRegion(fault_addr) orelse return Error.SegmentationFault;
+        const region_id = self.allocator.regions.find(fault_addr) orelse return Error.SegmentationFault;
+
+        const region = self.allocator.regions.get(region_id).?;
 
         if (region.object) |object| {
-            const offset_in_region = fault_addr - region.start;
-            const total_offset = region.offset + offset_in_region;
+            const offset_in_vma = fault_addr - region.start;
+            const total_offset = region.offset + offset_in_vma;
             const page_index = @as(u32, @intCast(total_offset / PAGE_SIZE));
-
             const phys_addr = try object.commit(page_index);
+            const effective_flags = region.flags orelse object.flags;
 
             return .{ .phys_addr = phys_addr, .flags = .{
-                .writable = object.flags.writable,
-                .executable = object.flags.executable,
+                .writable = effective_flags.writable,
+                .executable = effective_flags.executable,
                 .user = self.is_user,
             } };
-        } else {
-            return Error.SegmentationFault;
         }
+
+        return Error.SegmentationFault;
     }
 };
 
@@ -441,25 +416,27 @@ pub const Object = struct {
     ref_count: std.atomic.Value(u32),
 
     pub fn commit(self: *Object, page_index: u32) !u64 {
+        const max_pages = self.size / PAGE_SIZE;
+        if (page_index >= max_pages) return Space.Error.SegmentationFault;
+
         {
             const flags = self.lock.lockShared();
             defer self.lock.unlockShared(flags);
 
-            const physical_address = self.pages.get(page_index).*;
-            if (physical_address != 0) return physical_address;
+            const phys_addr = self.pages.get(page_index).*;
+            if (phys_addr != 0) return phys_addr;
         }
 
         const flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(flags);
 
-        // double check (race condition)
-        const physical_address = self.pages.get(page_index).*;
-        if (physical_address != 0) {
-            return physical_address;
+        const slot_ptr = self.pages.get(page_index);
+        if (slot_ptr.* != 0) {
+            return slot_ptr.*;
         }
 
-        const new_phys = try phys.allocPage(.l4K, true);
-        self.pages.get(page_index).* = new_phys;
+        const new_phys = try phys.allocPage(true);
+        slot_ptr.* = new_phys;
 
         return new_phys;
     }
@@ -472,9 +449,8 @@ pub const Object = struct {
         object.pages = .init();
 
         const needed_slots = object.size / PAGE_SIZE;
-        while (object.pages.capacity() < needed_slots) {
-            try object.pages.grow();
-        }
+
+        try object.pages.ensureTotalCapacity(needed_slots);
 
         object.lock = .{};
         object.ref_count = .init(0);
@@ -504,7 +480,7 @@ pub const Object = struct {
         while (i < (self.size / PAGE_SIZE)) : (i += 1) {
             const phys_addr = self.pages.get(i).*;
             if (phys_addr != 0) {
-                phys.freePage(phys_addr, .l4K);
+                phys.freePage(phys_addr);
             }
         }
 

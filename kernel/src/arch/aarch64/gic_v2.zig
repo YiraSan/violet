@@ -46,7 +46,7 @@ pub fn init() !void {
                 while (madt_iter.next()) |madt_entry| {
                     switch (madt_entry) {
                         .gicd => |gicd| {
-                            const virtual_address = try vmm.kernel_space.allocator.alloc(GICD_SIZE, 0, null, 0);
+                            const virtual_address = try vmm.kernel_space.allocator.alloc(GICD_SIZE, 0, null, 0, null);
                             const page_count = GICD_SIZE >> 12;
 
                             try vmm.kernel_space.paging.map(
@@ -199,7 +199,7 @@ pub fn initCpu() !void {
                     switch (madt_entry) {
                         .gicc => |gicc| {
                             if (gicc.interface_number == interface_number) {
-                                const virtual_address = try vmm.kernel_space.allocator.alloc(GICC_SIZE, 0, null, 0);
+                                const virtual_address = try vmm.kernel_space.allocator.alloc(GICC_SIZE, 0, null, 0, null);
                                 const page_count = GICC_SIZE >> 12;
 
                                 try vmm.kernel_space.paging.map(
