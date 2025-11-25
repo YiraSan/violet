@@ -120,7 +120,8 @@ pub const UnusedMemoryIterator = struct {
                 .conventional_memory,
                 .loader_code,
                 .boot_services_code,
-                .boot_services_data => true,
+                .boot_services_data,
+                => true,
                 else => false,
             };
 
