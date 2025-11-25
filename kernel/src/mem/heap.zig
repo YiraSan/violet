@@ -305,6 +305,416 @@ pub fn Queue(comptime T: type) type {
     };
 }
 
+pub fn RedBlackTree(comptime K: type, comptime V: type, comptime compareFn: anytype) type {
+    return struct {
+        const Self = @This();
+
+        const Color = enum { red, black };
+
+        const Node = struct {
+            value: V,
+
+            parent: ?Id = null,
+            left: ?Id = null,
+            right: ?Id = null,
+            color: Color = .red,
+        };
+
+        const NodeMap = SlotMap(Node);
+        pub const Id = NodeMap.Key;
+
+        nodes: NodeMap,
+        root: ?Id,
+
+        pub fn init() Self {
+            return .{
+                .nodes = .init(),
+                .root = null,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.nodes.deinit();
+        }
+
+        pub fn insert(self: *Self, key: K, value: V) !Id {
+            const id = try self.nodes.insert(Node{ .value = value });
+            self.insert_node(key, id);
+            return id;
+        }
+
+        pub fn get(self: *Self, id: Id) ?*V {
+            if (self.nodes.get(id)) |node| {
+                return &node.value;
+            }
+            return null;
+        }
+
+        pub fn find(self: *Self, key: K) ?Id {
+            var current = self.root;
+
+            while (current) |id| {
+                const node = self.node_ptr(id);
+                const order = compareFn(key, node.value);
+
+                switch (order) {
+                    .eq => return id,
+                    .lt => current = node.left,
+                    else => current = node.right,
+                }
+            }
+
+            return null;
+        }
+
+        pub fn first(self: *Self) ?Id {
+            var current = self.root;
+            var last: ?Id = null;
+            while (current) |id| {
+                last = id;
+                current = self.node_ptr(id).left;
+            }
+            return last;
+        }
+
+        pub fn next(self: *Self, current_id: Id) ?Id {
+            const node = self.node_ptr(current_id);
+
+            if (node.right) |right_id| {
+                return self.tree_minimum(right_id);
+            }
+
+            var x_id = current_id;
+            var p_id_opt = node.parent;
+
+            while (p_id_opt) |p_id| {
+                const p_node = self.node_ptr(p_id);
+                if (x_id == p_node.left) {
+                    return p_id;
+                }
+                x_id = p_id;
+                p_id_opt = p_node.parent;
+            }
+
+            return null;
+        }
+
+        inline fn node_ptr(self: *Self, id: Id) *Node {
+            return self.nodes.get(id) orelse @panic("RedBlackTree: tried to get the ptr of an inexistant index.");
+        }
+
+        inline fn insert_node(self: *Self, key: K, z_id: Id) void {
+            var y_id: ?Id = null;
+            var x_id = self.root;
+
+            while (x_id) |curr_id| {
+                y_id = curr_id;
+                const curr_node = self.node_ptr(curr_id);
+
+                const order = compareFn(key, curr_node.value);
+                switch (order) {
+                    .lt => x_id = curr_node.left,
+                    else => x_id = curr_node.right,
+                }
+            }
+
+            const z_node = self.node_ptr(z_id);
+            z_node.parent = y_id;
+
+            if (y_id == null) {
+                self.root = z_id;
+            } else {
+                const y_node = self.node_ptr(y_id.?);
+                const order = compareFn(key, y_node.value);
+                if (order == .lt) {
+                    y_node.left = z_id;
+                } else {
+                    y_node.right = z_id;
+                }
+            }
+
+            z_node.left = null;
+            z_node.right = null;
+            z_node.color = .red;
+
+            self.insert_fixup(z_id);
+        }
+
+        fn insert_fixup(self: *Self, start_node: Id) void {
+            var z_id = start_node;
+
+            while (self.node_ptr(z_id).parent) |p_id| {
+                const p_node = self.node_ptr(p_id);
+                if (p_node.color == .black) break;
+
+                const g_id = p_node.parent orelse unreachable;
+                const g_node = self.node_ptr(g_id);
+
+                if (p_id == g_node.left) {
+                    const u_id = g_node.right;
+                    const u_is_red = if (u_id) |u| self.node_ptr(u).color == .red else false;
+
+                    if (u_is_red) {
+                        p_node.color = .black;
+                        self.node_ptr(u_id.?).color = .black;
+                        g_node.color = .red;
+                        z_id = g_id;
+                    } else {
+                        if (z_id == p_node.right) {
+                            z_id = p_id;
+                            self.rotate_left(z_id);
+                        }
+
+                        const new_p_id = self.node_ptr(z_id).parent.?;
+                        self.node_ptr(new_p_id).color = .black;
+                        g_node.color = .red;
+                        self.rotate_right(g_id);
+                    }
+                } else {
+                    const u_id = g_node.left;
+                    const u_is_red = if (u_id) |u| self.node_ptr(u).color == .red else false;
+
+                    if (u_is_red) {
+                        p_node.color = .black;
+                        self.node_ptr(u_id.?).color = .black;
+                        g_node.color = .red;
+                        z_id = g_id;
+                    } else {
+                        if (z_id == p_node.left) {
+                            z_id = p_id;
+                            self.rotate_right(z_id);
+                        }
+
+                        const new_p_id = self.node_ptr(z_id).parent.?;
+                        self.node_ptr(new_p_id).color = .black;
+                        g_node.color = .red;
+                        self.rotate_left(g_id);
+                    }
+                }
+            }
+
+            if (self.root) |root_id| {
+                self.node_ptr(root_id).color = .black;
+            }
+        }
+
+        fn rotate_left(self: *Self, x_id: Id) void {
+            const x = self.node_ptr(x_id);
+            const y_id = x.right orelse return; // should be impossible
+            const y = self.node_ptr(y_id);
+
+            x.right = y.left;
+            if (y.left) |beta| {
+                self.node_ptr(beta).parent = x_id;
+            }
+
+            y.parent = x.parent;
+            if (x.parent == null) {
+                self.root = y_id;
+            } else {
+                const p = self.node_ptr(x.parent.?);
+                if (x_id == p.left) {
+                    p.left = y_id;
+                } else {
+                    p.right = y_id;
+                }
+            }
+
+            y.left = x_id;
+            x.parent = y_id;
+        }
+
+        fn rotate_right(self: *Self, x_id: Id) void {
+            const x = self.node_ptr(x_id);
+            const y_id = x.left orelse return; // should be impossible
+            const y = self.node_ptr(y_id);
+
+            x.left = y.right;
+            if (y.right) |beta| {
+                self.node_ptr(beta).parent = x_id;
+            }
+
+            y.parent = x.parent;
+            if (x.parent == null) {
+                self.root = y_id;
+            } else {
+                const p = self.node_ptr(x.parent.?);
+                if (x_id == p.left) {
+                    p.left = y_id;
+                } else {
+                    p.right = y_id;
+                }
+            }
+
+            y.right = x_id;
+            x.parent = y_id;
+        }
+
+        pub fn remove(self: *Self, z_id: Id) ?V {
+            const z_node = self.nodes.get(z_id) orelse return null;
+            const z_value = z_node.value;
+
+            var y_id = z_id;
+            var y_original_color = z_node.color;
+            var x_id: ?Id = null;
+            var x_parent_id: ?Id = null;
+
+            if (z_node.left == null) {
+                x_id = z_node.right;
+                x_parent_id = z_node.parent;
+                self.transplant(z_id, z_node.right);
+            } else if (z_node.right == null) {
+                x_id = z_node.left;
+                x_parent_id = z_node.parent;
+                self.transplant(z_id, z_node.left);
+            } else {
+                y_id = self.tree_minimum(z_node.right.?);
+                const y_node = self.node_ptr(y_id);
+                y_original_color = y_node.color;
+
+                x_id = y_node.right;
+
+                if (y_node.parent == z_id) {
+                    x_parent_id = y_id;
+                } else {
+                    x_parent_id = y_node.parent;
+                    self.transplant(y_id, y_node.right);
+                    y_node.right = z_node.right;
+                    self.node_ptr(y_node.right.?).parent = y_id;
+                }
+
+                self.transplant(z_id, y_id);
+                y_node.left = z_node.left;
+                self.node_ptr(y_node.left.?).parent = y_id;
+                y_node.color = z_node.color;
+            }
+
+            if (y_original_color == .black) {
+                self.remove_fixup(x_id, x_parent_id);
+            }
+
+            self.nodes.remove(z_id);
+
+            return z_value;
+        }
+
+        fn transplant(self: *Self, u_id: Id, v_id: ?Id) void {
+            const u_parent = self.node_ptr(u_id).parent;
+
+            if (u_parent == null) {
+                self.root = v_id;
+            } else {
+                const p_node = self.node_ptr(u_parent.?);
+                if (u_id == p_node.left) {
+                    p_node.left = v_id;
+                } else {
+                    p_node.right = v_id;
+                }
+            }
+
+            if (v_id) |v| {
+                self.node_ptr(v).parent = u_parent;
+            }
+        }
+
+        fn tree_minimum(self: *Self, start_id: Id) Id {
+            var current = start_id;
+            while (self.node_ptr(current).left) |left| {
+                current = left;
+            }
+            return current;
+        }
+
+        fn remove_fixup(self: *Self, start_x: ?Id, start_parent: ?Id) void {
+            var x = start_x;
+            var p_id = start_parent;
+
+            while (x != self.root and self.color_of(x) == .black) {
+                if (p_id == null) break; // shouldn't happen
+                const p_node = self.node_ptr(p_id.?);
+
+                if (x == p_node.left) {
+                    var w_id = p_node.right orelse unreachable;
+                    var w_node = self.node_ptr(w_id);
+
+                    if (w_node.color == .red) {
+                        w_node.color = .black;
+                        p_node.color = .red;
+                        self.rotate_left(p_id.?);
+
+                        w_id = p_node.right.?;
+                        w_node = self.node_ptr(w_id);
+                    }
+
+                    if (self.color_of(w_node.left) == .black and self.color_of(w_node.right) == .black) {
+                        w_node.color = .red;
+                        x = p_id;
+                        p_id = self.node_ptr(x.?).parent;
+                    } else {
+                        if (self.color_of(w_node.right) == .black) {
+                            if (w_node.left) |wl| self.node_ptr(wl).color = .black;
+                            w_node.color = .red;
+                            self.rotate_right(w_id);
+                            w_id = p_node.right.?;
+                            w_node = self.node_ptr(w_id);
+                        }
+
+                        w_node.color = p_node.color;
+                        p_node.color = .black;
+                        if (w_node.right) |wr| self.node_ptr(wr).color = .black;
+                        self.rotate_left(p_id.?);
+                        x = self.root;
+                        break;
+                    }
+                } else {
+                    var w_id = p_node.left orelse unreachable;
+                    var w_node = self.node_ptr(w_id);
+
+                    if (w_node.color == .red) {
+                        w_node.color = .black;
+                        p_node.color = .red;
+                        self.rotate_right(p_id.?);
+                        w_id = p_node.left.?;
+                        w_node = self.node_ptr(w_id);
+                    }
+
+                    if (self.color_of(w_node.right) == .black and self.color_of(w_node.left) == .black) {
+                        w_node.color = .red;
+                        x = p_id;
+                        p_id = self.node_ptr(x.?).parent;
+                    } else {
+                        if (self.color_of(w_node.left) == .black) {
+                            if (w_node.right) |wr| self.node_ptr(wr).color = .black;
+                            w_node.color = .red;
+                            self.rotate_left(w_id);
+                            w_id = p_node.left.?;
+                            w_node = self.node_ptr(w_id);
+                        }
+
+                        w_node.color = p_node.color;
+                        p_node.color = .black;
+                        if (w_node.left) |wl| self.node_ptr(wl).color = .black;
+                        self.rotate_right(p_id.?);
+                        x = self.root;
+                        break;
+                    }
+                }
+            }
+
+            if (x) |x_valid| {
+                self.node_ptr(x_valid).color = .black;
+            }
+        }
+
+        inline fn color_of(self: *Self, id: ?Id) Color {
+            if (id) |i| {
+                return self.node_ptr(i).color;
+            }
+            return .black;
+        }
+    };
+}
+
 // ---- //
 
 comptime {
