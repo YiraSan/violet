@@ -25,12 +25,12 @@ jobs:
 
     - name: Aarch64-QEMU (Build)
       run: |
-        zig build -Dplatform=aarch64_qemu -Doptimize=ReleaseSafe
+        zig build -Dplatform=aarch64_qemu -Doptimize=Debug
         mv ./zig-out/disk.img ./violet-aarch64_qemu.img
 
     - name: Raspberry Pi 4 (Build)
       run: |
-        zig build -Dplatform=rpi4 -Doptimize=ReleaseSafe
+        zig build -Dplatform=rpi4 -Doptimize=Debug
         mv ./zig-out/disk.img ./violet-rpi4.img
 
     - uses: "marvinpinto/action-automatic-releases@latest"
