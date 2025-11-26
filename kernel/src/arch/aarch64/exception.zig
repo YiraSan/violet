@@ -28,14 +28,15 @@ const mem = kernel.mem;
 const syscall = kernel.syscall;
 const scheduler = kernel.scheduler;
 
+const heap = mem.heap;
 const phys = mem.phys;
 const vmm = mem.vmm;
 
 // --- aarch64/exception.zig --- //
 
 pub fn init() !void {
-    const sp_el1_stack = kernel.boot.hhdm_base + (phys.allocPage(false) catch unreachable);
-    const sp_el1_stack_size = 0x1000;
+    const sp_el1_stack = @intFromPtr(try heap.allocContiguous(64));
+    const sp_el1_stack_size = 0x1000 * 64;
 
     set_sp_el1(sp_el1_stack + sp_el1_stack_size);
     set_vbar_el1(@intFromPtr(&exception_vector_table));
