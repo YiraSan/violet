@@ -62,87 +62,93 @@ pub fn resizeContiguous(old_address: [*]u8, old_count: usize, new_count: usize) 
 // --- collections --- //
 
 pub fn List(comptime T: type) type {
-    // NOTE could be optimized by forcing T alignment on 16 (to avoid a division).
-
     return struct {
         const PAGE_SIZE = mem.PageLevel.l4K.size();
 
-        const ITEM_PER_PAGE = PAGE_SIZE / @sizeOf(T);
+        const ITEMS_PER_PAGE = PAGE_SIZE / @sizeOf(T);
         const PTRS_PER_PAGE = PAGE_SIZE / @sizeOf([*]T);
 
         directory: [*][*]T = undefined,
         directory_capacity: u32 = 0,
-        directory_len: u32 = 0,
+        pages_count: u32 = 0,
 
-        pub fn init() @This() {
+        const Self = @This();
+
+        pub fn init() Self {
             return .{
                 .directory = undefined,
                 .directory_capacity = 0,
-                .directory_len = 0,
+                .pages_count = 0,
             };
         }
 
-        pub fn deinit(self: *@This()) void {
+        pub fn deinit(self: *Self) void {
             if (self.directory_capacity != 0) {
                 var i: usize = 0;
-                while (i < self.directory_len) : (i += 1) {
+                while (i < self.pages_count) : (i += 1) {
                     freePage(@ptrCast(self.directory[i]));
                 }
 
-                freeContiguous(@ptrCast(self.directory), self.directory_capacity / PTRS_PER_PAGE);
+                const dir_pages = self.directory_capacity / PTRS_PER_PAGE;
+                if (dir_pages > 0) {
+                    freeContiguous(@ptrCast(self.directory), dir_pages);
+                }
             }
+
+            self.* = init();
         }
 
-        fn ensureDirectoryCapacity(self: *@This()) !void {
-            if (self.directory_len < self.directory_capacity) return;
+        fn ensureDirectoryCapacity(self: *Self) !void {
+            if (self.pages_count < self.directory_capacity) return;
 
             const old_capacity = self.directory_capacity;
             const new_capacity = old_capacity + PTRS_PER_PAGE;
 
-            const old_capacity_pages = old_capacity / PTRS_PER_PAGE;
-            const new_capacity_pages = new_capacity / PTRS_PER_PAGE;
+            const old_dir_pages = old_capacity / PTRS_PER_PAGE;
+            const new_dir_pages = new_capacity / PTRS_PER_PAGE;
 
-            const new_ptr = if (old_capacity == 0)
-                try allocContiguous(new_capacity_pages)
+            const new_ptr_addr = if (old_capacity == 0)
+                try allocContiguous(new_dir_pages)
             else
-                try resizeContiguous(@ptrCast(self.directory), old_capacity_pages, new_capacity_pages);
+                try resizeContiguous(@ptrCast(self.directory), old_dir_pages, new_dir_pages);
 
-            self.directory = @ptrCast(@alignCast(new_ptr));
+            self.directory = @ptrCast(@alignCast(new_ptr_addr));
             self.directory_capacity = @intCast(new_capacity);
         }
 
-        pub fn grow(self: *@This()) !void {
+        pub fn grow(self: *Self) !void {
             try self.ensureDirectoryCapacity();
 
-            const page = try allocPage();
+            const page_addr = try allocPage();
 
-            self.directory[self.directory_len] = @ptrCast(@alignCast(page));
-            self.directory_len += 1;
+            self.directory[self.pages_count] = @ptrCast(@alignCast(page_addr));
+            self.pages_count += 1;
         }
 
-        pub fn ensureTotalCapacity(self: *@This(), total_items: u64) !void {
+        pub fn ensureTotalCapacity(self: *Self, total_items: u64) !void {
             while (self.capacity() < total_items) {
                 try self.grow();
             }
         }
 
-        pub fn capacity(self: *@This()) u32 {
-            return @intCast(self.directory_len * ITEM_PER_PAGE);
+        pub inline fn capacity(self: *Self) u64 {
+            return @as(u64, self.pages_count) * ITEMS_PER_PAGE;
         }
 
-        pub inline fn get(self: *@This(), index: u32) *T {
+        pub inline fn get(self: *Self, index: u64) *T {
             if (builtin.mode == .Debug) {
                 if (index >= self.capacity()) @panic("List: index out of bounds");
             }
 
-            const page_index = index / ITEM_PER_PAGE;
-            const item_index = index % ITEM_PER_PAGE;
+            const page_index = index / ITEMS_PER_PAGE;
+            const item_index = index % ITEMS_PER_PAGE;
 
             return &self.directory[page_index][item_index];
         }
 
         comptime {
-            if (@sizeOf(T) > PAGE_SIZE) @compileError("List: T is too large.");
+            if (@sizeOf(T) > PAGE_SIZE) @compileError("List: T is too large to fit in a page.");
+            if (@sizeOf(T) == 0) @compileError("List: T cannot be zero-sized.");
         }
     };
 }
