@@ -32,16 +32,6 @@ pub const prism = @import("prism/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 pub const syscall = @import("syscall/root.zig");
 
-comptime {
-    _ = arch;
-    _ = boot;
-    _ = drivers;
-    _ = mem;
-    _ = prism;
-    _ = scheduler;
-    _ = syscall;
-}
-
 // --- main.zig --- //
 
 pub fn stage0() !void {
@@ -137,3 +127,15 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
     .log_level = if (builtin.mode == .Debug) .debug else .info,
 };
+
+// ---- //
+
+comptime {
+    _ = arch;
+    _ = boot;
+    _ = drivers;
+    _ = mem;
+    _ = prism;
+    _ = scheduler;
+    _ = syscall;
+}
