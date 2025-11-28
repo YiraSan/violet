@@ -64,6 +64,15 @@ pub const RwLock = struct {
         kernel.arch.restoreSaved(saved_flags);
     }
 
+    pub fn tryLockExclusive(self: *@This()) ?u64 {
+        const flags = kernel.arch.maskAndSave();
+        if (self.state.cmpxchgStrong(0, WRITER_LOCKED, .acq_rel, .monotonic) == null) {
+            return flags;
+        }
+        kernel.arch.restoreSaved(flags);
+        return null;
+    }
+
     pub fn lockExclusive(self: *@This()) u64 {
         const flags = kernel.arch.maskAndSave();
 
