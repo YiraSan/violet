@@ -362,7 +362,6 @@ pub const Space = struct {
     pub fn unmap(self: *@This(), addr: u64) !void {
         const info = try self.allocator.free(addr);
         self.paging.unmap(addr, info.size / PAGE_SIZE, .l4K);
-        if (info.object) |object| object.release();
     }
 
     pub fn resolveFault(self: *@This(), fault_addr: u64) !struct { phys_addr: u64, flags: Paging.Flags } {
