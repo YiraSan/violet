@@ -1,7 +1,7 @@
 .{
-    .name = .system,
+    .name = .genesis,
     .version = "0.0.0",
-    .fingerprint = 0xc94d118bfcdeccb4, // Changing this has security and trust implications.
+    .fingerprint = 0x8a3adb802f5c4bc4, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
     .dependencies = .{
         .basalt = .{ .path = "../basalt/" },

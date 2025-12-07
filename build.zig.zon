@@ -5,8 +5,9 @@
     .minimum_zig_version = "0.14.1",
     .dependencies = .{
         .basalt = .{ .path = "./basalt/" },
-        .kernel = .{ .path = "./kernel/" },
         .bootloader = .{ .path = "./bootloader/" },
+        .genesis = .{ .path = "./genesis/" },
+        .kernel = .{ .path = "./kernel/" },
         .dimmer = .{
             .url = "git+https://github.com/zig-osdev/disk-image-step#c0411db63cfda4c42a502dda277fd10f4a751160",
             .hash = "dimmer-2.0.0-suxOkghVAgCZxYfOd33arl5jOJrnL_8hoZEnCL86IXyX",
@@ -19,9 +20,9 @@
     .paths = .{
         "basalt",
         "bootloader",
+        "genesis",
         "kernel",
         "shared",
-        "system",
         "AUTHORS.md",
         "build.zig",
         "build.zig.zon",

@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const builtin = @import("builtin");
+const std = @import("std");
 const basalt = @import("basalt");
 
-pub fn main() !void {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            asm volatile ("svc #0");
-        },
-        else => unreachable,
-    }
+pub fn build(b: *std.Build) void {
+    const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
+    const optimize = b.standardOptimizeOption(.{});
+
+    const exe = basalt.addExecutable(b, .{
+        .name = "system",
+        .optimize = optimize,
+        .root_source_file = b.path("src/main.zig"),
+        .platform = platform,
+        .kernel_module = true,
+    });
+
+    b.installArtifact(exe);
 }
