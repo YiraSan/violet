@@ -118,8 +118,15 @@ pub fn build(b: *std.Build) !void {
         .aarch64_qemu => b.addSystemCommand(&[_][]const u8{
             // zig fmt: off
             "qemu-system-aarch64",
-            "-cpu", "cortex-a72",
-            "-machine", "virt,secure=off,virtualization=on",
+
+            "-accel", "kvm",
+            "-accel", "hvf",
+            "-accel", "tcg",
+
+            "-cpu", "host",
+
+            "-machine", "virt,secure=off,virtualization=off",
+
             "-m", "4G",
             "-smp", "4",
             "-bios", ".zig-cache/AA64_OVMF.fd",
