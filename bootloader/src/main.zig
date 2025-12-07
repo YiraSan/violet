@@ -242,9 +242,15 @@ pub fn main() uefi.Status {
 
             const mmfr1 = ark.armv8.registers.ID_AA64MMFR1_EL1.load();
             if (mmfr1.vh == .supported) {
-                const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
-                if (hcr_el2.e2h == .enabled) {
-                    @panic("VH extension is enabled but not supported on violetOS.");
+                const currentEL = asm volatile ("mrs %[out], currentEL"
+                    : [out] "=r" (-> u64),
+                );
+
+                if (currentEL == 0b1000) {
+                    const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
+                    if (hcr_el2.e2h == .enabled) {
+                        @panic("VH extension is enabled but not supported on violetOS.");
+                    }
                 }
             }
         },
@@ -263,11 +269,20 @@ pub fn main() uefi.Status {
             reg.fpen = .el0_el1;
             reg.store();
 
-            var sctlr = ark.armv8.registers.SCTLR_EL1.load();
-            sctlr.M = true;
-            sctlr.A = false;
-            sctlr.C = true;
-            sctlr.I = .no_effect;
+            const sctlr = ark.armv8.registers.SCTLR_EL1{
+                .m = true,
+                .c = true,
+                .i = .no_effect,
+
+                .sa = true,
+                .sa0 = true,
+
+                .a = false,
+                .ee = .little_endian,
+                .e0e = .little_endian,
+
+                .wxn = false,
+            };
             sctlr.store();
 
             const currentEL = asm volatile ("mrs %[out], currentEL"

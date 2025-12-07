@@ -179,11 +179,6 @@ pub fn mapPage(
             };
         },
     }
-
-    asm volatile (
-        \\ dsb sy
-        \\ isb
-    );
 }
 
 fn get_table(table_addr: u64, index: u64) ?u64 {
