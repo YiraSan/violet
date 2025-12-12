@@ -24,6 +24,7 @@ const log = std.log.scoped(.exception);
 
 const kernel = @import("root");
 
+const arch = kernel.arch;
 const mem = kernel.mem;
 const syscall = kernel.syscall;
 const scheduler = kernel.scheduler;
@@ -34,78 +35,151 @@ const vmm = mem.vmm;
 
 // --- aarch64/exception.zig --- //
 
-pub fn init() !void {
-    const sp_el1_stack = @intFromPtr(try heap.allocContiguous(64));
-    const sp_el1_stack_size = 0x1000 * 64;
+pub extern fn extend_frame(frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) *arch.ExtendedFrame;
 
-    set_sp_el1(sp_el1_stack + sp_el1_stack_size);
-    set_vbar_el1(@intFromPtr(&exception_vector_table));
+extern fn restore_general_via_eret(frame: *arch.GeneralFrame, kernel_stack_reset: u64) callconv(.{ .aarch64_aapcs = .{} }) noreturn;
+extern fn restore_extended_via_eret(frame: *arch.ExtendedFrame, kernel_stack_reset: u64) callconv(.{ .aarch64_aapcs = .{} }) noreturn;
+
+extern fn restore_general_via_ret(frame: *arch.GeneralFrame, kernel_stack_reset: u64) callconv(.{ .aarch64_aapcs = .{} }) noreturn;
+extern fn restore_extended_via_ret(frame: *arch.ExtendedFrame, kernel_stack_reset: u64) callconv(.{ .aarch64_aapcs = .{} }) noreturn;
+
+export fn internal_entry(frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) void {
+    const sched_local = scheduler.Local.get();
+
+    if (sched_local.current_task) |current_task| {
+        current_task.exception = false;
+        current_task.suspended = false;
+        current_task.is_extended = false;
+
+        current_task.stack_pointer = .{
+            .general = frame,
+        };
+    }
 }
 
-// --- old --- //
+export fn internal_exit(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+    const cpu = arch.Cpu.get();
+    const kernel_stack_top = cpu.kernel_stack_top;
 
-extern fn set_vbar_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
+    const sched_local = scheduler.Local.get();
 
-pub extern fn set_sp_el1(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
-pub extern fn set_sp_el0(addr: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
+    if (sched_local.current_task) |current_task| {
+        if (current_task.exception) {
+            if (current_task.is_extended) {
+                _ = @as(*volatile arch.ExtendedFrame, @ptrCast(current_task.stack_pointer.extended)).*;
+                current_task.exception_data.restore();
+                restore_extended_via_eret(current_task.stack_pointer.extended, kernel_stack_top);
+            } else {
+                _ = @as(*volatile arch.GeneralFrame, @ptrCast(current_task.stack_pointer.general)).*;
+                current_task.exception_data.restore();
+                restore_general_via_eret(current_task.stack_pointer.general, kernel_stack_top);
+            }
+        } else {
+            if (current_task.is_extended) {
+                restore_extended_via_ret(current_task.stack_pointer.extended, kernel_stack_top);
+            } else {
+                restore_general_via_ret(current_task.stack_pointer.general, kernel_stack_top);
+            }
+        }
+    } else {
+        restore_general_via_ret(old_frame, kernel_stack_top);
+    }
+}
 
-pub extern fn get_sp_el0() callconv(.{ .aarch64_aapcs = .{} }) u64;
+extern fn call_system(_: basalt.syscall.Code, _: u64, _: u64, _: u64, _: u64, _: u64, _: u64) callconv(.{ .aarch64_aapcs = .{} }) void;
 
-extern const exception_vector_table: [2048]u8 linksection(".bss");
+pub fn init() !void {
+    const cpu = arch.Cpu.get();
 
-pub const ExceptionContext = extern struct {
-    lr: u64,
-    _: u64 = 0, // padding
-    xregs: [30]u64,
-    vregs: [32]u128, // TODO optimize that
-    fpcr: u64,
-    fpsr: u64,
-    elr_el1: u64,
-    spsr_el1: ark.armv8.registers.SPSR_EL1,
+    const kernel_stack = @intFromPtr(try heap.allocContiguous(64));
+    const kernel_stack_size = 0x1000 * 64;
 
-    pub inline fn setArg(self: *@This(), index: usize, value: u64) void {
-        self.xregs[index] = value;
+    cpu.kernel_stack_top = kernel_stack + kernel_stack_size;
+
+    ark.armv8.registers.storeSpEl1(cpu.kernel_stack_top);
+    ark.armv8.registers.storeVbarEl1(@intFromPtr(&exception_vector_table));
+
+    syscall.kernel_indirection_table.call_system = @ptrCast(&call_system);
+
+    asm volatile (
+        \\ dsb sy
+        \\ isb
+    );
+}
+
+extern const exception_vector_table: [2048]u8 linksection(".text");
+
+inline fn saveFrameToTask(frame: *arch.GeneralFrame) ark.armv8.registers.SPSR_EL1 {
+    const sched_local = scheduler.Local.get();
+
+    if (sched_local.current_task) |current_task| {
+        current_task.exception = true;
+        current_task.suspended = false;
+        current_task.is_extended = false;
+
+        current_task.exception_data.save(); // save SPSR_EL1
+
+        current_task.stack_pointer = .{
+            .general = frame,
+        };
     }
 
-    pub inline fn getArg(self: *@This(), index: usize) u64 {
-        return self.xregs[index];
-    }
-};
+    return ark.armv8.registers.SPSR_EL1.load();
+}
 
-// TODO dissociate sync_handler depending on EL0/EL1t/EL1h later
-fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
-    kernel.arch.maskInterrupts();
+inline fn getCurrentFrame(old_frame: *arch.GeneralFrame) *arch.GeneralFrame {
+    const sched_local = scheduler.Local.get();
+
+    if (sched_local.current_task) |current_task| {
+        if (current_task.is_extended) {
+            return &current_task.stack_pointer.extended.general_frame;
+        } else {
+            return current_task.stack_pointer.general;
+        }
+    } else {
+        return old_frame;
+    }
+}
+
+inline fn exitException(old_frame: *arch.GeneralFrame, spsr: ark.armv8.registers.SPSR_EL1) noreturn {
+    const sched_local = scheduler.Local.get();
+
+    const cpu = arch.Cpu.get();
+    const kernel_stack_top = cpu.kernel_stack_top;
+
+    arch.maskInterrupts();
+
+    if (sched_local.current_task) |current_task| {
+        // NOTE reading the frame before the restore makes sure no nested exception overwrites the SPSR.
+        if (current_task.is_extended) {
+            _ = @as(*volatile arch.ExtendedFrame, @ptrCast(current_task.stack_pointer.extended)).*;
+            current_task.exception_data.restore();
+            restore_extended_via_eret(current_task.stack_pointer.extended, kernel_stack_top);
+        } else {
+            _ = @as(*volatile arch.GeneralFrame, @ptrCast(current_task.stack_pointer.general)).*;
+            current_task.exception_data.restore();
+            restore_general_via_eret(current_task.stack_pointer.general, kernel_stack_top);
+        }
+    } else {
+        spsr.store(); // NOTE that allows for nested exceptions to occur outside a task without overwritting the SPSR.
+        restore_general_via_eret(old_frame, kernel_stack_top);
+    }
+}
+
+fn sync_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+    arch.maskInterrupts();
+
+    const saved_spsr = saveFrameToTask(old_frame);
 
     const esr_el1 = ark.armv8.registers.ESR_EL1.load();
 
     switch (esr_el1.ec) {
         .svc_inst_aarch64 => {
-            const code = ctx.xregs[0];
-
-            if (code < syscall.registers.len) {
-                const syscall_fn_val = syscall.registers[code];
-                if (syscall_fn_val != 0) {
-                    const syscall_fn: syscall.SyscallFn = @ptrFromInt(syscall_fn_val);
-
-                    ctx.xregs[0] = @bitCast(basalt.syscall.Result{
-                        .is_success = false,
-                        .code = @intFromEnum(basalt.syscall.ErrorCode.no_result),
-                    });
-
-                    return syscall_fn(ctx);
-                }
-            }
-
-            ctx.xregs[0] = @bitCast(basalt.syscall.Result{
-                .is_success = false,
-                .code = @intFromEnum(basalt.syscall.ErrorCode.unknown_syscall),
-            });
-
-            return;
+            kernel.syscall.internal_call_system(old_frame);
         },
         .data_abort_lower_el, .data_abort_same_el => {
-            const far = ark.armv8.registers.loadFarEl1();
             const iss = esr_el1.iss.data_abort;
+            const far = ark.armv8.registers.loadFarEl1();
 
             switch (iss.dfsc) {
                 .translation_fault_lv0,
@@ -114,97 +188,158 @@ fn sync_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void
                 .translation_fault_lv3,
                 => {
                     const local = scheduler.Local.get();
+                    const vs = if (local.current_task) |current_task| current_task.process.virtualSpace() else &vmm.kernel_space;
 
-                    if (local.current_task) |current_task| {
-                        const vs = current_task.process.virtualSpace();
-
-                        const res = vs.resolveFault(far) catch |err| switch (err) {
-                            vmm.Space.Error.SegmentationFault => {
+                    const res = vs.resolveFault(far) catch |err| switch (err) {
+                        vmm.Space.Error.SegmentationFault => {
+                            if (local.current_task) |current_task| {
                                 log.err("segmentation fault from task {}:{} at address 0x{x}", .{ current_task.process.id.index, current_task.id.index, far });
 
-                                scheduler.terminateTask(ctx);
-
-                                return;
-                            },
-                            else => unreachable,
-                        };
-
-                        vs.paging.map(
-                            far,
-                            res.phys_addr,
-                            1,
-                            switch (iss.dfsc) {
-                                .translation_fault_lv0 => unreachable,
-                                .translation_fault_lv1 => .l1G,
-                                .translation_fault_lv2 => .l2M,
-                                .translation_fault_lv3 => .l4K,
-                                else => unreachable,
-                            },
-                            res.flags,
-                        ) catch |err| {
-                            log.err("failed to commit on 0x{x} at task {}:{}, {}", .{ far, current_task.process.id.index, current_task.id.index, err });
+                                scheduler.task_terminate(old_frame) catch {};
+                                exitException(old_frame, saved_spsr);
+                            } else {
+                                log.err("segmentation fault from kernel at address 0x{x}", .{far});
+                            }
                             ark.cpu.halt();
-                        };
+                        },
+                        else => unreachable,
+                    };
 
-                        return;
-                    } else {
-                        log.err("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
-                    }
+                    vs.paging.map(
+                        far,
+                        res.phys_addr,
+                        1,
+                        switch (iss.dfsc) {
+                            .translation_fault_lv0 => unreachable,
+                            .translation_fault_lv1 => .l1G,
+                            .translation_fault_lv2 => .l2M,
+                            .translation_fault_lv3 => .l4K,
+                            else => unreachable,
+                        },
+                        res.flags,
+                    ) catch |err| {
+                        log.err("failed to commit on 0x{x}, {}", .{ far, err });
+                        ark.cpu.halt();
+                    };
                 },
                 else => {
-                    log.err("DataAbort({s}) from {s} on 0x{x}", .{ @tagName(iss.dfsc), @tagName(ctx.spsr_el1.mode), far });
+                    log.err("DataAbort({s}) on 0x{x}", .{ @tagName(iss.dfsc), far });
                     @panic("unimplemented data abort exception");
                 },
             }
         },
         .brk_aarch64 => {
+            const frame = getCurrentFrame(old_frame);
+
             const iss = esr_el1.iss.brk_aarch64;
+            log.debug("Breakpoint({}) at address 0x{x}", .{ iss.comment, frame.program_counter });
 
-            log.debug("Breakpoint({}) from {s} at address 0x{x}", .{ iss.comment, @tagName(ctx.spsr_el1.mode), ctx.elr_el1 });
-
-            ctx.elr_el1 += 4;
-            return;
+            frame.program_counter += 4;
         },
         else => {
-            log.err("UNEXPECTED SYNCHRONOUS EXCEPTION from {s}", .{@tagName(ctx.spsr_el1.mode)});
+            log.err("UNEXPECTED SYNCHRONOUS EXCEPTION\n{}", .{old_frame});
             esr_el1.dump();
+            ark.cpu.halt();
         },
     }
 
-    ark.cpu.halt();
+    exitException(old_frame, saved_spsr);
 }
 
 const gic = @import("gic.zig");
 
-pub const IrqCallback = *const fn (ctx: *ExceptionContext) void;
+pub const IrqCallback = *const fn () callconv(basalt.task.call_conv) void;
 pub var irq_callbacks: [1024]?IrqCallback linksection(".bss") = undefined;
 
-fn irq_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
-    kernel.arch.maskInterrupts();
+fn irq_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+    arch.maskInterrupts();
+
+    const sched_local = scheduler.Local.get();
+    const begin_uptime = kernel.drivers.Timer.getUptime();
+    const begin_task = sched_local.current_task;
+
+    const saved_spsr = saveFrameToTask(old_frame);
 
     const irq_id = gic.acknowledge();
 
     if (irq_id >= 1023) {
         log.warn("Spurious IRQ received (no valid source)", .{});
     } else if (irq_callbacks[irq_id]) |callback| {
-        callback(ctx);
+        callback();
     } else {
         log.warn("Unhandled IRQ ID: {}", .{irq_id});
     }
 
     gic.endOfInterrupt(irq_id);
+
+    const elapsed = kernel.drivers.Timer.getUptime() - begin_uptime;
+
+    if (begin_task) |task| {
+        task.uptime_schedule += elapsed;
+    }
+
+    // log.debug("IRQ on cpu{} elapsed time: {} ns", .{ kernel.arch.Cpu.id(), elapsed });
+
+    exitException(old_frame, saved_spsr);
 }
 
-fn fiq_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
-    log.err("UNEXPECTED FIQ from {s}", .{@tagName(ctx.spsr_el1.mode)});
-    ark.cpu.armv8a_64.registers.ESR_EL1.get().dump();
-    ark.cpu.halt();
-}
+// when an exception happens inside of an handler :p
+fn nested_sync_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
+    arch.maskInterrupts();
 
-fn serror_handler(ctx: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
-    log.err("UNEXPECTED SERROR from {s}", .{@tagName(ctx.spsr_el1.mode)});
-    ark.cpu.armv8a_64.registers.ESR_EL1.get().dump();
-    ark.cpu.halt();
+    const esr_el1 = ark.armv8.registers.ESR_EL1.load();
+
+    switch (esr_el1.ec) {
+        .data_abort_same_el => {
+            const iss = esr_el1.iss.data_abort;
+            const far = ark.armv8.registers.loadFarEl1();
+
+            switch (iss.dfsc) {
+                .translation_fault_lv0,
+                .translation_fault_lv1,
+                .translation_fault_lv2,
+                .translation_fault_lv3,
+                => {
+                    const local = scheduler.Local.get();
+                    const vs = if (far >= 0xffff_8000_0000_0000) &vmm.kernel_space else if (local.current_task) |current_task| current_task.process.virtualSpace() else &vmm.kernel_space;
+
+                    const res = vs.resolveFault(far) catch |err| switch (err) {
+                        vmm.Space.Error.SegmentationFault => {
+                            log.err("nested segmentation fault from kernel at address 0x{x}", .{far});
+                            ark.cpu.halt();
+                        },
+                        else => unreachable,
+                    };
+
+                    vs.paging.map(
+                        far,
+                        res.phys_addr,
+                        1,
+                        switch (iss.dfsc) {
+                            .translation_fault_lv0 => unreachable,
+                            .translation_fault_lv1 => .l1G,
+                            .translation_fault_lv2 => .l2M,
+                            .translation_fault_lv3 => .l4K,
+                            else => unreachable,
+                        },
+                        res.flags,
+                    ) catch |err| {
+                        log.err("failed to commit on 0x{x}, {}", .{ far, err });
+                        ark.cpu.halt();
+                    };
+                },
+                else => {
+                    log.err("Nested::DataAbort({s}) on 0x{x}", .{ @tagName(iss.dfsc), far });
+                    ark.cpu.halt();
+                },
+            }
+        },
+        else => {
+            log.err("UNEXPECTED NESTED SYNCHRONOUS EXCEPTION", .{});
+            esr_el1.dump();
+            ark.cpu.halt();
+        },
+    }
 }
 
 export const el1t_sync = sync_handler;
@@ -212,18 +347,24 @@ export const el1t_irq = irq_handler;
 export const el1t_fiq = unexpected_exception;
 export const el1t_serror = unexpected_exception;
 
-export const el1h_sync = sync_handler;
-export const el1h_irq = irq_handler;
-export const el1h_fiq = unexpected_exception;
-export const el1h_serror = unexpected_exception;
+export const el1h_sync = nested_sync_handler;
+export const el1h_irq = unexpected_nested_exception;
+export const el1h_fiq = unexpected_nested_exception;
+export const el1h_serror = unexpected_nested_exception;
 
 export const el0_sync = sync_handler;
 export const el0_irq = irq_handler;
 export const el0_fiq = unexpected_exception;
 export const el0_serror = unexpected_exception;
 
-fn unexpected_exception(_: *ExceptionContext) callconv(.{ .aarch64_aapcs = .{} }) void {
+fn unexpected_exception(_: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     log.err("unexpected exception", .{});
+    ark.armv8.registers.ESR_EL1.load().dump();
+    ark.cpu.halt();
+}
+
+fn unexpected_nested_exception() callconv(.{ .aarch64_aapcs = .{} }) void {
+    log.err("unexpected nested exception", .{});
     ark.armv8.registers.ESR_EL1.load().dump();
     ark.cpu.halt();
 }

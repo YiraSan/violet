@@ -17,21 +17,142 @@
 const std = @import("std");
 const basalt = @import("basalt");
 
+const log = std.log.scoped(.timer);
+
 // --- imports --- //
 
 const kernel = @import("root");
 
-const generic_timer = @import("../arch/aarch64/generic_timer.zig");
+const mem = kernel.mem;
+const scheduler = kernel.scheduler;
+const syscall = kernel.syscall;
+
+const heap = mem.heap;
+
+const Future = scheduler.Future;
+const Process = scheduler.Process;
+const Task = scheduler.Task;
 
 // --- drivers/timer.zig --- //
 
+const generic_timer = @import("../arch/aarch64/generic_timer.zig");
+
 pub var selected_timer: enum { unselected, generic_timer } = .unselected;
 
-pub var callback: ?*const fn (ctx: *kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void = null;
+pub var callback: ?*const fn () void = null;
 
-pub fn arm(delay: basalt.timer.Delay) void {
+pub fn init() !void {
+    syscall.register(.timer_single, &timer_single);
+    syscall.register(.timer_sequential, &timer_sequential);
+}
+
+fn timer_single(frame: *kernel.arch.GeneralFrame) !void {
+    const sched_local = scheduler.Local.get();
+
+    if (sched_local.current_task) |task| {
+        const future_id_ptr_raw = frame.getArg(1);
+        if (!syscall.pin(task, future_id_ptr_raw, Future.Id, 1, true)) return try syscall.fail(frame, .invalid_pointer);
+        defer syscall.unpin(task, future_id_ptr_raw);
+        const future_id_ptr: *Future.Id = @ptrFromInt(future_id_ptr_raw);
+
+        const virtual_tick = frame.getArg(2);
+        if (virtual_tick == 0) return try syscall.fail(frame, .invalid_argument);
+
+        const physical_tick = @max(virtual_tick, task.priority.minResolution());
+
+        const future_id = Future.create(null, task.process.id, task.priority, .one_shot) catch return try syscall.fail(frame, .internal_failure);
+        errdefer if (Future.acquire(future_id)) |future| {
+            future.release();
+            future.release();
+        };
+
+        const timer_local = Local.get();
+
+        const now = getUptime();
+
+        try timer_local.event_queue.add(.{
+            .future_id = future_id,
+            .virtual_tick = virtual_tick,
+            .start_uptime = now,
+            .deadline = now + physical_tick,
+            .tick_count = 0,
+        });
+
+        future_id_ptr.* = future_id;
+
+        rearmEvent(task);
+
+        syscall.success(frame, .{});
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn timer_sequential(frame: *kernel.arch.GeneralFrame) !void {
+    const sched_local = scheduler.Local.get();
+
+    if (sched_local.current_task) |task| {
+        const future_id_ptr_raw = frame.getArg(1);
+        if (!syscall.pin(task, future_id_ptr_raw, Future.Id, 1, true)) return try syscall.fail(frame, .invalid_pointer);
+        defer syscall.unpin(task, future_id_ptr_raw);
+        const future_id_ptr: *Future.Id = @ptrFromInt(future_id_ptr_raw);
+
+        const virtual_tick = frame.getArg(2);
+        if (virtual_tick == 0) return try syscall.fail(frame, .invalid_argument);
+
+        const physical_tick = @max(virtual_tick, task.priority.minResolution());
+
+        const future_id = Future.create(null, task.process.id, task.priority, .multi_shot) catch return try syscall.fail(frame, .internal_failure);
+        errdefer if (Future.acquire(future_id)) |future| {
+            future.release();
+            future.release();
+        };
+
+        const timer_local = Local.get();
+
+        const now = getUptime();
+
+        try timer_local.event_queue.add(.{
+            .future_id = future_id,
+            .virtual_tick = virtual_tick,
+            .start_uptime = now,
+            .deadline = now + physical_tick,
+            .tick_count = 0,
+        });
+
+        future_id_ptr.* = future_id;
+
+        rearmEvent(task);
+
+        syscall.success(frame, .{});
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+pub fn initCpu() !void {
+    const local = Local.get();
+
+    local.event_queue = .init();
+}
+
+pub fn rearmEvent(current_task: *Task) void {
+    const local = Local.get();
+
+    if (local.event_queue.peek()) |event| {
+        const event_remaining, const overflowed = @subWithOverflow(event.deadline, getUptime());
+        // TODO slow-motion backpressure & quantum coallesing
+        if (overflowed == 1) {
+            arm(0);
+        } else if (event_remaining < scheduler.getRemainingQuantum(current_task)) {
+            arm(event_remaining);
+        }
+    }
+}
+
+pub fn arm(nanoseconds: u64) void {
     switch (selected_timer) {
-        .generic_timer => generic_timer.arm(delay),
+        .generic_timer => generic_timer.arm(nanoseconds),
         else => unreachable,
     }
 }
@@ -42,3 +163,30 @@ pub fn cancel() void {
         else => unreachable,
     }
 }
+
+pub fn getUptime() u64 {
+    return switch (selected_timer) {
+        .generic_timer => generic_timer.getUptime(),
+        else => unreachable,
+    };
+}
+
+const TimerEvent = struct {
+    future_id: Future.Id,
+    virtual_tick: u64,
+    start_uptime: u64,
+    deadline: u64,
+    tick_count: u64,
+
+    pub fn compare(a: TimerEvent, b: TimerEvent) std.math.Order {
+        return std.math.order(a.deadline, b.deadline);
+    }
+};
+
+pub const Local = struct {
+    event_queue: heap.PriorityQueue(TimerEvent, TimerEvent.compare),
+
+    pub fn get() *@This() {
+        return &kernel.arch.Cpu.get().timer_local;
+    }
+};

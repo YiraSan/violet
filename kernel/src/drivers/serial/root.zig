@@ -177,6 +177,8 @@ const writer = std.io.Writer(
     writeHandler,
 ){ .context = undefined };
 
+// TODO figure out an option for the rwlock that makes it possible to bypass lock if its the same core that hold the lock.
+
 pub var logfn_lock: mem.RwLock = .{};
 
 pub fn print(comptime format: []const u8, args: anytype) void {

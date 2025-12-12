@@ -23,9 +23,13 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 const scheduler = kernel.scheduler;
+
 const heap = mem.heap;
 
 const Task = scheduler.Task;
+
+const Future = scheduler.Future;
+const Prism = scheduler.Prism;
 
 // --- scheduler/process.zig --- //
 
@@ -45,23 +49,27 @@ state: std.atomic.Value(State),
 
 task_count: std.atomic.Value(usize),
 
-host_id: ?u8,
-host_affinity: u8,
+produced_future_head: ?*Future,
+consumed_future_head: ?*Future,
+
+prism_head: ?*Prism,
 
 pub fn create(options: Options) !Id {
     var process: Process = undefined;
     process.execution_level = options.execution_level;
 
-    if (!process.isPriviledged()) process.virtual_space = try .init(.lower, null, true);
-    errdefer if (!process.isPriviledged()) process.virtual_space.deinit();
+    if (!process.isPrivileged()) process.virtual_space = try .init(.lower, null, true);
+    errdefer if (!process.isPrivileged()) process.virtual_space.deinit();
 
     process.ref_count = .init(0);
     process.state = .init(.alive);
 
     process.task_count = .init(0);
 
-    process.host_id = null;
-    process.host_affinity = 16;
+    process.produced_future_head = null;
+    process.consumed_future_head = null;
+
+    process.prism_head = null;
 
     const lock_flags = processes_map_lock.lockExclusive();
     defer processes_map_lock.unlockExclusive(lock_flags);
@@ -82,16 +90,45 @@ fn destroy(self: *Process) void {
 
     defer processes_map.remove(self.id);
 
-    std.log.debug("destroying process {}", .{self.id.index});
+    var nprism = self.prism_head;
+    while (nprism) |prism| {
+        nprism = prism.next_prism;
 
-    if (!self.isPriviledged()) {
+        prism.next_prism = null;
+
+        prism.release();
+    }
+
+    var nproduced_future = self.produced_future_head;
+    while (nproduced_future) |future| {
+        nproduced_future = future.next_producer_future;
+
+        future.next_producer_future = null;
+        future.prev_producer_future = null;
+
+        _ = future.cancel();
+        future.release();
+    }
+
+    var nconsumed_future = self.consumed_future_head;
+    while (nconsumed_future) |future| {
+        nconsumed_future = future.next_consumer_future;
+
+        future.next_consumer_future = null;
+        future.prev_consumer_future = null;
+
+        _ = future.cancel();
+        future.release();
+    }
+
+    if (!self.isPrivileged()) {
         self.virtual_space.deinit();
     }
 }
 
 fn _kill(self: *Process) void {
     if (self.state.cmpxchgStrong(.alive, .dying, .acq_rel, .monotonic) == null) {
-        // TODO kill waiting tasks
+        // TODO release waiting tasks on future and interface !
     }
 }
 
@@ -122,30 +159,33 @@ pub fn release(self: *Process) void {
     }
 }
 
-pub fn virtualSpace(self: *Process) *mem.vmm.Space {
-    if (self.isPriviledged()) {
+pub inline fn virtualSpace(self: *Process) *mem.vmm.Space {
+    if (self.isPrivileged()) {
         return &mem.vmm.kernel_space;
     } else {
         return &self.virtual_space;
     }
 }
 
-pub fn isPriviledged(self: *Process) bool {
-    return self.execution_level == .kernel;
+pub inline fn isPrivileged(self: *const Process) bool {
+    return switch (self.execution_level) {
+        .module, .system => true,
+        else => false,
+    };
 }
 
-pub fn taskCount(self: *Process) usize {
+pub inline fn taskCount(self: *const Process) usize {
     return self.task_count.load(.acquire);
 }
 
-pub fn isDying(self: *Process) bool {
+pub inline fn isDying(self: *const Process) bool {
     return self.state.load(.acquire) == .dying;
 }
 
 // ---- //
 
 pub const Options = struct {
-        execution_level: basalt.process.ExecutionLevel = .user,
+    execution_level: basalt.process.ExecutionLevel = .user,
 };
 
 pub const State = enum(u8) {

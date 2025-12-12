@@ -28,7 +28,6 @@ pub const arch = @import("arch/root.zig");
 pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
-pub const prism = @import("prism/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 pub const syscall = @import("syscall/root.zig");
 
@@ -50,63 +49,113 @@ pub fn stage1() !void {
 
     try arch.init();
     try syscall.init();
-    try prism.init();
-    try prism.initCpu();
     try scheduler.init();
+    try mem.syscalls.init();
+    try drivers.Timer.init();
+    try drivers.Timer.initCpu();
 
     // scheduler tests
-    if (builtin.mode == .Debug) {
+    if (builtin.mode == .Debug or true) {
         const test_process_id = try scheduler.Process.create(.{
-            .execution_level = .kernel,
+            .execution_level = .module,
         });
 
-        const task0 = try scheduler.Task.create(test_process_id, .{ .entry_point = @intFromPtr(&_task0) });
-        const task1 = try scheduler.Task.create(test_process_id, .{ .entry_point = @intFromPtr(&_task1) });
-
+        const task0 = try scheduler.Task.create(test_process_id, .{
+            .entry_point = @intFromPtr(&task0_entry),
+        });
         try scheduler.register(task0);
+
+        const task1 = try scheduler.Task.create(test_process_id, .{
+            .entry_point = @intFromPtr(&task1_entry),
+        });
         try scheduler.register(task1);
     }
 }
 
 pub fn stage2() !void {
-    // try drivers.init();
+    try drivers.init();
 
     try arch.bootCpus();
 
     // jump to scheduler
     arch.unmaskInterrupts();
-    drivers.Timer.arm(._5ms);
+    drivers.Timer.arm(1 * std.time.ns_per_ms);
 }
 
-fn _task0() callconv(basalt.task.call_conv) noreturn {
-    asm volatile ("brk #0");
+const task0_log = std.log.scoped(.task0);
 
-    std.log.info("hello from task 0 !", .{});
+fn task0_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
+    task0_main() catch |err| {
+        task0_log.err("task0 terminated with: {}", .{err});
+    };
 
     basalt.task.terminate();
 }
 
-fn _task1() callconv(basalt.task.call_conv) noreturn {
-    asm volatile ("brk #1");
+fn task0_main() !void {
+    @breakpoint();
 
-    std.log.info("hello from task 1 !", .{});
+    task0_log.info("hello world !", .{});
+
+    var debug_allocator: std.heap.DebugAllocator(.{ .thread_safe = false }) = .init;
+    defer _ = debug_allocator.deinit();
+
+    const allocator = debug_allocator.allocator();
+
+    var list: std.ArrayList(u64) = .init(allocator);
+    defer list.deinit();
+
+    try list.append(790);
+    try list.append(10000);
+    try list.append(12000);
+    try list.append(1);
+
+    for (list.items) |item| {
+        task0_log.info("{}", .{item});
+    }
+
+    task0_log.info("sleeping for 5s...", .{});
+    try basalt.timer.sleep(._5s);
+    task0_log.info("sleep finished !", .{});
+}
+
+const task1_log = std.log.scoped(.task1);
+
+fn task1_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
+    task1_main() catch |err| {
+        task1_log.err("task1 terminated with: {}", .{err});
+    };
 
     basalt.task.terminate();
+}
+
+fn task1_main() !void {
+    @breakpoint();
+
+    task1_log.info("hello world !", .{});
+
+    var sequential_timer = try basalt.timer.sequential(._60hz);
+    defer sequential_timer.deinit();
+
+    while (true) {
+        const delta = try sequential_timer.wait();
+
+        task1_log.info("elapsed ticks since last: {}", .{delta});
+
+        try basalt.timer.sleep(._1s);
+    }
 }
 
 // --- zig std features --- //
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
-    _ = return_address;
-
     // TODO this could cause a deadlock on serial.
-    std.log.err("panic: {s}", .{message});
+    std.log.err("panic(0x{?x}): {s}", .{ return_address, message });
 
     // NOTE little panic handler
     const local_scheduler = scheduler.Local.get();
-    if (local_scheduler.current_task) |task| {
-        task.kill();
-        drivers.Timer.arm(._1ms);
+    if (local_scheduler.current_task) |_| {
+        basalt.task.terminate();
     }
 
     ark.cpu.halt();
@@ -126,6 +175,14 @@ pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal)
 pub const std_options: std.Options = .{
     .logFn = logFn,
     .log_level = if (builtin.mode == .Debug) .debug else .info,
+    .page_size_max = basalt.heap.PAGE_SIZE,
+    .page_size_min = basalt.heap.PAGE_SIZE,
+};
+
+pub const os = struct {
+    pub const heap = struct {
+        pub const page_allocator = basalt.heap.page_allocator;
+    };
 };
 
 // ---- //
@@ -135,7 +192,6 @@ comptime {
     _ = boot;
     _ = drivers;
     _ = mem;
-    _ = prism;
     _ = scheduler;
     _ = syscall;
 }

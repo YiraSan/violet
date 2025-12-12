@@ -57,9 +57,12 @@ pub const Allocator = struct {
         offset: u64,
         flags: ?Object.Flags,
 
+        /// NOTE fetching can be done under lockShared, but loading should be done under lockExclusive.
+        syscall_pinned: std.atomic.Value(usize),
+
         const Tree = heap.RedBlackTree(u64, Region, compareRegion);
 
-        fn compareRegion(address: u64, region: Region) std.math.Order {
+        inline fn compareRegion(address: u64, region: Region) std.math.Order {
             if (address < region.start) return .lt;
             if (address >= region.end) return .gt;
             return .eq;
@@ -141,6 +144,7 @@ pub const Allocator = struct {
             .object = object,
             .offset = offset,
             .flags = flags,
+            .syscall_pinned = .init(0),
         };
 
         _ = try self.regions.insert(candidate_start, new_region);
@@ -150,56 +154,60 @@ pub const Allocator = struct {
         return candidate_start;
     }
 
-    pub fn allocAt(self: *@This(), address: u64, size: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !void {
-        if (size == 0) return;
+    // TODO allocAt needs alignement etc...
 
-        if (!std.mem.isAligned(address, mem.PageLevel.l4K.size())) return Error.InvalidAlignment;
+    // pub fn allocAt(self: *@This(), address: u64, size: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !void {
+    //     if (size == 0) return;
 
-        const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
+    //     if (!std.mem.isAligned(address, mem.PageLevel.l4K.size())) return Error.InvalidAlignment;
 
-        const end_addr, const overflowed = @addWithOverflow(address, actual_size);
-        if (overflowed == 1 or end_addr > self.limit or address < self.base) {
-            return Error.OutOfRange;
-        }
+    //     const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
 
-        const lock_flags = self.lock.lockExclusive();
-        defer self.lock.unlockExclusive(lock_flags);
+    //     const end_addr, const overflowed = @addWithOverflow(address, actual_size);
+    //     if (overflowed == 1 or end_addr > self.limit or address < self.base) {
+    //         return Error.OutOfRange;
+    //     }
 
-        var curr_id = self.regions.first();
+    //     const lock_flags = self.lock.lockExclusive();
+    //     defer self.lock.unlockExclusive(lock_flags);
 
-        while (curr_id) |id| {
-            const region = self.regions.get(id).?;
+    //     var curr_id = self.regions.first();
 
-            if (region.end <= address) {
-                curr_id = self.regions.next(id);
-                continue;
-            }
+    //     while (curr_id) |id| {
+    //         const region = self.regions.get(id).?;
 
-            if (region.start >= end_addr) {
-                break;
-            }
+    //         if (region.end <= address) {
+    //             curr_id = self.regions.next(id);
+    //             continue;
+    //         }
 
-            return Error.AddressAlreadyInUse;
-        }
+    //         if (region.start >= end_addr) {
+    //             break;
+    //         }
 
-        const new_region = Region{
-            .start = address,
-            .end = end_addr,
-            .object = object,
-            .offset = offset,
-            .flags = flags,
-        };
+    //         return Error.AddressAlreadyInUse;
+    //     }
 
-        _ = try self.regions.insert(address, new_region);
-    }
+    //     const new_region = Region{
+    //         .start = address,
+    //         .end = end_addr,
+    //         .object = object,
+    //         .offset = offset,
+    //         .flags = flags,
+    //     };
 
-    pub fn free(self: *@This(), address: u64) !struct { object: ?*Object, size: u64 } {
+    //     _ = try self.regions.insert(address, new_region);
+    // }
+
+    pub fn free(self: *@This(), address: u64, is_syscall: bool) Error!struct { object: ?*Object, size: u64 } {
         const lock_flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(lock_flags);
 
         const region_id = self.regions.find(address) orelse return Error.InvalidAddress;
 
         const region_ptr = self.regions.get(region_id).?;
+
+        if (is_syscall) if (region_ptr.syscall_pinned.load(.acquire) > 0) return Error.InvalidAddress;
 
         if (region_ptr.start != address) {
             return Error.InvalidAddress;
@@ -348,19 +356,20 @@ pub const Space = struct {
         self: *@This(),
         object_id: Object.Id,
         size: u64,
+        alignment: u64,
         offset: u64,
         flags: ?Object.Flags,
     ) !u64 {
         const object = Object.acquire(object_id) orelse return Error.InvalidObject;
         errdefer object.release();
 
-        const vaddr = try self.allocator.alloc(size, PAGE_SIZE, object, offset, flags);
+        const vaddr = try self.allocator.alloc(size, alignment, object, offset, flags);
 
         return vaddr;
     }
 
-    pub fn unmap(self: *@This(), addr: u64) !void {
-        const info = try self.allocator.free(addr);
+    pub fn unmap(self: *@This(), addr: u64, is_syscall: bool) !void {
+        const info = try self.allocator.free(addr, is_syscall);
         self.paging.unmap(addr, info.size / PAGE_SIZE, .l4K);
     }
 
@@ -397,10 +406,9 @@ pub const Object = struct {
     var objects_map: Map = .init();
     var objects_map_lock: mem.RwLock = .{};
 
-    pub const Flags = packed struct(u8) {
+    pub const Flags = struct {
         writable: bool = false,
         executable: bool = false,
-        _reserved0: u6 = 0,
     };
 
     const PAGE_SIZE = mem.PageLevel.l4K.size();

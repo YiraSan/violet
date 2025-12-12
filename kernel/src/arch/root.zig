@@ -29,8 +29,11 @@ const impl = switch (builtin.cpu.arch) {
     else => unreachable,
 };
 
-pub const TaskContext = impl.TaskContext;
-pub const ExceptionContext = impl.ExceptionContext;
+pub const extend_frame = impl.extend_frame;
+
+pub const GeneralFrame = impl.GeneralFrame;
+pub const ExtendedFrame = impl.ExtendedFrame;
+pub const ExceptionData = impl.ExceptionData;
 
 comptime {
     _ = impl;
@@ -68,14 +71,18 @@ pub fn restoreSaved(saved: u64) void {
 
 // --- //
 
+/// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
+pub var cpus: [256]?*kernel.arch.Cpu align(@alignOf(u128)) = undefined;
+
 pub const Cpu = struct {
     cpuid: u64,
+    kernel_stack_top: u64,
 
     phys_local: kernel.mem.phys.Local,
     scheduler_local: kernel.scheduler.Local,
-    prism_local: kernel.prism.Local,
+    timer_local: kernel.drivers.Timer.Local,
 
-    pub fn id() usize {
+    pub fn id() u8 {
         switch (builtin.cpu.arch) {
             .aarch64 => {
                 const mpidr = ark.armv8.registers.MPIDR_EL1.load();
@@ -89,9 +96,13 @@ pub const Cpu = struct {
 
     pub fn get() *Cpu {
         return switch (builtin.cpu.arch) {
-            .aarch64 => @ptrFromInt(ark.armv8.registers.loadTpidrEL1()),
+            .aarch64 => @ptrFromInt(ark.armv8.registers.loadTpidrEl1()),
             else => unreachable,
         };
+    }
+
+    pub fn getCpu(idx: u8) *Cpu {
+        return cpus[idx].?;
     }
 
     comptime {

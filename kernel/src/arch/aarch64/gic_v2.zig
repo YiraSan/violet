@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ const phys = mem.phys;
 const vmm = mem.vmm;
 
 const acpi = kernel.drivers.acpi;
+
+const gic = @import("gic.zig");
 
 // --- aarch64/gic_v2.zig --- //
 
@@ -161,7 +163,27 @@ const GICD_ISACTIVERn = 0x300;
 const GICD_ICACTIVERn = 0x380;
 const GICD_IPRIORITYRn = 0x400;
 const GICD_ITARGETSRn = 0x800;
+
 const GICD_ICFGRn = 0xC00;
+
+pub fn configure(irq: u32, trigger_mode: gic.TriggerMode, polarity: gic.Polarity) void {
+    _ = polarity;
+
+    const reg_index = irq / 16;
+    const bit_shift = (irq % 16) * 2 + 1;
+
+    const icfgr: *volatile u32 = @ptrFromInt(gicd_base + GICD_ICFGRn + (reg_index * 4));
+
+    var val = icfgr.*;
+
+    val &= ~(@as(u32, 1) << @intCast(bit_shift));
+
+    if (trigger_mode == .edge) {
+        val |= (@as(u32, 1) << @intCast(bit_shift));
+    }
+
+    icfgr.* = val;
+}
 
 // --- GIC CPU --- //
 

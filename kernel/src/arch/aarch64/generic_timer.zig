@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const basalt = @import("basalt");
+const ark = @import("ark");
 
 // --- imports --- //
 
@@ -30,19 +31,28 @@ const Timer = kernel.drivers.Timer;
 // --- generic_timer.zig --- //
 
 var gsiv: u32 = undefined;
+var is_virtual: bool = undefined;
 
 pub fn init() !void {
     var xsdt_iter = kernel.boot.xsdt.iter();
     xsdt_loop: while (xsdt_iter.next()) |xsdt_entry| {
         switch (xsdt_entry) {
             .gtdt => |gtdt| {
-                if (gtdt.el1_non_secure_gsiv == 0) @panic("EL1 Non-Secure GENERIC TIMER not found.");
-
-                exception.irq_callbacks[gtdt.el1_non_secure_gsiv] = &callback;
-
-                gsiv = gtdt.el1_non_secure_gsiv;
-
-                Timer.selected_timer = .generic_timer;
+                if (gtdt.el1_virtual_gsiv != 0) {
+                    exception.irq_callbacks[gtdt.el1_virtual_gsiv] = &callback;
+                    gsiv = gtdt.el1_virtual_gsiv;
+                    is_virtual = true;
+                    Timer.selected_timer = .generic_timer;
+                    gic.configure(gtdt.el1_virtual_gsiv, .level, .active_low);
+                } else if (gtdt.el1_non_secure_gsiv != 0) {
+                    exception.irq_callbacks[gtdt.el1_non_secure_gsiv] = &callback;
+                    gsiv = gtdt.el1_non_secure_gsiv;
+                    is_virtual = false;
+                    Timer.selected_timer = .generic_timer;
+                    gic.configure(gtdt.el1_non_secure_gsiv, .level, .active_low);
+                } else {
+                    @panic("generic_timer isn't available.");
+                }
 
                 break :xsdt_loop;
             },
@@ -59,68 +69,56 @@ pub fn disableCpu() !void {
     gic.disableIRQ(gsiv);
 }
 
-fn callback(ctx: *kernel.arch.ExceptionContext) void {
+fn callback() callconv(basalt.task.call_conv) void {
     disable();
     if (Timer.callback) |timer_callback| {
-        timer_callback(ctx);
+        timer_callback();
     }
 }
 
-/// Reads the current system counter frequency from CNTFRQ_EL0.
-fn read_cntfrq_el0() u64 {
-    var val: u64 = undefined;
-    asm volatile (
-        \\ mrs %[out], cntfrq_el0
-        : [out] "=r" (val),
-        :
-        : "memory"
-    );
-    return val;
+pub inline fn getUptime() u64 {
+    const frequency = ark.armv8.registers.loadCntfrqEl0();
+    if (frequency == 0) return 0;
+
+    const ticks = if (is_virtual)
+        ark.armv8.registers.loadCntvctEl0()
+    else
+        ark.armv8.registers.loadCntpctEl0();
+
+    const ticks_u128: u128 = @as(u128, ticks) * std.time.ns_per_s;
+    return @intCast(ticks_u128 / frequency);
 }
 
-/// Writes a value to CNTP_TVAL_EL0 (Timer Value Register).
-fn write_cntp_tval_el0(val: u64) void {
-    asm volatile (
-        \\ msr cntp_tval_el0, %[in]
-        :
-        : [in] "r" (val),
-        : "memory"
-    );
-}
-
-/// Writes a value to CNTP_CTL_EL0 (Timer Control Register).
-/// Bit 0 = enable, Bit 1 = imask, Bit 2 = ISTATUS (read-only).
-fn write_cntp_ctl_el0(val: u32) void {
-    asm volatile (
-        \\ msr cntp_ctl_el0, %[in]
-        :
-        : [in] "r" (val),
-        : "memory"
-    );
-}
-
-pub inline fn arm(delay: basalt.timer.Delay) void {
+pub inline fn arm(nanoseconds: u64) void {
     disable();
 
-    const freq = read_cntfrq_el0();
-    const interval = switch (delay) {
-        ._100ms => freq / 10,
-        ._50ms => freq / 20,
-        ._10ms => freq / 100,
-        ._5ms => freq / 200,
-        ._1ms => freq / 1000,
-        ._0_5ms => freq / 2000,
-    };
+    const frequency = ark.armv8.registers.loadCntfrqEl0();
 
-    write_cntp_tval_el0(interval);
+    const total_cycles: u128 = @as(u128, @intCast(nanoseconds)) * @as(u128, @intCast(frequency));
+
+    const interval: u128 = total_cycles / 1_000_000_000;
+
+    if (is_virtual) {
+        ark.armv8.registers.storeCntvTvalEl0(@intCast(interval));
+    } else {
+        ark.armv8.registers.storeCntpTvalEl0(@intCast(interval));
+    }
 
     enable();
 }
 
 pub inline fn enable() void {
-    write_cntp_ctl_el0(0b0001);
+    if (is_virtual) {
+        ark.armv8.registers.storeCntvCtlEl0(0b0001);
+    } else {
+        ark.armv8.registers.storeCntpCtlEl0(0b0001);
+    }
 }
 
 pub inline fn disable() void {
-    write_cntp_ctl_el0(0);
+    if (is_virtual) {
+        ark.armv8.registers.storeCntvCtlEl0(0b0000);
+    } else {
+        ark.armv8.registers.storeCntpCtlEl0(0b0000);
+    }
 }

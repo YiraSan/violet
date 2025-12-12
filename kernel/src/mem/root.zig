@@ -22,8 +22,9 @@ const ark = @import("ark");
 const kernel = @import("root");
 
 pub const heap = @import("heap.zig");
-pub const vmm = @import("vmm.zig");
 pub const phys = @import("phys.zig");
+pub const syscalls = @import("syscalls.zig");
+pub const vmm = @import("vmm.zig");
 
 pub const PageLevel = ark.mem.PageLevel;
 

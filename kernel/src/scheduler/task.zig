@@ -15,6 +15,7 @@
 // --- dependencies --- //
 
 const std = @import("std");
+const ark = @import("ark");
 const basalt = @import("basalt");
 
 // --- imports --- //
@@ -23,6 +24,7 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 const scheduler = kernel.scheduler;
+const syscall = kernel.syscall;
 
 const heap = mem.heap;
 const vmm = mem.vmm;
@@ -44,18 +46,49 @@ var tasks_map_lock: mem.RwLock = .{};
 id: Id,
 process: *scheduler.Process,
 
-timer_precision: basalt.timer.Precision,
-
 ref_count: std.atomic.Value(usize),
 state: std.atomic.Value(State),
-waiting_future: ?void,
 
 priority: basalt.task.Priority,
-quantum: basalt.task.Quantum,
-quantum_elapsed_ns: usize,
+quantum: basalt.timer.Delay,
+uptime_schedule: u64, // When it has been scheduled last
+uptime_suspend: u64, // When it has been suspended last
 
-context: kernel.arch.TaskContext,
-stack_pointer: u64,
+host_id: u8,
+host_affinity: u8,
+
+base_stack: u64,
+
+exception: bool,
+suspended: bool,
+/// NOTE: We default to Eager switching for three reasons:
+/// 1. Security: Lazy switching is vulnerable to side-channels on x86_64 (CVE-2018-3665).
+/// 2. Real-Time: Eager switching guarantees deterministic context switch timing.
+/// 3. Performance: On AArch64/RISC-V, almost all processes use SIMD, making Lazy logic pure overhead.
+should_extend: bool,
+is_extended: bool,
+exception_data: kernel.arch.ExceptionData,
+stack_pointer: extern union {
+    general: *kernel.arch.GeneralFrame,
+    extended: *kernel.arch.ExtendedFrame,
+},
+
+// next_listener: ?*Task,
+
+futures_lock: mem.RwLock,
+futures_generation: u64,
+futures_waitmode: basalt.sync.Future.WaitMode,
+futures_payloads: [128]u64,
+futures_statuses: [128]basalt.sync.Future.Status,
+futures_pending: u8,
+futures_resolved: u8,
+futures_canceled: u8,
+
+futures_userland_len: u64,
+futures_userland_payloads_ptr: u64,
+futures_userland_statuses_ptr: u64,
+
+futures_failfast_index: ?u8,
 
 pub fn create(process_id: Process.Id, options: Options) !Id {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
@@ -64,27 +97,73 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
     var task: Task = undefined;
     task.process = process;
 
-    task.timer_precision = options.timer_precision;
-
     task.ref_count = .init(0);
     task.state = .init(.ready);
-    task.waiting_future = null;
 
     task.priority = options.priority;
-    task.quantum = options.quantum;
-    task.quantum_elapsed_ns = 0;
+    task.quantum = options.quantum.toDelay();
+    task.uptime_schedule = 0;
+    task.uptime_suspend = 0;
+
+    task.host_id = 0;
+    task.host_affinity = 16;
+
+    // task.next_listener = null;
+
+    // TODO GUARD PAGES
+
+    const object = try vmm.Object.create(STACK_SIZE, .{ .writable = true });
 
     const vs = task.process.virtualSpace();
-    { // TODO GUARD PAGES !!
-        const object = try vmm.Object.create(STACK_SIZE, .{ .writable = true });
-        task.stack_pointer = try vs.map(object, STACK_SIZE, 0);
-    }
-    errdefer vs.unmap(task.stack_pointer) catch unreachable;
+    task.base_stack = try vs.map(
+        object,
+        STACK_SIZE,
+        0,
+        0,
+        null,
+    );
+    errdefer vs.unmap(task.base_stack, false) catch {};
 
-    task.context = .init();
-    task.context.setExecutionAddress(options.entry_point);
-    task.context.setStackPointer(task.stack_pointer);
-    task.context.setExecutionLevel(task.process.execution_level);
+    const kernel_stack_base = try vmm.kernel_space.map(object, STACK_SIZE, 0, 0, null);
+    defer vmm.kernel_space.unmap(kernel_stack_base, false) catch {};
+
+    task.exception = true;
+    task.suspended = true;
+    task.should_extend = true;
+    task.is_extended = true; // NOTE starting on "is_extended" to avoid leaking data from the last task.
+
+    task.exception_data.init(&task);
+
+    const frame_offset = STACK_SIZE - @sizeOf(kernel.arch.ExtendedFrame);
+
+    task.stack_pointer = .{ .extended = @ptrFromInt(task.base_stack + frame_offset) };
+
+    const kernel_stack_pointer: *kernel.arch.ExtendedFrame = @ptrFromInt(kernel_stack_base + frame_offset);
+
+    kernel_stack_pointer.general_frame.program_counter = options.entry_point;
+    kernel_stack_pointer.general_frame.stack_pointer = task.base_stack + STACK_SIZE;
+
+    // NOTE on x86_64 initializing to zero the SSE context isn't valid. (MXCSR)
+
+    // std.log.warn("umbilical id not given to task !!!!", .{});
+
+    if (task.process.isPrivileged()) {
+        kernel_stack_pointer.general_frame.setArg(1, @intFromPtr(&syscall.kernel_indirection_table));
+    }
+
+    task.futures_lock = .{};
+    task.futures_generation = 0;
+    task.futures_waitmode = undefined;
+    task.futures_payloads = undefined;
+    task.futures_statuses = undefined;
+    task.futures_pending = 0;
+    task.futures_resolved = 0;
+    task.futures_canceled = 0;
+
+    task.futures_userland_payloads_ptr = 0;
+    task.futures_userland_statuses_ptr = 0;
+
+    task.futures_failfast_index = null;
 
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
@@ -96,6 +175,17 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
     _ = task_ptr.process.task_count.fetchAdd(1, .acq_rel);
 
     return slot_key;
+}
+
+pub fn extendFrame(self: *Task) void {
+    if (!self.suspended) {
+        self.suspended = true;
+
+        if (!self.is_extended and self.should_extend) {
+            self.stack_pointer.extended = kernel.arch.extend_frame(self.stack_pointer.general);
+            self.is_extended = true;
+        }
+    }
 }
 
 pub fn kill(self: *Task) void {
@@ -115,9 +205,7 @@ fn destroy(self: *Task) void {
 
     defer tasks_map.remove(self.id);
 
-    std.log.debug("destroying task {}:{}", .{ self.process.id.index, self.id.index });
-
-    self.process.virtualSpace().unmap(self.stack_pointer) catch {};
+    self.process.virtualSpace().unmap(self.base_stack, false) catch {};
 }
 
 pub fn acquire(id: Id) ?*Task {
@@ -139,8 +227,21 @@ pub fn release(self: *Task) void {
     }
 }
 
-pub fn isDying(self: *Task) bool {
+pub inline fn isDying(self: *const Task) bool {
     return self.state.load(.acquire) == .dying;
+}
+
+pub inline fn penalty(self: *const Task) u64 {
+    const userland_penalty: u64 = if (self.process.isPrivileged()) 0 else 250 * std.time.ns_per_us;
+
+    const priority_penalty: u64 = switch (self.priority) {
+        .background => 500 * std.time.ns_per_ms,
+        .normal => 50 * std.time.ns_per_ms,
+        .reactive => 5 * std.time.ns_per_ms,
+        .realtime => 0,
+    };
+
+    return priority_penalty + userland_penalty;
 }
 
 // ---- //
@@ -149,13 +250,13 @@ pub const Options = struct {
     entry_point: u64,
     priority: basalt.task.Priority = .normal,
     quantum: basalt.task.Quantum = .moderate,
-    timer_precision: basalt.timer.Precision = .disabled,
 };
 
 pub const State = enum(u8) {
     ready,
     dying,
     waiting,
+    waiting_queued,
 };
 
 pub const Error = error{

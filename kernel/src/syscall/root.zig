@@ -23,59 +23,100 @@ const kernel = @import("root");
 
 // --- syscall/root.zig --- //
 
-pub const SyscallFn = *const fn (*kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void;
+pub const SyscallFn = *const fn (*kernel.arch.GeneralFrame) anyerror!void;
 
-pub var registers: [basalt.syscall.MAX_CODE]u64 = undefined;
+var registers: [basalt.syscall.MAX_CODE]u64 = undefined;
+
+pub var kernel_indirection_table: basalt.module.KernelIndirectionTable = undefined;
 
 pub fn init() !void {
     @memset(&registers, 0);
 
     register(.null, &null_syscall);
+
+    basalt.module.kernel_indirection_table = &kernel_indirection_table;
+}
+
+pub export fn internal_call_system(frame: *kernel.arch.GeneralFrame) callconv(basalt.task.call_conv) void {
+    const code = frame.getArg(0);
+
+    if (code < registers.len) {
+        const syscall_fn_val = registers[code];
+        if (syscall_fn_val != 0) {
+            const syscall_fn: SyscallFn = @ptrFromInt(syscall_fn_val);
+
+            frame.setArg(0, @bitCast(basalt.syscall.Result{
+                .is_success = false,
+                .value = .{ .err = .{ .error_code = .internal_failure } },
+            }));
+
+            return syscall_fn(frame) catch {};
+        }
+    }
+
+    frame.setArg(0, @bitCast(basalt.syscall.Result{
+        .is_success = false,
+        .value = .{ .err = .{ .error_code = .unknown_syscall } },
+    }));
 }
 
 pub fn register(code: basalt.syscall.Code, syscall_fn: SyscallFn) void {
     registers[@intFromEnum(code)] = @intFromPtr(syscall_fn);
 }
 
-fn null_syscall(context: *kernel.arch.ExceptionContext) callconv(basalt.task.call_conv) void {
-    success(context);
+fn null_syscall(frame: *kernel.arch.GeneralFrame) !void {
+    success(frame, .{});
 }
 
-pub fn success(context: *kernel.arch.ExceptionContext) void {
-    context.setArg(0, @bitCast(basalt.syscall.Result{
+pub fn success(frame: *kernel.arch.GeneralFrame, values: basalt.syscall.SuccessValues) void {
+    frame.setArg(0, @bitCast(basalt.syscall.Result{
         .is_success = true,
+        .value = .{
+            .success = values,
+        },
     }));
 }
 
-pub fn fail(context: *kernel.arch.ExceptionContext, code: basalt.syscall.ErrorCode) void {
-    context.setArg(0, @bitCast(basalt.syscall.Result{
+pub fn fail(frame: *kernel.arch.GeneralFrame, code: basalt.syscall.ErrorCode) !void {
+    frame.setArg(0, @bitCast(basalt.syscall.Result{
         .is_success = false,
-        .code = @intFromEnum(code),
+        .value = .{ .err = .{
+            .error_code = code,
+        } },
     }));
+
+    return error._;
 }
 
-pub fn isAddressSafe(virt_address: u64, T: type, writable: bool) bool {
-    const local = kernel.scheduler.Local.get();
-
+pub fn pin(task: *kernel.scheduler.Task, virt_address: u64, T: type, count: usize, writable: bool) bool {
     if (!std.mem.isAligned(virt_address, @alignOf(T))) return false;
 
-    if (local.current_task) |current_task| {
-        const vs = current_task.process.virtualSpace();
-        const lock_flags = vs.allocator.lock.lockShared();
-        defer vs.allocator.lock.unlockShared(lock_flags);
+    const vs = task.process.virtualSpace();
+    const lock_flags = vs.allocator.lock.lockShared();
+    defer vs.allocator.lock.unlockShared(lock_flags);
 
-        const region_id = vs.allocator.regions.find(virt_address) orelse return false;
-        const region = vs.allocator.regions.get(region_id).?;
+    const region_id = vs.allocator.regions.find(virt_address) orelse return false;
+    const region = vs.allocator.regions.get(region_id).?;
 
-        if (region.object) |object| {
-            if (region.end - virt_address < @sizeOf(T)) return false;
-            if (!object.flags.writable and writable) return false;
+    if (region.object) |object| {
+        if (region.end - virt_address < @sizeOf(T) * count) return false;
+        if (!object.flags.writable and writable) return false;
 
-            return true;
-        }
-    } else {
-        @panic("syscall.isAddressSafe called outside a task !");
+        _ = region.syscall_pinned.fetchAdd(1, .acq_rel);
+
+        return true;
     }
 
     return false;
+}
+
+pub fn unpin(task: *kernel.scheduler.Task, virt_address: u64) void {
+    const vs = task.process.virtualSpace();
+    const lock_flags = vs.allocator.lock.lockShared();
+    defer vs.allocator.lock.unlockShared(lock_flags);
+
+    const region_id = vs.allocator.regions.find(virt_address) orelse return;
+    const region = vs.allocator.regions.get(region_id).?;
+
+    _ = region.syscall_pinned.fetchSub(1, .acq_rel);
 }

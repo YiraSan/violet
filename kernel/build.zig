@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,6 +69,7 @@ pub fn build(b: *std.Build) !void {
     const basalt_dep = b.dependency("basalt", .{
         .target = target,
         .optimize = optimize,
+        .module_mode = true,
     });
     const basalt_mod = basalt_dep.module("basalt");
     kernel_mod.addImport("basalt", basalt_mod);

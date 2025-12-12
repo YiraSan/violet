@@ -329,59 +329,77 @@ pub const armv8 = struct {
     };
 
     pub const registers = struct {
-        pub fn loadTtbr0El1() u64 {
+        pub inline fn storeSpEl0(sp_el0: u64) void {
+            asm volatile (
+                \\ msr sp_el0, %[sp_el0]
+                :
+                : [sp_el0] "r" (sp_el0),
+            );
+        }
+
+        pub inline fn storeSpEl1(sp_el1: u64) void {
+            asm volatile (
+                \\ msr spsel, #1
+                \\ mov sp, %[sp_el1]
+                \\ msr spsel, #0
+                :
+                : [sp_el1] "r" (sp_el1),
+            );
+        }
+
+        pub inline fn loadTtbr0El1() u64 {
             return asm volatile ("mrs %[output], ttbr0_el1"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeTtbr0El1(l0_table: u64) void {
+        pub inline fn storeTtbr0El1(l0_table: u64) void {
             asm volatile ("msr ttbr0_el1, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadTtbr1El1() u64 {
+        pub inline fn loadTtbr1El1() u64 {
             return asm volatile ("mrs %[output], ttbr1_el1"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeTtbr1El1(l0_table: u64) void {
+        pub inline fn storeTtbr1El1(l0_table: u64) void {
             asm volatile ("msr ttbr1_el1, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadVbarEl1() u64 {
+        pub inline fn loadVbarEl1() u64 {
             return asm volatile ("mrs %[output], vbar_el1"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeVbarEl1(l0_table: u64) void {
+        pub inline fn storeVbarEl1(exception_vector_table: u64) void {
             asm volatile ("msr vbar_el1, %[input]"
                 :
-                : [input] "r" (l0_table),
+                : [input] "r" (exception_vector_table),
             );
         }
 
-        pub fn loadVbarEl2() u64 {
+        pub inline fn loadVbarEl2() u64 {
             return asm volatile ("mrs %[output], vbar_el2"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeVbarEl2(l0_table: u64) void {
+        pub inline fn storeVbarEl2(exception_vector_table: u64) void {
             asm volatile ("msr vbar_el2, %[input]"
                 :
-                : [input] "r" (l0_table),
+                : [input] "r" (exception_vector_table),
             );
         }
 
-        pub fn loadElrEl1() u64 {
+        pub inline fn loadElrEl1() u64 {
             return asm volatile ("mrs %[output], elr_el1"
                 : [output] "=r" (-> u64),
             );
@@ -394,68 +412,126 @@ pub const armv8 = struct {
             );
         }
 
-        pub fn loadElrEl2() u64 {
+        pub inline fn loadElrEl2() u64 {
             return asm volatile ("mrs %[output], elr_el2"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeElrEl2(l0_table: u64) void {
+        pub inline fn storeElrEl2(l0_table: u64) void {
             asm volatile ("msr elr_el2, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadFarEl1() u64 {
+        pub inline fn loadFarEl1() u64 {
             return asm volatile ("mrs %[output], far_el1"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeFarEl1(l0_table: u64) void {
+        pub inline fn storeFarEl1(l0_table: u64) void {
             asm volatile ("msr far_el1, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadTpidrEL0() u64 {
+        pub inline fn loadTpidrEl0() u64 {
             return asm volatile ("mrs %[output], tpidr_el0"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeTpidrEL0(l0_table: u64) void {
+        pub fn storeTpidrEl0(l0_table: u64) void {
             asm volatile ("msr tpidr_el0, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadTpidrroEL0() u64 {
+        pub inline fn loadTpidrroEl0() u64 {
             return asm volatile ("mrs %[output], tpidrro_el0"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeTpidrroEL0(l0_table: u64) void {
+        pub inline fn storeTpidrroEl0(l0_table: u64) void {
             asm volatile ("msr tpidrro_el0, %[input]"
                 :
                 : [input] "r" (l0_table),
             );
         }
 
-        pub fn loadTpidrEL1() u64 {
+        pub inline fn loadTpidrEl1() u64 {
             return asm volatile ("mrs %[output], tpidr_el1"
                 : [output] "=r" (-> u64),
             );
         }
 
-        pub fn storeTpidrEL1(l0_table: u64) void {
+        pub inline fn storeTpidrEl1(l0_table: u64) void {
             asm volatile ("msr tpidr_el1, %[input]"
                 :
                 : [input] "r" (l0_table),
+            );
+        }
+
+        pub inline fn loadCntfrqEl0() u64 {
+            return asm volatile ("mrs %[output], cntfrq_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn loadCntpctEl0() u64 {
+            return asm volatile ("mrs %[output], cntpct_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn storeCntpCtlEl0(cntp_ctl_el0: u64) void {
+            asm volatile ("msr cntp_ctl_el0, %[input]"
+                :
+                : [input] "r" (cntp_ctl_el0),
+            );
+        }
+
+        pub inline fn loadCntpTvalEl0() u64 {
+            return asm volatile ("mrs %[output], cntp_tval_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn storeCntpTvalEl0(cntp_tval_el0: u64) void {
+            asm volatile ("msr cntp_tval_el0, %[input]"
+                :
+                : [input] "r" (cntp_tval_el0),
+            );
+        }
+
+        pub inline fn loadCntvctEl0() u64 {
+            return asm volatile ("mrs %[output], cntvct_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn loadCntvTvalEl0() u64 {
+            return asm volatile ("mrs %[output], cntv_tval_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn storeCntvTvalEl0(cntv_tval_el0: u64) void {
+            asm volatile ("msr cntv_tval_el0, %[input]"
+                :
+                : [input] "r" (cntv_tval_el0),
+            );
+        }
+
+        pub inline fn storeCntvCtlEl0(cntv_ctl_el0: u64) void {
+            asm volatile ("msr cntv_ctl_el0, %[input]"
+                :
+                : [input] "r" (cntv_ctl_el0),
             );
         }
 
@@ -766,45 +842,45 @@ pub const armv8 = struct {
         /// TODO rewrite this crapy description
         pub const SCTLR_EL1 = packed struct(u64) {
             /// MMU enable for EL1&0 stage 1 address translation.
-            M: bool = false, // bit 0
+            m: bool = false, // bit 0
             /// Alignment check enable. This is the enable bit for Alignment fault checking at EL1 and EL0.
-            A: bool = true, // bit 1
+            a: bool = true, // bit 1
             /// Stage 1 Cacheability control, for data accesses.
-            C: bool = false, // bit 2
+            c: bool = false, // bit 2
             /// SP Alignment check enable (EL1).
             /// When set to true, if a load or store instruction executed at EL1 uses the SP as the base address
             /// and the SP is not aligned to a 16-byte boundary, then an SP alignment fault exception is generated.
-            SA: bool = true, // bit 3
+            sa: bool = true, // bit 3
             /// SP Alignment check enable (EL0).
             /// When set to true, if a load or store instruction executed at EL0 uses the SP as the base address
             /// and the SP is not aligned to a 16-byte boundary, then an SP alignment fault exception is generated.
-            SA0: bool = true, // bit 4
+            sa0: bool = true, // bit 4
             /// CP15BEN when FEAT_AA32EL0 is implemented
-            _reserved5: u1 = 0, // bit 5
+            _todo5: u1 = 0, // bit 5
             /// nAA when FEAT_LSE2 is implemented
-            _reserved6: u1 = 0, // bit 6
+            _todo6: u1 = 0, // bit 6
             /// ITD when FEAT_AA32EL0 is implemented
-            _reserved7: u1 = 0, // bit 7
+            _todo7: u1 = 0, // bit 7
             /// SED when FEAT_AA32EL0 is implemented
-            _reserved8: u1 = 0, // bit 8
+            _todo8: u1 = 0, // bit 8
             /// User Mask Access. Traps EL0 execution of MSR and MRS instructions that access the PSTATE.{D, A, I, F} masks to EL1,
             /// or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from AArch64 state only, reported using EC syndrome value 0x18.
             /// It is a mask, "false" means the trap is enabled, "true" means that the trap is masked.
             uma: bool = false, // bit 9
             /// EnRCTX when FEAT_SPECRES is implemented
-            _reserved10: u1 = 0, // bit 10
+            _todo10: u1 = 0, // bit 10
             /// EOS when FEAT_ExS is implemented
-            _reserved11: u1 = 0, // bit 11
+            _todo11: u1 = 0, // bit 11
             /// Stage 1 instruction access Cacheability control, for accesses at EL0 and EL1:
             /// *If the value of SCTLR_EL1.M is 0, instruction accesses from stage 1 of the EL1&0 translation regime are to Normal, Outer Shareable, Inner Non-cacheable, Outer Non-cacheable memory.*
-            I: enum(u1) { // bit 12
+            i: enum(u1) { // bit 12
                 /// All instruction access to Stage 1 Normal memory from EL0 and EL1 are Stage 1 Non-cacheable.
                 non_cacheable = 0b00,
                 /// This control has no effect on the Stage 1 Cacheability of instruction access to Stage 1 Normal memory from EL0 and EL1.
                 no_effect = 0b01,
             } = .no_effect,
             /// EnDB wWhen FEAT_PAuth is implemented
-            _reserved13: u1 = 0, // bit 13
+            _todo13: u1 = 0, // bit 13
             /// Traps EL0 execution of the following instructions to EL1, or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from AArch64 state only, reported using EC syndrome value 0x18:
             ///
             /// - DC ZVA.
@@ -812,38 +888,148 @@ pub const armv8 = struct {
             /// - If FEAT_MTETC is implemented, DC GBVA and DC ZGBVA.
             ///
             /// Traps EL0 execution of DC ZVA instructions to EL1, or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from AArch64 state only, reported using EC syndrome value 0x18.
-            DZE: enum(u1) { // bit 14
+            dze: enum(u1) { // bit 14
                 /// Any attempt to execute an instruction that this trap applies to at EL0 using AArch64 is trapped.
                 trapped = 0b0,
                 /// This control does not cause any instructions to be trapped.
                 not_trapped = 0b1,
             } = .trapped,
             /// Traps EL0 accesses to the CTR_EL0 to EL1, or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from AArch64 state only, reported using EC syndrome value 0x18.
-            UCT: enum(u1) { // bit 15
+            uct: enum(u1) { // bit 15
                 /// Accesses to the CTR_EL0 from EL0 using AArch64 are trapped.
                 trapped = 0b0,
                 /// This control does not cause any instructions to be trapped.
                 not_trapped = 0b1,
             } = .trapped,
             /// Traps EL0 execution of WFI instructions to EL1, or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from both Execution states, reported using EC syndrome value 0x01.
-            nTWI: enum(u1) { // bit 16
+            ntwi: enum(u1) { // bit 16
                 /// Any attempt to execute a WFI instruction at EL0 is trapped, if the instruction would otherwise have caused the PE to enter a low-power state.
                 trapped = 0b0,
                 /// This control does not cause any instructions to be trapped.
                 not_trapped = 0b1,
             } = .trapped,
-            _reserved17: u1 = 0, // bit 17
+            _todo17: u1 = 0, // bit 17
             /// Traps EL0 execution of WFE instructions to EL1, or to EL2 when it is implemented and enabled for the current Security state and HCR_EL2.TGE is 1, from both Execution states, reported using EC syndrome value 0x01.
-            nTWE: enum(u1) { // bit 18
+            ntwe: enum(u1) { // bit 18
                 /// Any attempt to execute a WFE instruction at EL0 is trapped, if the instruction would otherwise have caused the PE to enter a low-power state.
                 trapped = 0b0,
                 /// This control does not cause any instructions to be trapped.
                 not_trapped = 0b1,
             } = .trapped,
             /// Write permission implies XN (Execute-never). For the EL1&0 translation regime, this bit can restrict execute permissions on writeable pages.
-            WXN: bool = false, // bit 19
-            /// TODO
-            _todo: u44 = 0, // bit 20-63
+            wxn: bool = false, // bit 19
+
+            /// Trap EL0 Access to the SCXTNUM_EL0 register, when EL0 is using AArch64.
+            ///
+            /// When FEAT_CSV2_2 is implemented or FEAT_CSV2_1p2 is implemented
+            tscxt: bool = true, // bit 20
+
+            /// Implicit Error Synchronization event enable.
+            ///
+            /// When FEAT_IESB is implemented
+            iesb: bool = false, // bit 21
+
+            /// Exception Entry is Context Synchronizing.
+            ///
+            /// When FEAT_ExS is implemented
+            eis: bool = true, // bit 22
+
+            /// Set Privileged Access Never, on taking an exception to EL1.
+            ///
+            /// When FEAT_PAN is implemented
+            pan: bool = true, // bit 23
+
+            /// Endianness of data accesses at EL0.
+            e0e: enum(u1) { // bit 24
+                little_endian = 0b0,
+                big_endian = 0b1,
+            } = .little_endian,
+
+            /// Endianness of data accesses at EL1, and stage 1 translation table walks in the EL1&0 translation regime.
+            ee: enum(u1) { // bit 25
+                little_endian = 0b0,
+                big_endian = 0b1,
+            } = .little_endian,
+
+            /// Traps EL0 execution of cache maintenance instructions, to EL1, or to EL2
+            /// when it is implemented and enabled in the current Security state and HCR_EL2.TGE is 1,
+            /// from AArch64 state only, reported using EC syndrome value 0x18.
+            uci: enum(u1) { // bit 26
+                trapped = 0b0,
+                not_trapped = 0b1,
+            } = .trapped,
+
+            /// Controls enabling of pointer authentication of instruction addresses, using the APDAKey_EL1 key, in the EL1&0 translation regime.
+            ///
+            /// When FEAT_PAuth is implemented
+            enda: bool = false, // bit 27
+
+            /// No Trap Load Multiple and Store Multiple to Device-nGRE/Device-nGnRE/Device-nGnRnE memory.
+            ///
+            /// When FEAT_LSMAOC is implemented
+            ntlsmd: bool = true, // bit 28
+
+            /// Load Multiple and Store Multiple Atomicity and Ordering Enable.
+            ///
+            /// When FEAT_LSMAOC is implemented
+            lsmaoe: bool = true, // bit 29
+
+            /// Controls enabling of pointer authentication of instruction addresses, using the APIBKey_EL1 key, in the EL1&0 translation regime.
+            ///
+            /// When FEAT_PAuth is implemented
+            enib: bool = false, // bit 30
+
+            /// Controls enabling of pointer authentication of instruction addresses, using the APIAKey_EL1 key, in the EL1&0 translation regime.
+            ///
+            /// When FEAT_PAuth is implemented
+            enia: bool = false, // bit 31
+
+            /// Controls cache maintenance instruction permission for the following instructions executed at EL0.
+            ///
+            /// When FEAT_CMOW is implemented
+            cmow: bool = false, // bit 32
+
+            /// Memory Copy and Memory Set instructions Enable. Enables execution of the Memory Copy and Memory Set instructions at EL0.
+            ///
+            /// When FEAT_MOPS is implemented and !ELIsInHost(EL0)
+            mscen: bool = false, // bit 33
+
+            /// Enables direct and indirect accesses to FPMR from EL0.
+            ///
+            /// When FEAT_FPMR is implemented
+            enfpm: enum(u1) { // bit 34
+                trapped = 0b0,
+                not_trapped = 0b1,
+            } = .trapped,
+
+            _todo35: u1 = 0,
+            _todo36: u1 = 0,
+            _todo37: u1 = 0,
+            _todo38: u1 = 0,
+            _todo39: u1 = 0,
+            _todo40_41: u2 = 0,
+            _todo42: u1 = 0,
+            _todo43: u1 = 0,
+            _todo44: u1 = 0,
+            _todo45: u1 = 0,
+            _todo46: u1 = 0,
+            _todo47: u1 = 0,
+            _todo48: u1 = 0,
+            _todo49: u1 = 0,
+            _todo50: u1 = 0,
+            _todo51: u1 = 0,
+            _todo52: u1 = 0,
+            _todo53: u1 = 0,
+            _todo54: u1 = 0,
+            _todo55: u1 = 0,
+            _todo56: u1 = 0,
+            _todo57: u1 = 0,
+            _todo58: u1 = 0,
+            _todo59: u1 = 0,
+            _todo60: u1 = 0,
+            _todo61: u1 = 0,
+            _todo62: u1 = 0,
+            _todo63: u1 = 0,
 
             pub fn load() @This() {
                 return asm volatile ("mrs %[output], sctlr_el1"
@@ -1449,13 +1635,13 @@ pub const armv8 = struct {
                     \\ 
                     \\ -------- ESR_EL1 --------
                     \\
-                    \\ iss {}
+                    // \\ iss {}
                     \\ il {s}
                     \\ ec {s}
                     \\
                     \\ -------------------------
                 , .{
-                    self.iss,
+                    // self.iss,
                     @tagName(self.il),
                     @tagName(self.ec),
                 });

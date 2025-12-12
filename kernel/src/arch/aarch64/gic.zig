@@ -67,8 +67,17 @@ pub fn acknowledge() u32 {
     };
 }
 
-pub fn endOfInterrupt(irq_id: u32) void {
+pub fn endOfInterrupt(irq: u32) void {
     switch (gic_version) {
-        .v2 => gic_v2.endOfInterrupt(irq_id),
+        .v2 => gic_v2.endOfInterrupt(irq),
+    }
+}
+
+pub const TriggerMode = enum { level, edge };
+pub const Polarity = enum { active_high, active_low };
+
+pub fn configure(irq: u32, trigger_mode: TriggerMode, polarity: Polarity) void {
+    switch (gic_version) {
+        .v2 => gic_v2.configure(irq, trigger_mode, polarity),
     }
 }

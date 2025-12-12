@@ -311,7 +311,7 @@ pub fn Queue(comptime T: type) type {
     };
 }
 
-pub fn RedBlackTree(comptime K: type, comptime V: type, comptime compareFn: anytype) type {
+pub fn RedBlackTree(comptime K: type, comptime V: type, comptime compareFn: fn (key: K, value: V) callconv(.@"inline") std.math.Order) type {
     return struct {
         const Self = @This();
 
@@ -717,6 +717,125 @@ pub fn RedBlackTree(comptime K: type, comptime V: type, comptime compareFn: anyt
                 return self.node_ptr(i).color;
             }
             return .black;
+        }
+    };
+}
+
+pub fn PriorityQueue(comptime T: type, comptime compareFn: fn (a: T, b: T) std.math.Order) type {
+    return struct {
+        list: List(T),
+        len: usize,
+
+        const Self = @This();
+
+        pub fn init() Self {
+            return .{
+                .list = .init(),
+                .len = 0,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.list.deinit();
+            self.len = 0;
+        }
+
+        pub fn add(self: *Self, item: T) !void {
+            const new_len = self.len + 1;
+            try self.list.ensureTotalCapacity(new_len);
+
+            const child_ptr = self.list.get(self.len);
+            child_ptr.* = item;
+
+            self.len = new_len;
+
+            self.siftUp(self.len - 1);
+        }
+
+        pub fn pop(self: *Self) ?T {
+            if (self.len == 0) return null;
+
+            const root_val = self.list.get(0).*;
+
+            const last_index = self.len - 1;
+            const last_val = self.list.get(last_index).*;
+
+            self.list.get(0).* = last_val;
+            self.len -= 1;
+
+            if (self.len > 0) {
+                self.siftDown(0);
+            }
+
+            return root_val;
+        }
+
+        pub fn peek(self: *Self) ?T {
+            if (self.len == 0) return null;
+            return self.list.get(0).*;
+        }
+
+        fn siftUp(self: *Self, start_index: u64) void {
+            var index = start_index;
+
+            while (index > 0) {
+                const parent_index = (index - 1) / 2;
+
+                const child_ptr = self.list.get(index);
+                const parent_ptr = self.list.get(parent_index);
+
+                if (compareFn(child_ptr.*, parent_ptr.*) == .lt) {
+                    const temp = child_ptr.*;
+                    child_ptr.* = parent_ptr.*;
+                    parent_ptr.* = temp;
+
+                    index = parent_index;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        fn siftDown(self: *Self, start_index: u64) void {
+            var index = start_index;
+            const count = self.len;
+
+            while (true) {
+                const left = index * 2 + 1;
+                const right = index * 2 + 2;
+                var smallest = index;
+
+                if (left < count) {
+                    const left_ptr = self.list.get(left);
+                    const smallest_ptr = self.list.get(smallest);
+
+                    if (compareFn(left_ptr.*, smallest_ptr.*) == .lt) {
+                        smallest = left;
+                    }
+                }
+
+                if (right < count) {
+                    const right_ptr = self.list.get(right);
+                    const smallest_ptr = self.list.get(smallest);
+
+                    if (compareFn(right_ptr.*, smallest_ptr.*) == .lt) {
+                        smallest = right;
+                    }
+                }
+
+                if (smallest != index) {
+                    const index_ptr = self.list.get(index);
+                    const smallest_ptr = self.list.get(smallest);
+
+                    const temp = index_ptr.*;
+                    index_ptr.* = smallest_ptr.*;
+                    smallest_ptr.* = temp;
+
+                    index = smallest;
+                } else {
+                    break;
+                }
+            }
         }
     };
 }

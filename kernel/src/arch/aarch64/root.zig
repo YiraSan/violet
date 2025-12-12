@@ -32,6 +32,8 @@ const gic = @import("gic.zig");
 const generic_timer = @import("generic_timer.zig");
 const psci = @import("psci.zig");
 
+pub const extend_frame = exception.extend_frame;
+
 comptime {
     _ = exception;
     _ = gic;
@@ -42,7 +44,7 @@ comptime {
 // --- aarch64/root.zig --- //
 
 pub fn initCpus() !void {
-    for (&cpus) |*cpu| cpu.* = null;
+    for (&kernel.arch.cpus) |*cpu| cpu.* = null;
 
     var gicc_found = false;
     var xsdt_iter = kernel.boot.xsdt.iter();
@@ -59,7 +61,7 @@ pub fn initCpus() !void {
                             if (mpidr.aff1 != 0 or mpidr.aff2 != 0 or mpidr.aff3 != 0) continue;
 
                             const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguous(64, true));
-                            cpus[mpidr.aff0] = cpu_ptr;
+                            kernel.arch.cpus[mpidr.aff0] = cpu_ptr;
                             cpu_ptr.cpuid = gicc.mpidr;
                         },
                         else => {},
@@ -72,7 +74,7 @@ pub fn initCpus() !void {
 
     if (!gicc_found) asm volatile ("brk #0"); // TODO brk so it produces a visible exception for QEMU
 
-    const cpu = cpus[kernel.arch.Cpu.id()].?;
+    const cpu = kernel.arch.Cpu.getCpu(kernel.arch.Cpu.id());
     asm volatile (
         \\ msr tpidr_el1, %[in]
         :
@@ -89,190 +91,190 @@ pub fn init() !void {
     try psci.init();
 }
 
-/// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
-var cpus: [256]?*kernel.arch.Cpu align(@alignOf(u128)) = undefined;
-
+// NOTE I know that there's a lot of potential memory leaks there, don't worry.
 pub fn bootCpus() !void {
-    if (build_options.platform == .rpi4) return;
+    if (comptime build_options.platform == .rpi4) return;
 
     const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
-
-    var ttbr0_space = try kernel.mem.vmm.Space.init(.lower, null, false);
-    defer ttbr0_space.deinit();
 
     const trampoline_ptr = if (pfr0.el2 == .not_implemented) @intFromPtr(&trampoline_el1) else @intFromPtr(&trampoline_el2);
     const trampoline_page = kernel.mem.vmm.kernel_space.paging.get(trampoline_ptr).?;
     const trampoline_addr = trampoline_page.phys_addr | (trampoline_ptr & 0xfff);
 
+    var setup_data: SetupData = undefined;
+
     if (pfr0.el2 == .not_implemented) {
-        try kernel.mem.vmm.kernel_space.paging.map(
+        var ttbr0_space = try kernel.mem.vmm.Space.init(.lower, null, false);
+
+        try ttbr0_space.paging.map(
             trampoline_page.phys_addr,
             trampoline_page.phys_addr,
             1,
             .l4K,
-            .{ .executable = true, .writable = true },
+            .{ .executable = true },
         );
 
-        cpu_setup_data.ttbr0 = ttbr0_space.paging.table_phys;
+        setup_data.level_specific.el1.ttbr0_el1 = ttbr0_space.paging.table_phys;
 
         var tcr_el1 = ark.armv8.registers.TCR_EL1.load();
         tcr_el1.epd0 = false;
-        cpu_setup_data.tcr = @bitCast(tcr_el1);
+        setup_data.tcr_el1 = tcr_el1;
     } else {
-        cpu_setup_data.ttbr0 = @bitCast(ark.armv8.registers.SPSR_EL2{
+        setup_data.level_specific.el2.spsr_el2 = ark.armv8.registers.SPSR_EL2{
             .mode = .el1t,
             .d = false,
             .a = false,
             .i = true,
             .f = true,
-        });
+        };
 
-        cpu_setup_data.hcr_el2 = @bitCast(ark.armv8.registers.HCR_EL2{
+        setup_data.level_specific.el2.hcr_el2 = ark.armv8.registers.HCR_EL2{
             .rw = .el1_is_aa64,
-        });
+        };
 
-        cpu_setup_data.tcr = @bitCast(ark.armv8.registers.TCR_EL1.load());
+        setup_data.tcr_el1 = ark.armv8.registers.TCR_EL1.load();
     }
 
-    cpu_setup_data.mair = @bitCast(ark.armv8.registers.MAIR_EL1.load());
+    setup_data.mair_el1 = ark.armv8.registers.MAIR_EL1.load();
+    setup_data.sctlr_el1 = ark.armv8.registers.SCTLR_EL1.load();
+    setup_data.ttbr1_el1 = kernel.mem.vmm.kernel_space.paging.table_phys;
+    setup_data.entry_virt = @intFromPtr(&cpu_entry);
 
-    cpu_setup_data.sctlr_el1 = @bitCast(ark.armv8.registers.SCTLR_EL1.load());
-
-    cpu_setup_data.ttbr1 = kernel.mem.vmm.kernel_space.paging.table_phys;
-
-    cpu_setup_data.entry_virt = @intFromPtr(&initSecondary);
-
-    for (cpus) |cpu_nptr| {
+    for (kernel.arch.cpus) |cpu_nptr| {
         if (cpu_nptr) |cpu| {
             if (cpu.cpuid == kernel.arch.Cpu.id()) continue;
 
-            cpu_setup_data.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocContiguous(64, false) + mem.PageLevel.l4K.size() * 64;
-            cpu_setup_data.setup_done = 0;
+            const setup_data_phys = try mem.phys.allocPage(true);
+            const setup_data_virt: *SetupData = @ptrFromInt(kernel.boot.hhdm_base + setup_data_phys);
 
-            asm volatile ("dsb ish ; isb" ::: "memory");
+            setup_data_virt.* = setup_data;
+            setup_data_virt.stack_top_virt = kernel.boot.hhdm_base + try kernel.mem.phys.allocContiguous(64, false) + mem.PageLevel.l4K.size() * 64;
 
-            try psci.cpuOn(cpu.cpuid, trampoline_addr, 0);
+            cleanCache(@intFromPtr(setup_data_virt), @sizeOf(SetupData));
 
-            while (cpu_setup_data.setup_done != 1) {
-                asm volatile ("wfe");
-                asm volatile ("dsb ish ; isb" ::: "memory");
-            }
+            try psci.cpuOn(cpu.cpuid, trampoline_addr, setup_data_phys);
         }
     }
 }
 
-extern var cpu_setup_data: extern struct {
-    ttbr0: u64 align(1),
-    ttbr1: u64 align(1),
-    tcr: u64 align(1),
-    mair: u64 align(1),
-    stack_top_virt: u64 align(1),
-    entry_virt: u64 align(1),
-    setup_done: u64 align(1),
-    hcr_el2: u64 align(1),
-    sctlr_el1: u64 align(1),
+pub fn cleanCache(virt_start: u64, size: usize) void {
+    var i: usize = 0;
+    while (i < size) : (i += 64) {
+        asm volatile ("dc cvac, %[addr]"
+            :
+            : [addr] "r" (virt_start + i),
+        );
+    }
+
+    asm volatile ("dsb ish");
+}
+
+const SetupData = extern struct {
+    tcr_el1: ark.armv8.registers.TCR_EL1, // offset 0
+    mair_el1: ark.armv8.registers.MAIR_EL1, // offset 8
+    sctlr_el1: ark.armv8.registers.SCTLR_EL1, // offset 16
+
+    ttbr1_el1: u64, // offset 24
+
+    stack_top_virt: u64, // offset 32
+    entry_virt: u64, // offset 40
+
+    level_specific: extern union {
+        el1: extern struct {
+            ttbr0_el1: u64, // offset 48
+        },
+        el2: extern struct {
+            hcr_el2: ark.armv8.registers.HCR_EL2, // offset 48
+            spsr_el2: ark.armv8.registers.SPSR_EL2, // offset 56
+        },
+    },
+
+    comptime {
+        if (@sizeOf(SetupData) > 0x1000) @compileError("SetupData should be less than 4 KiB");
+    }
 };
 
-fn trampoline_el1() align(0x1000) linksection(".data") callconv(.naked) noreturn {
+fn trampoline_el1() align(0x1000) callconv(.naked) noreturn {
     asm volatile (
+        \\ msr daifset, #0b1111
+        \\ isb
+        \\
         \\ ic iallu
         \\ dsb ish
-        \\ isb
         \\
-        \\ adr x0, cpu_setup_data
-        \\ ldr x1, [x0, #0]  // ttbr0
-        \\ ldr x2, [x0, #8]  // ttbr1
-        \\ ldr x3, [x0, #16] // tcr
-        \\ ldr x4, [x0, #24] // mair
+        \\ ldr x1, [x0, #0] // tcr_el1
+        \\ ldr x2, [x0, #8] // mair_el1
+        \\ ldr x3, [x0, #16] // sctlr_el1
+        \\ 
+        \\ ldr x4, [x0, #24] // ttbr1_el1
+        \\
         \\ ldr x5, [x0, #32] // stack_top_virt
         \\ ldr x6, [x0, #40] // entry_virt
-        \\ ldr x8, [x0, #64] // sctlr_el1
         \\
-        \\ msr mair_el1, x4
-        \\ msr tcr_el1, x3
-        \\ msr ttbr0_el1, x1
-        \\ msr ttbr1_el1, x2
+        \\ ldr x7, [x0, #48] // ttbr0_el1
+        \\
+        \\ msr tcr_el1, x1
+        \\ msr mair_el1, x2
+        \\ msr ttbr0_el1, x7
+        \\ msr ttbr1_el1, x4
+        \\
         \\ dsb ish
         \\ isb
         \\
-        \\ tlbi vmalle1
-        \\ dsb ish
+        \\ msr sctlr_el1, x3
         \\ isb
         \\
-        \\ msr sctlr_el1, x8
-        \\
-        \\ mov x7, #0
-        \\ msr spsel, x7
+        \\ mov x9, #0
+        \\ msr spsel, x9
         \\ mov sp, x5
         \\
-        \\ mov x7, #1
-        \\ str x7, [x0, #48]
-        \\ dsb ish
-        \\ sev
-        \\
         \\ br x6
-        \\
-        \\ .align 3
-        \\ .global cpu_setup_data
-        \\ cpu_setup_data:
-        \\    .quad 0 // ttbr0 / spsr_el2
-        \\    .quad 0 // ttbr1
-        \\    .quad 0 // tcr
-        \\    .quad 0 // mair
-        \\    .quad 0 // stack_top_virt
-        \\    .quad 0 // entry_virt
-        \\    .quad 0 // setup_done
-        \\    .quad 0 // hcr_el2
-        \\    .quad 0 // sctlr_el1
     );
 }
 
-fn trampoline_el2() linksection(".data") callconv(.naked) noreturn {
+fn trampoline_el2() align(0x1000) callconv(.naked) noreturn {
     asm volatile (
+        \\ msr daifset, #0b1111
+        \\ isb
+        \\
         \\ ic iallu
         \\ dsb ish
-        \\ isb
         \\
-        \\ adr x0, cpu_setup_data
-        \\ ldr x1, [x0, #0]  // spsr_el2
-        \\ ldr x2, [x0, #8]  // ttbr1
-        \\ ldr x3, [x0, #16] // tcr
-        \\ ldr x4, [x0, #24] // mair
+        \\ ldr x1, [x0, #0] // tcr_el1
+        \\ ldr x2, [x0, #8] // mair_el1
+        \\ ldr x3, [x0, #16] // sctlr_el1
+        \\ 
+        \\ ldr x4, [x0, #24] // ttbr1_el1
+        \\
         \\ ldr x5, [x0, #32] // stack_top_virt
         \\ ldr x6, [x0, #40] // entry_virt
-        \\ ldr x7, [x0, #56] // hcr_el2
-        \\ ldr x8, [x0, #64] // sctlr_el1
         \\
-        \\ msr spsr_el2, x1
-        \\ msr ttbr1_el1, x2
-        \\ msr tcr_el1,  x3
-        \\ msr mair_el1, x4
-        \\ msr sp_el0, x5
-        \\ msr elr_el2, x6
+        \\ ldr x7, [x0, #48] // hcr_el2
+        \\ ldr x8, [x0, #56] // spsr_el2
+        \\
+        \\ msr tcr_el1, x1
+        \\ msr mair_el1, x2
+        \\ msr ttbr1_el1, x4
+        \\ msr sctlr_el1, x3
         \\ msr hcr_el2, x7
-        \\ msr sctlr_el1, x8
+        \\ msr spsr_el2, x8
+        \\ msr elr_el2, x6
+        \\
         \\ dsb ish
         \\ isb
         \\
-        \\ tlbi vmalle1
-        \\ dsb ish
-        \\ isb
-        \\
-        \\ mov x8, #1
-        \\ str x8, [x0, #48]
-        \\ dsb ish
-        \\ sev
+        \\ msr sp_el0, x5
         \\
         \\ eret
     );
 }
 
-fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn cpu_entry() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     var reg = ark.armv8.registers.CPACR_EL1.load();
     reg.fpen = .el0_el1;
     reg.store();
 
-    const cpu = cpus[kernel.arch.Cpu.id()].?;
+    const cpu = kernel.arch.Cpu.getCpu(kernel.arch.Cpu.id());
     asm volatile (
         \\ msr tpidr_el1, %[in]
         :
@@ -281,20 +283,15 @@ fn initSecondary() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     );
 
     mem.phys.initCpu() catch unreachable;
-    exception.init() catch {};
+    exception.init() catch unreachable;
     gic.initCpu() catch unreachable;
     generic_timer.enableCpu() catch unreachable;
-    kernel.prism.initCpu() catch unreachable;
     kernel.scheduler.initCpu() catch unreachable;
+    kernel.drivers.Timer.initCpu() catch unreachable;
 
+    kernel.drivers.Timer.arm(1 * std.time.ns_per_ms);
     unmaskInterrupts();
-
-    // jump to scheduler.
-    kernel.drivers.Timer.arm(._5ms);
-
-    while (true) {
-        asm volatile ("wfi");
-    }
+    ark.cpu.halt();
 }
 
 pub fn maskInterrupts() void {
@@ -330,91 +327,48 @@ pub fn restoreSaved(saved: u64) void {
     );
 }
 
-// TODO move arch-independent part into arch/root.zig
-
-pub const ExceptionContext = exception.ExceptionContext;
-
-pub const TaskContext = struct {
-    // operational registers
-    lr: u64,
-    xregs: [30]u64,
-    vregs: [32]u128,
-    fpcr: u64,
-    fpsr: u64,
-    elr_el1: u64,
+pub const ExceptionData = struct {
     spsr_el1: ark.armv8.registers.SPSR_EL1,
-    tpidr_el0: u64,
-    sp: u64,
 
-    pub fn init() @This() {
-        var context: @This() = undefined;
-        context.lr = 0;
-        @memset(&context.xregs, 0);
-        @memset(&context.vregs, 0);
-        context.fpcr = 0;
-        context.fpsr = 0;
-        context.elr_el1 = 0;
-        context.spsr_el1 = .{ .mode = .el0 };
-        context.tpidr_el0 = @bitCast(@as(u64, 0));
-        context.sp = 0;
-
-        return context;
+    pub fn init(self: *ExceptionData, task: *kernel.scheduler.Task) void {
+        self.* = ExceptionData{ .spsr_el1 = .{
+            .mode = switch (task.process.execution_level) {
+                .system, .module => .el1t,
+                .user => .el0,
+            },
+        } };
     }
 
-    pub fn setExecutionAddress(self: *@This(), address: u64) void {
-        self.elr_el1 = address;
-    }
-
-    pub fn getExecutionAddress(self: *@This()) u64 {
-        return self.elr_el1;
-    }
-
-    pub fn setStackPointer(self: *@This(), address: u64) void {
-        self.sp = address + kernel.scheduler.Task.STACK_SIZE;
-    }
-
-    pub fn getStackPointer(self: *@This()) u64 {
-        return self.sp;
-    }
-
-    pub fn setExecutionLevel(self: *@This(), execution_level: basalt.process.ExecutionLevel) void {
-        self.spsr_el1.mode = switch (execution_level) {
-            .kernel => .el1t,
-            .user => .el0,
+    pub fn save(self: *ExceptionData) void {
+        self.* = ExceptionData{
+            .spsr_el1 = .load(),
         };
     }
 
-    pub fn store(
-        task: *kernel.scheduler.Task,
-        exception_ctx: *kernel.arch.ExceptionContext,
-    ) void {
-        task.context.lr = exception_ctx.lr;
-        task.context.xregs = exception_ctx.xregs;
-        task.context.vregs = exception_ctx.vregs;
-        task.context.fpcr = exception_ctx.fpcr;
-        task.context.fpsr = exception_ctx.fpsr;
-        task.context.elr_el1 = exception_ctx.elr_el1;
-        task.context.spsr_el1 = exception_ctx.spsr_el1;
+    pub fn restore(self: *ExceptionData) void {
+        self.spsr_el1.store();
+    }
+};
 
-        task.context.sp = exception.get_sp_el0();
+pub const GeneralFrame = extern struct {
+    xregs: [30]u64, // x0..x29
+    link_register: u64, // x30
+    program_counter: u64,
+    tpidr_el0: u64,
+    stack_pointer: u64,
 
-        task.context.tpidr_el0 = ark.armv8.registers.loadTpidrEL0();
+    pub fn setArg(self: *GeneralFrame, comptime index: usize, value: u64) void {
+        self.xregs[index] = value;
     }
 
-    pub fn load(
-        task: *kernel.scheduler.Task,
-        exception_ctx: *kernel.arch.ExceptionContext,
-    ) void {
-        exception_ctx.lr = task.context.lr;
-        exception_ctx.xregs = task.context.xregs;
-        exception_ctx.vregs = task.context.vregs;
-        exception_ctx.fpcr = task.context.fpcr;
-        exception_ctx.fpsr = task.context.fpsr;
-        exception_ctx.elr_el1 = task.context.elr_el1;
-        exception_ctx.spsr_el1 = task.context.spsr_el1;
-
-        exception.set_sp_el0(task.context.sp);
-
-        ark.armv8.registers.storeTpidrEL0(task.context.tpidr_el0);
+    pub fn getArg(self: *GeneralFrame, comptime index: usize) u64 {
+        return self.xregs[index];
     }
+};
+
+pub const ExtendedFrame = extern struct {
+    qregs: [32]u128, // q0..q31
+    fpcr: u64,
+    fpsr: u64,
+    general_frame: GeneralFrame,
 };

@@ -15,38 +15,27 @@
 // --- dependencies --- //
 
 const std = @import("std");
-const build_options = @import("build_options");
+const basalt = @import("basalt");
 
 // --- imports --- //
 
 const kernel = @import("root");
 
-pub const serial = @import("serial/root.zig");
+const mem = kernel.mem;
+const scheduler = kernel.scheduler;
 
-pub const acpi = @import("acpi.zig");
-pub const Timer = @import("timer.zig");
+const heap = mem.heap;
 
-// const pcie = @import("pcie/root.zig");
-// const virtio = @import("virtio/root.zig");
+const Prism = scheduler.Prism;
 
-comptime {
-    _ = serial;
-    _ = acpi;
+// --- scheduler/facet.zig --- //
 
-    _ = Timer;
+const Facet = @This();
+const FacetMap = heap.SlotMap(Facet);
+pub const Id = FacetMap.Key;
 
-    // _ = pcie;
-    // _ = virtio;
-}
+var facets_map: FacetMap = .init();
+var facets_map_lock: mem.RwLock = .{};
 
-// --- drivers/root.zig --- //
-
-pub fn init() !void {
-    // try Timer.init();
-
-    // try pcie.init();
-
-    // if (build_options.platform == .aarch64_qemu or build_options.platform == .riscv64_qemu) {
-    //     try virtio.init();
-    // }
-}
+id: Id,
+prism_id: Prism.Id,

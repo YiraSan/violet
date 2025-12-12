@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,228 +12,347 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+.equ GEN_SIZE,       272
+.equ EXT_SIZE,       528
+
+.equ OFF_GEN_LR,     240
+.equ OFF_GEN_PC,     248
+.equ OFF_GEN_TPIDR,  256
+.equ OFF_GEN_SP,     264
+
+.equ OFF_EXT_FPCR,   512
+.equ OFF_EXT_FPSR,   520
+.equ OFF_EXT_GEN,    528
+
 .section .text
 
-// --- set_sp_el0 --- // USED FROM SP_EL1
-
-    .global set_sp_el0
-    .type set_sp_el0, %function
-set_sp_el0:
-    mov x1, #0
-    msr spsel, x1
+.global call_system
+.type call_system, %function
+call_system:
+    msr daifset, #0b0011
     isb
 
-    mov sp, x0
-    isb
+    msr spsel, #1
 
-    mov x1, #1
-    msr spsel, x1
+    stp x0, x1, [sp, #-16]!
 
-    dsb sy
-    isb
+    mrs x0, sp_el0
+    mov x1, x0
+    sub x0, x0, #GEN_SIZE
+    msr sp_el0, x0
+
+    str x1, [x0, #OFF_GEN_SP]
+
+    str x30, [x0, #OFF_GEN_PC] // in order to make it compatible with ERET
+    str x30, [x0, #OFF_GEN_LR]
+
+    mrs x1, tpidr_el0
+    str x1, [x0, #OFF_GEN_TPIDR]
+
+    stp x2, x3,   [x0, #(16 * 1)]
+    stp x4, x5,   [x0, #(16 * 2)]
+    stp x6, x7,   [x0, #(16 * 3)]
+    stp x8, x9,   [x0, #(16 * 4)]
+    stp x10, x11, [x0, #(16 * 5)]
+    stp x12, x13, [x0, #(16 * 6)]
+    stp x14, x15, [x0, #(16 * 7)]
+    stp x16, x17, [x0, #(16 * 8)]
+    stp x18, x19, [x0, #(16 * 9)]
+    stp x20, x21, [x0, #(16 * 10)]
+    stp x22, x23, [x0, #(16 * 11)]
+    stp x24, x25, [x0, #(16 * 12)]
+    stp x26, x27, [x0, #(16 * 13)]
+    stp x28, x29, [x0, #(16 * 14)]
+
+    ldp x2, x3, [sp], #16
+    stp x2, x3, [x0, #(16 * 0)]
+
+    str x0, [sp, #-16]!
+
+    bl internal_entry
+
+    ldr x0, [sp]
+    bl internal_call_system
+
+    ldr x0, [sp], #16
+    b internal_exit
+
+.global extend_frame
+.type extend_frame, %function
+extend_frame:
+    sub x0, x0, #EXT_SIZE
+
+    stp q0, q1,   [x0, #(32 * 0)]
+    stp q2, q3,   [x0, #(32 * 1)]
+    stp q4, q5,   [x0, #(32 * 2)]
+    stp q6, q7,   [x0, #(32 * 3)]
+    stp q8, q9,   [x0, #(32 * 4)]
+    stp q10, q11, [x0, #(32 * 5)]
+    stp q12, q13, [x0, #(32 * 6)]
+    stp q14, q15, [x0, #(32 * 7)]
+    stp q16, q17, [x0, #(32 * 8)]
+    stp q18, q19, [x0, #(32 * 9)]
+    stp q20, q21, [x0, #(32 * 10)]
+    stp q22, q23, [x0, #(32 * 11)]
+    stp q24, q25, [x0, #(32 * 12)]
+    stp q26, q27, [x0, #(32 * 13)]
+    stp q28, q29, [x0, #(32 * 14)]
+    stp q30, q31, [x0, #(32 * 15)]
+
+    mrs x1, fpcr
+    str x1, [x0, #OFF_EXT_FPCR]
+    mrs x2, fpsr
+    str x2, [x0, #OFF_EXT_FPSR]
 
     ret
 
-// --- get_sp_el0 --- // USED FROM SP_EL1
+.global restore_general_via_eret
+.type restore_general_via_eret, %function
+restore_general_via_eret:
+    mov sp, x1
 
-    .global get_sp_el0
-    .type get_sp_el0, %function
-get_sp_el0:
-    mov x1, #0
-    msr spsel, x1
-    isb
+    ldr x1, [x0, #OFF_GEN_PC]
+    msr elr_el1, x1
 
-    mov x0, sp
-    isb
+    ldr x1, [x0, #OFF_GEN_TPIDR]
+    msr tpidr_el0, x1
 
-    mov x1, #1
-    msr spsel, x1
+    ldr x1, [x0, #OFF_GEN_SP]
+    msr sp_el0, x1
 
-    dsb sy
-    isb
+    ldp x2, x3,   [x0, #(16 * 1)]
+    ldp x4, x5,   [x0, #(16 * 2)]
+    ldp x6, x7,   [x0, #(16 * 3)]
+    ldp x8, x9,   [x0, #(16 * 4)]
+    ldp x10, x11, [x0, #(16 * 5)]
+    ldp x12, x13, [x0, #(16 * 6)]
+    ldp x14, x15, [x0, #(16 * 7)]
+    ldp x16, x17, [x0, #(16 * 8)]
+    ldp x18, x19, [x0, #(16 * 9)]
+    ldp x20, x21, [x0, #(16 * 10)]
+    ldp x22, x23, [x0, #(16 * 11)]
+    ldp x24, x25, [x0, #(16 * 12)]
+    ldp x26, x27, [x0, #(16 * 13)]
+    ldp x28, x29, [x0, #(16 * 14)]
+    ldr x30,      [x0, #OFF_GEN_LR]
 
-    ret
+    ldp x0, x1,   [x0, #(16 * 0)]
 
-// --- set_sp_el1 --- // USED FROM SP_EL0
-
-    .global set_sp_el1
-    .type set_sp_el1, %function
-set_sp_el1:
-    mov x1, #1
-    msr spsel, x1
-    isb
-
-    mov sp, x0
-    isb
-
-    mov x1, #0
-    msr spsel, x1
-
-    dsb sy
-    isb
-
-    ret
-
-// --- set_vbar_el1 --- //
-
-    .global set_vbar_el1
-    .type set_vbar_el1, %function
-
-set_vbar_el1:
-    msr vbar_el1, x0
-    dsb sy
-    isb
-
-    ret
-
-// --- exception_vector_table --- //
-
-// TODO make q0-q31 used only if FP/NEON trap
-// NOTE SVE isn't implemented currently; it needs a 128 alignment for the stack!
-
-.equ CONTEXT_SIZE, 800
-
-prepare_exception:
-    stp x0, x1, [sp, #16 * 1]
-    stp x2, x3, [sp, #16 * 2]
-    stp x4, x5, [sp, #16 * 3]
-    stp x6, x7, [sp, #16 * 4]
-    stp x8, x9, [sp, #16 * 5]
-    stp x10, x11, [sp, #16 * 6]
-    stp x12, x13, [sp, #16 * 7]
-    stp x14, x15, [sp, #16 * 8]
-    stp x16, x17, [sp, #16 * 9]
-    stp x18, x19, [sp, #16 * 10]
-    stp x20, x21, [sp, #16 * 11]
-    stp x22, x23, [sp, #16 * 12]
-    stp x24, x25, [sp, #16 * 13]
-    stp x26, x27, [sp, #16 * 14]
-    stp x28, x29, [sp, #16 * 15]
-
-    str q0, [sp, #16 * 16]
-    str q1, [sp, #16 * 17]
-    str q2, [sp, #16 * 18]
-    str q3, [sp, #16 * 19]
-    str q4, [sp, #16 * 20]
-    str q5, [sp, #16 * 21]
-    str q6, [sp, #16 * 22]
-    str q7, [sp, #16 * 23]
-    str q8, [sp, #16 * 24]
-    str q9, [sp, #16 * 25]
-    str q10, [sp, #16 * 26]
-    str q11, [sp, #16 * 27]
-    str q12, [sp, #16 * 28]
-    str q13, [sp, #16 * 29]
-    str q14, [sp, #16 * 30]
-    str q15, [sp, #16 * 31]
-    str q16, [sp, #16 * 32]
-    str q17, [sp, #16 * 33]
-    str q18, [sp, #16 * 34]
-    str q19, [sp, #16 * 35]
-    str q20, [sp, #16 * 36]
-    str q21, [sp, #16 * 37]
-    str q22, [sp, #16 * 38]
-    str q23, [sp, #16 * 39]
-    str q24, [sp, #16 * 40]
-    str q25, [sp, #16 * 41]
-    str q26, [sp, #16 * 42]
-    str q27, [sp, #16 * 43]
-    str q28, [sp, #16 * 44]
-    str q29, [sp, #16 * 45]
-    str q30, [sp, #16 * 46]
-    str q31, [sp, #16 * 47]
-
-    mrs x0, fpcr
-    str x0, [sp, #(16 * 48) + 0]
-
-    mrs x0, fpsr
-    str x0, [sp, #(16 * 48) + 8]
-
-    mrs x0, elr_el1
-    str x0, [sp, #(16 * 49) + 0]
-
-    mrs x0, spsr_el1
-    str x0, [sp, #(16 * 49) + 8]
-
-    ret
-
-exit_exception:
-    ldr x0, [sp, #(16 * 49) + 8]
-    msr spsr_el1, x0
-
-    ldr x0, [sp, #(16 * 49) + 0]
-    msr elr_el1, x0
-
-    ldr x0, [sp, #(16 * 48) + 8]
-    msr fpsr, x0
-
-    ldr x0, [sp, #(16 * 48) + 0]
-    msr fpcr, x0
-
-    ldr q31, [sp, #16 * 47]
-    ldr q30, [sp, #16 * 46]
-    ldr q29, [sp, #16 * 45]
-    ldr q28, [sp, #16 * 44]
-    ldr q27, [sp, #16 * 43]
-    ldr q26, [sp, #16 * 42]
-    ldr q25, [sp, #16 * 41]
-    ldr q24, [sp, #16 * 40]
-    ldr q23, [sp, #16 * 39]
-    ldr q22, [sp, #16 * 38]
-    ldr q21, [sp, #16 * 37]
-    ldr q20, [sp, #16 * 36]
-    ldr q19, [sp, #16 * 35]
-    ldr q18, [sp, #16 * 34]
-    ldr q17, [sp, #16 * 33]
-    ldr q16, [sp, #16 * 32]
-    ldr q15, [sp, #16 * 31]
-    ldr q14, [sp, #16 * 30]
-    ldr q13, [sp, #16 * 29]
-    ldr q12, [sp, #16 * 28]
-    ldr q11, [sp, #16 * 27]
-    ldr q10, [sp, #16 * 26]
-    ldr q9, [sp, #16 * 25]
-    ldr q8, [sp, #16 * 24]
-    ldr q7, [sp, #16 * 23]
-    ldr q6, [sp, #16 * 22]
-    ldr q5, [sp, #16 * 21]
-    ldr q4, [sp, #16 * 20]
-    ldr q3, [sp, #16 * 19]
-    ldr q2, [sp, #16 * 18]
-    ldr q1, [sp, #16 * 17]
-    ldr q0, [sp, #16 * 16]
-
-    ldp x28, x29, [sp, #16 * 15]
-    ldp x26, x27, [sp, #16 * 14]
-    ldp x24, x25, [sp, #16 * 13]
-    ldp x22, x23, [sp, #16 * 12]
-    ldp x20, x21, [sp, #16 * 11]
-    ldp x18, x19, [sp, #16 * 10]
-    ldp x16, x17, [sp, #16 * 9]
-    ldp x14, x15, [sp, #16 * 8]
-    ldp x12, x13, [sp, #16 * 7]
-    ldp x10, x11, [sp, #16 * 6]
-    ldp x8, x9, [sp, #16 * 5]
-    ldp x6, x7, [sp, #16 * 4]
-    ldp x4, x5, [sp, #16 * 3]
-    ldp x2, x3, [sp, #16 * 2]
-    ldp x0, x1, [sp, #16 * 1]
-
-    ldr x30, [sp, #16 * 0]
-
-    add sp, sp, #CONTEXT_SIZE
     eret
 
+.global restore_extended_via_eret
+.type restore_extended_via_eret, %function
+restore_extended_via_eret:
+    ldp q0, q1,   [x0, #0]
+    ldp q2, q3,   [x0, #32]
+    ldp q4, q5,   [x0, #64]
+    ldp q6, q7,   [x0, #96]
+    ldp q8, q9,   [x0, #128]
+    ldp q10, q11, [x0, #160]
+    ldp q12, q13, [x0, #192]
+    ldp q14, q15, [x0, #224]
+    ldp q16, q17, [x0, #256]
+    ldp q18, q19, [x0, #288]
+    ldp q20, q21, [x0, #320]
+    ldp q22, q23, [x0, #352]
+    ldp q24, q25, [x0, #384]
+    ldp q26, q27, [x0, #416]
+    ldp q28, q29, [x0, #448]
+    ldp q30, q31, [x0, #480]
+
+    ldr x2, [x0, #OFF_EXT_FPCR]
+    msr fpcr, x2
+    ldr x2, [x0, #OFF_EXT_FPSR]
+    msr fpsr, x2
+
+    add x0, x0, #OFF_EXT_GEN
+    b restore_general_via_eret
+
+.global restore_general_via_ret
+.type restore_general_via_ret, %function
+restore_general_via_ret:
+    mov sp, x1
+
+    ldr x1,       [x0, #OFF_GEN_SP]
+    msr sp_el0, x1
+
+    ldr x1,       [x0, #OFF_GEN_TPIDR]
+    msr tpidr_el0, x1
+
+    ldp x2, x3,   [x0, #(16 * 1)]
+    ldp x4, x5,   [x0, #(16 * 2)]
+    ldp x6, x7,   [x0, #(16 * 3)]
+    ldp x8, x9,   [x0, #(16 * 4)]
+    ldp x10, x11, [x0, #(16 * 5)]
+    ldp x12, x13, [x0, #(16 * 6)]
+    ldp x14, x15, [x0, #(16 * 7)]
+    ldp x16, x17, [x0, #(16 * 8)]
+    ldp x18, x19, [x0, #(16 * 9)]
+    ldp x20, x21, [x0, #(16 * 10)]
+    ldp x22, x23, [x0, #(16 * 11)]
+    ldp x24, x25, [x0, #(16 * 12)]
+    ldp x26, x27, [x0, #(16 * 13)]
+    ldp x28, x29, [x0, #(16 * 14)]
+
+    ldr x30,      [x0, #OFF_GEN_LR]
+
+    ldp x0, x1,   [x0, #(16 * 0)]
+
+    msr spsel, #0
+
+    msr daifclr, #0b0011
+    isb
+
+    ret
+
+.global restore_extended_via_ret
+.type restore_extended_via_ret, %function
+restore_extended_via_ret:
+    mov sp, x1
+
+    ldr x1,       [x0, #(OFF_EXT_GEN + OFF_GEN_SP)]
+    msr sp_el0, x1
+
+    ldr x1,       [x0, #OFF_GEN_TPIDR]
+    msr tpidr_el0, x1
+
+    ldp q0, q1,   [x0, #0]
+    ldp q2, q3,   [x0, #32]
+    ldp q4, q5,   [x0, #64]
+    ldp q6, q7,   [x0, #96]
+    ldp q8, q9,   [x0, #128]
+    ldp q10, q11, [x0, #160]
+    ldp q12, q13, [x0, #192]
+    ldp q14, q15, [x0, #224]
+    ldp q16, q17, [x0, #256]
+    ldp q18, q19, [x0, #288]
+    ldp q20, q21, [x0, #320]
+    ldp q22, q23, [x0, #352]
+    ldp q24, q25, [x0, #384]
+    ldp q26, q27, [x0, #416]
+    ldp q28, q29, [x0, #448]
+    ldp q30, q31, [x0, #480]
+
+    ldr x1, [x0, #OFF_EXT_FPCR]
+    msr fpcr, x1
+    ldr x2, [x0, #OFF_EXT_FPSR]
+    msr fpsr, x2
+
+    add x0, x0, #OFF_EXT_GEN
+
+    ldp x2, x3,   [x0, #(16 * 1)]
+    ldp x4, x5,   [x0, #(16 * 2)]
+    ldp x6, x7,   [x0, #(16 * 3)]
+    ldp x8, x9,   [x0, #(16 * 4)]
+    ldp x10, x11, [x0, #(16 * 5)]
+    ldp x12, x13, [x0, #(16 * 6)]
+    ldp x14, x15, [x0, #(16 * 7)]
+    ldp x16, x17, [x0, #(16 * 8)]
+    ldp x18, x19, [x0, #(16 * 9)]
+    ldp x20, x21, [x0, #(16 * 10)]
+    ldp x22, x23, [x0, #(16 * 11)]
+    ldp x24, x25, [x0, #(16 * 12)]
+    ldp x26, x27, [x0, #(16 * 13)]
+    ldp x28, x29, [x0, #(16 * 14)]
+
+    ldr x30,      [x0, #OFF_GEN_LR]
+
+    ldp x0, x1,   [x0, #(16 * 0)]
+
+    msr spsel, #0
+
+    msr daifclr, #0b0011
+    isb
+
+    ret
+
 .macro EXCEPTION_HANDLER handler
-    sub sp, sp, #CONTEXT_SIZE
+    stp x0, x1, [sp, #-16]!
 
-    str x30, [sp, #16 * 0] // bl clobbers x30
-    bl prepare_exception
+    mrs x0, sp_el0
+    mov x1, x0
+    sub x0, x0, #GEN_SIZE
+    msr sp_el0, x0
 
-    mov x0, sp
+    str x1, [x0, #OFF_GEN_SP]
+
+    mrs x1, elr_el1
+    str x1, [x0, #OFF_GEN_PC]
+
+    mrs x1, tpidr_el0
+    str x1, [x0, #OFF_GEN_TPIDR]
+
+    stp x2, x3,   [x0, #(16 * 1)]
+    stp x4, x5,   [x0, #(16 * 2)]
+    stp x6, x7,   [x0, #(16 * 3)]
+    stp x8, x9,   [x0, #(16 * 4)]
+    stp x10, x11, [x0, #(16 * 5)]
+    stp x12, x13, [x0, #(16 * 6)]
+    stp x14, x15, [x0, #(16 * 7)]
+    stp x16, x17, [x0, #(16 * 8)]
+    stp x18, x19, [x0, #(16 * 9)]
+    stp x20, x21, [x0, #(16 * 10)]
+    stp x22, x23, [x0, #(16 * 11)]
+    stp x24, x25, [x0, #(16 * 12)]
+    stp x26, x27, [x0, #(16 * 13)]
+    stp x28, x29, [x0, #(16 * 14)]
+
+    str x30,      [x0, #OFF_GEN_LR]
+
+    ldp x2, x3, [sp], #16
+    stp x2, x3, [x0, #(16 * 0)]
+
+    b \handler
+.endm
+
+.macro NESTED_HANDLER handler
+    stp x0, x1, [sp, #-16]!
+    stp x2, x3, [sp, #-16]!
+    stp x4, x5, [sp, #-16]!
+    stp x6, x7, [sp, #-16]!
+    stp x8, x9, [sp, #-16]!
+    stp x10, x11, [sp, #-16]!
+    stp x12, x13, [sp, #-16]!
+    stp x14, x15, [sp, #-16]!
+    stp x16, x17, [sp, #-16]!
+    stp x18, x19, [sp, #-16]!
+    stp x20, x21, [sp, #-16]!
+    stp x22, x23, [sp, #-16]!
+    stp x24, x25, [sp, #-16]!
+    stp x26, x27, [sp, #-16]!
+    stp x28, x29, [sp, #-16]!
+    str x30,      [sp, #-16]!
+
+    mrs x10, elr_el1
+    mrs x11, spsr_el1
+
+    stp x10, x11, [sp, #-16]!
+
     bl \handler
 
-    b exit_exception
+    ldp x10, x11, [sp], #16
+    
+    msr elr_el1, x10
+    msr spsr_el1, x11
+
+    ldr x30,      [sp], #16
+    ldp x28, x29, [sp], #16
+    ldp x26, x27, [sp], #16
+    ldp x24, x25, [sp], #16
+    ldp x22, x23, [sp], #16
+    ldp x20, x21, [sp], #16
+    ldp x18, x19, [sp], #16
+    ldp x16, x17, [sp], #16
+    ldp x14, x15, [sp], #16
+    ldp x12, x13, [sp], #16
+    ldp x10, x11, [sp], #16
+    ldp x8, x9,   [sp], #16
+    ldp x6, x7,   [sp], #16
+    ldp x4, x5,   [sp], #16
+    ldp x2, x3,   [sp], #16
+    ldp x0, x1,   [sp], #16
+
+    eret
 .endm
 
 .balign 0x800
@@ -254,16 +373,16 @@ _el1t_serror:
 
 .balign 0x80
 _el1h_sync:
-    EXCEPTION_HANDLER el1h_sync
+    NESTED_HANDLER el1h_sync
 .balign 0x80
 _el1h_irq:
-    EXCEPTION_HANDLER el1h_irq
+    NESTED_HANDLER el1h_irq
 .balign 0x80
 _el1h_fiq:
-    EXCEPTION_HANDLER el1h_fiq
+    NESTED_HANDLER el1h_fiq
 .balign 0x80
 _el1h_serror:
-    EXCEPTION_HANDLER el1h_serror
+    NESTED_HANDLER el1h_serror
 
 .balign 0x80
 _el0_sync:
