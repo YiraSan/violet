@@ -12,10 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const sync = @import("sync/root.zig");
-pub const heap = @import("heap/root.zig");
-pub const module = @import("module/root.zig");
-pub const process = @import("process/root.zig");
-pub const syscall = @import("syscall/root.zig");
-pub const task = @import("task/root.zig");
-pub const timer = @import("timer/root.zig");
+// --- dependencies --- //
+
+const std = @import("std");
+
+// --- imports --- //
+
+const basalt = @import("basalt");
+
+const syscall = basalt.syscall;
+
+// --- process/root.zig --- //
+
+/// Terminate current process.
+pub fn terminate() noreturn {
+    _ = syscall.syscall0(.process_terminate) catch {};
+    unreachable;
+}
+
+pub const ExecutionLevel = enum(u8) {
+    user = 0x00,
+    module = 0xe0,
+    /// Same as `module`. Used by genesis or internal kernel task. Grants certain privilege.
+    system = 0xf0,
+};

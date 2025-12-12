@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const sync = @import("sync/root.zig");
-pub const heap = @import("heap/root.zig");
-pub const module = @import("module/root.zig");
-pub const process = @import("process/root.zig");
-pub const syscall = @import("syscall/root.zig");
-pub const task = @import("task/root.zig");
-pub const timer = @import("timer/root.zig");
+pub const Facet = @import("facet.zig").Facet;
+pub const Future = @import("future.zig").Future;
+pub const Prism = @import("prism.zig").Prism;

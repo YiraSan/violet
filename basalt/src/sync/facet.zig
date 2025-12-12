@@ -12,10 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const sync = @import("sync/root.zig");
-pub const heap = @import("heap/root.zig");
-pub const module = @import("module/root.zig");
-pub const process = @import("process/root.zig");
-pub const syscall = @import("syscall/root.zig");
-pub const task = @import("task/root.zig");
-pub const timer = @import("timer/root.zig");
+// --- dependencies --- //
+
+const std = @import("std");
+
+// --- imports --- //
+
+const basalt = @import("basalt");
+
+const sync = basalt.sync;
+const syscall = basalt.syscall;
+
+const Prism = sync.Prism;
+const Future = sync.Future;
+
+// --- sync/facet.zig --- //
+
+pub const Facet = packed struct(u64) {
+    id: u64,
+};

@@ -1,0 +1,160 @@
+// Copyright (c) 2024-2025 The violetOS authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// --- dependencies --- //
+
+const std = @import("std");
+
+// --- imports --- //
+
+const basalt = @import("basalt");
+
+const sync = basalt.sync;
+const syscall = basalt.syscall;
+
+// --- sync/future.zig --- //
+
+pub const Future = packed struct(u64) {
+    id: u64,
+
+    /// This create a **local** future (that has for producer and consumer the current process).
+    pub fn create(future_type: Type) basalt.syscall.Error!Future {
+        var future: Future = undefined;
+
+        _ = try syscall.syscall2(.future_create, @intFromPtr(&future), @intFromEnum(future_type));
+
+        return future;
+    }
+
+    /// Destroys the future by forcefully completing its lifecycle.
+    ///
+    /// This helper performs a `cancel()` followed by a non-blocking `wait()`.
+    ///
+    /// **Why both?**
+    /// In a **local** future, the current process holds *both* the Producer
+    /// and Consumer references (Refcount = 2).
+    /// - `cancel()` drops the **Producer** reference.
+    /// - `wait()` drops the **Consumer** reference.
+    ///
+    /// Calling this ensures the kernel resource is fully deallocated (Refcount = 0),
+    /// regardless of the current state or role.
+    pub fn destroy(self: Future) void {
+        self.cancel() catch {};
+        _ = self.wait(.non_blocking) catch {};
+    }
+
+    /// If the threshold is no more reachable, it causes an Error.Insolvent.
+    ///
+    /// @return `null` corresponds to success (threshold has been reached).
+    ///
+    /// @return `usize` correspond to the index of the future that caused the fail-fast.
+    pub fn waitMany(
+        futures: []Future,
+        /// - input(multi_shot): known_sequence
+        /// - output(multi_shot): delta_sequence
+        /// - output(one_shot): result_value
+        payloads: []u64,
+        statuses: []Status,
+        mode: WaitMode,
+        behavior: syscall.SuspendBehavior,
+    ) basalt.syscall.Error!?usize {
+        if (futures.len == 0) return null;
+        if (futures.len != payloads.len) return basalt.syscall.Error.InvalidArgument;
+        if (futures.len != statuses.len) return basalt.syscall.Error.InvalidArgument;
+
+        const vals = try syscall.syscall6(
+            .future_await,
+            @intFromPtr(futures.ptr),
+            @intFromPtr(payloads.ptr),
+            @intFromPtr(statuses.ptr),
+            futures.len,
+            @bitCast(mode),
+            @intFromEnum(behavior),
+        );
+
+        if (vals.success0 == std.math.maxInt(u16)) return null;
+
+        return @intCast(vals.success0);
+    }
+
+    /// If the future is canceled/invalid it returns null.
+    pub fn wait(self: Future, known_sequence: ?u64, behavior: syscall.SuspendBehavior) basalt.syscall.Error!?u64 {
+        var futures = [_]Future{self};
+        var payloads = [_]u64{known_sequence orelse 0};
+        var statuses = [_]Status{.pending};
+
+        if (try waitMany(&futures, &payloads, &statuses, .race, behavior) == null) {
+            if (statuses[0] == .resolved) {
+                return payloads[0];
+            }
+        }
+
+        return null;
+    }
+
+    /// Signal to the consumer that the future has been resolved.
+    ///
+    /// (one-shot) `payload` is the result value of the future.
+    ///
+    /// (multi-shot) `payload` is the sequence increment (0 is ignored by the kernel).
+    pub fn resolve(self: @This(), payload: u64) basalt.syscall.Error!void {
+        _ = try syscall.syscall3(.future_resolve, self.id, @intFromEnum(Status.resolved), payload);
+    }
+
+    /// Cancel the future.
+    ///
+    /// This signals the intent to abort the pending operation.
+    ///
+    /// Use `destroy()` instead of `cancel()` for local future if you are the consumer.
+    pub fn cancel(self: @This()) basalt.syscall.Error!void {
+        _ = try syscall.syscall2(.future_resolve, self.id, @intFromEnum(Status.canceled));
+    }
+    pub const WaitMode = packed struct(u64) {
+        /// Wait that one future resolve or cancel.
+        pub const race: WaitMode = .{ .resolve_threshold = 1, .fail_fast = true };
+
+        /// Wait that one future resolve or until every futures was canceled.
+        pub const any_resolve: WaitMode = .{ .resolve_threshold = 1, .fail_fast = false };
+
+        /// Wait that every futures resolve or cancel.
+        pub const barrier: WaitMode = .{ .resolve_threshold = 0, .fail_fast = false };
+
+        /// Wait that every futures resolve, or that one cancel.
+        pub const transaction: WaitMode = .{ .resolve_threshold = 0, .fail_fast = true };
+
+        /// Represents the number of resolved futures required to return.
+        ///
+        /// `0` represents FUTURES_LEN.
+        resolve_threshold: u8,
+
+        /// If any future is cancaled, return.
+        fail_fast: bool,
+
+        _reserved: u55 = 0,
+    };
+
+    pub const Type = enum(u8) {
+        one_shot = 0,
+        multi_shot = 1,
+    };
+
+    pub const Status = enum(u8) {
+        pending = 0,
+        resolved = 1,
+        canceled = 2,
+        /// Is either used by the kernel to represent an invalid future, or by the user to make it ignored by the kernel.
+        /// In the scenario that another task is already awaiting for that future, the kernel will consider that future as invalid from your point of view.
+        invalid = 3,
+    };
+};

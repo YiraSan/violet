@@ -1,6 +1,6 @@
 .{
     .name = .basalt,
-    .version = "0.1.0",
+    .version = "0.1.0-dev.1",
     .fingerprint = 0xfe136ee48cd5b0ac, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
     .dependencies = .{},
@@ -8,6 +8,6 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "readme.md",
+        "README.md",
     },
 }

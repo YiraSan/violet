@@ -15,17 +15,25 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const module_mode = b.option(bool, "module_mode", "kernel module mode") orelse false;
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const main_mod = b.addModule("basalt_main", .{
-        .root_source_file = b.path("src/main.zig"),
+    const mod = b.addModule("basalt", .{
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const mod = b.addModule("basalt", .{
-        .root_source_file = b.path("src/root.zig"),
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "module_mode", module_mode);
+    mod.addImport("build_options", build_options.createModule());
+
+    mod.addImport("basalt", mod);
+
+    const main_mod = b.addModule("basalt_main", .{
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -46,14 +54,20 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
     const basalt = b.dependency("basalt", .{
         .target = target,
         .optimize = options.optimize,
+        .module_mode = options.kernel_module,
     });
     const basalt_mod = basalt.module("basalt");
     const basalt_main_mod = basalt.module("basalt_main");
+
+    if (options.kernel_module) {
+        basalt_main_mod.pic = true;
+    }
 
     const mod = b.createModule(.{
         .root_source_file = options.root_source_file,
         .target = target,
         .optimize = options.optimize,
+        .pic = options.kernel_module,
     });
 
     mod.addImport("basalt", basalt_mod);
@@ -66,6 +80,7 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
     });
 
     exe.entry = .disabled;
+
     // TODO works only with 0.15+
     // exe.out_filename = b.fmt("{s}.elf", .{options.name});
 
@@ -79,6 +94,7 @@ pub const ExecutableOptions = struct {
     root_source_file: std.Build.LazyPath,
     platform: Platform,
     optimize: std.builtin.OptimizeMode = .Debug,
+    kernel_module: bool = false,
 };
 
 pub const Platform = enum {

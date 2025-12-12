@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,25 @@ const mod = @import("mod");
 
 // --- main.zig --- //
 
-export fn _start() callconv(basalt.task.call_conv) void {
-    mod.main() catch {};
+const entry_point = if (basalt.module.is_module) struct {
+    export fn _start(umbilical: basalt.sync.Facet, kernel_indirection_table: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) void {
+        basalt.module.kernel_indirection_table = kernel_indirection_table;
+        setup_routine(umbilical);
+        main_entry();
+    }
+} else struct {
+    export fn _start(umbilical: basalt.sync.Facet) callconv(basalt.task.call_conv) void {
+        setup_routine(umbilical);
+        main_entry();
+    }
+};
+
+fn setup_routine(umbilical: basalt.sync.Facet) void {
+    _ = umbilical;
+}
+
+fn main_entry() void {
+    mod.main() catch {}; // TODO log the err.
 }
 
 // --- zig std features --- //
@@ -37,4 +54,23 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
     // TODO print the message !
 
     basalt.task.terminate();
+}
+
+pub const std_options: std.Options = .{
+    // .logFn = logFn,
+    // .log_level = if (builtin.mode == .Debug) .debug else .info,
+    .page_size_max = basalt.heap.PAGE_SIZE,
+    .page_size_min = basalt.heap.PAGE_SIZE,
+};
+
+pub const os = struct {
+    pub const heap = struct {
+        pub const page_allocator = basalt.heap.page_allocator;
+    };
+};
+
+// ---- //
+
+comptime {
+    _ = entry_point;
 }
