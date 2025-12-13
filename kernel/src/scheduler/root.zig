@@ -196,6 +196,11 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
             task.futures_statuses[i] = status;
             if (status != .pending) {
                 task.futures_pending -= 1;
+                if (status == .resolved) {
+                    task.futures_resolved += 1;
+                } else if (status == .canceled) {
+                    task.futures_canceled += 1;
+                }
             }
         }
 
