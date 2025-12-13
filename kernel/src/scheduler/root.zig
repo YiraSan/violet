@@ -230,16 +230,22 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
                 const saved_flags = future.lock.lockExclusive();
                 defer future.lock.unlockExclusive(saved_flags);
 
-                if (future.waiter != null) {
-                    task.futures_pending -= 1;
-                    task.futures_canceled += 1;
+                if (future.waiter) |waiter_id| {
+                    if (Task.acquire(waiter_id)) |waiter| {
+                        defer waiter.release();
 
-                    task.futures_statuses[i] = .invalid;
+                        if (waiter.futures_generation == future.waiter_generation) {
+                            task.futures_pending -= 1;
+                            task.futures_canceled += 1;
 
-                    if (task.futures_waitmode.fail_fast) {
-                        statuses[i] = .invalid;
-                        syscall.success(frame, .{ .success0 = @intCast(i) });
-                        return error._;
+                            task.futures_statuses[i] = .invalid;
+
+                            if (task.futures_waitmode.fail_fast) {
+                                statuses[i] = .invalid;
+                                syscall.success(frame, .{ .success0 = @intCast(i) });
+                                return error._;
+                            }
+                        }
                     }
                 }
 
