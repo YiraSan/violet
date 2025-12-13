@@ -117,6 +117,34 @@ fn task0_main() !void {
     task0_log.info("sleeping for 5s...", .{});
     try basalt.task.sleep(._5s);
     task0_log.info("sleep finished !", .{});
+
+    const timer_10s = try basalt.time.SingleTimer.init(._10s);
+    const timer_5s = try basalt.time.SingleTimer.init(._5s);
+
+    var wait_list: basalt.sync.WaitList = .init;
+
+    const timer_10s_index = try timer_10s.addToList(&wait_list);
+    const timer_5s_index = try timer_5s.addToList(&wait_list);
+
+    while (try wait_list.wait(.race, .wait)) |result| {
+        switch (result) {
+            .resolved => |resolved| {
+                wait_list.remove(resolved.index);
+
+                if (resolved.index == timer_10s_index) {
+                    task0_log.info("timer_10s_index done !", .{});
+                } else if (resolved.index == timer_5s_index) {
+                    task0_log.info("timer_5s_index done !", .{});
+                }
+            },
+            .canceled, .invalid => |index| {
+                task0_log.info("{} failed.", .{index});
+            },
+            .insolvent => break,
+        }
+    }
+
+    task0_log.info("wait list done !", .{});
 }
 
 const task1_log = std.log.scoped(.task1);

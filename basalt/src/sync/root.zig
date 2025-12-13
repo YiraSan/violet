@@ -13,5 +13,8 @@
 // limitations under the License.
 
 pub const Facet = @import("facet.zig").Facet;
+
 pub const Future = @import("future.zig").Future;
+pub const WaitList = @import("future.zig").WaitList;
+
 pub const Prism = @import("prism.zig").Prism;

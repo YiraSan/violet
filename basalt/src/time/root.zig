@@ -99,6 +99,10 @@ pub const SingleTimer = struct {
     pub fn wait(self: *const SingleTimer) !void {
         _ = try self.future.wait(null, .wait) orelse return error.Canceled;
     }
+
+    pub fn addToList(self: *const SingleTimer, wait_list: *sync.WaitList) !usize {
+        return wait_list.add(self.future, null);
+    }
 };
 
 pub const SequentialTimer = struct {
@@ -137,5 +141,9 @@ pub const SequentialTimer = struct {
         self.known_sequence = try self.future.wait(t - 1, .wait) orelse return error.Canceled;
 
         return self.known_sequence - tick;
+    }
+
+    pub fn addToList(self: *const SequentialTimer, wait_list: *sync.WaitList) !usize {
+        return wait_list.add(self.future, self.known_sequence);
     }
 };

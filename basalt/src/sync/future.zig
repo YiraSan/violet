@@ -25,6 +25,77 @@ const syscall = basalt.syscall;
 
 // --- sync/future.zig --- //
 
+pub const WaitList = struct {
+    futures: [128]Future = undefined,
+    payloads: [128]u64 = undefined,
+    statuses: [128]Future.Status = .{.unset} ** 128,
+
+    pub const init = WaitList{};
+
+    pub fn add(self: *WaitList, future: Future, payload: ?u64) !usize {
+        for (0.., &self.statuses) |i, *status| {
+            if (status.* == .unset) {
+                self.futures[i] = future;
+                self.payloads[i] = payload orelse 0;
+                status.* = .pending;
+                return i;
+            }
+        }
+        return error.ListFull;
+    }
+
+    pub fn reset(self: *WaitList, index: usize) void {
+        if (index < 128) {
+            self.statuses[index] = .pending;
+        }
+    }
+
+    pub fn remove(self: *WaitList, index: usize) void {
+        if (index < 128) {
+            self.statuses[index] = .unset;
+        }
+    }
+
+    /// Be careful, in some cases "nothing to wait for" will return error.Insolvent (e.g. .race wait_mode)
+    /// because you asked the kernel for at least 1, but provided 0 pending futures, so this is impossible.
+    ///
+    /// In other cases, like .barrier wait_mode (which requires "everything" to be done),
+    /// "nothing to be done" is logically equivalent to "everything is done"! So the kernel will return success.
+    pub fn wait(self: *WaitList, wait_mode: Future.WaitMode, behavior: syscall.SuspendBehavior) syscall.Error!?Result {
+        if (Future.waitMany(&self.futures, &self.payloads, &self.statuses, wait_mode, behavior) catch |err| switch (err) {
+            syscall.Error.Insolvent => return .insolvent,
+            else => return err,
+        }) |fail_index| {
+            switch (self.statuses[fail_index]) {
+                .canceled => return .{ .canceled = fail_index },
+                .invalid => return .{ .invalid = fail_index },
+                else => unreachable,
+            }
+        }
+
+        for (0.., self.statuses) |i, status| {
+            switch (status) {
+                .resolved => return .{ .resolved = .{ .index = i, .payload = self.payloads[i] } },
+                .canceled => return .{ .canceled = i },
+                .invalid => return .{ .invalid = i },
+                else => {},
+            }
+        }
+
+        return null;
+    }
+
+    pub const Result = union(enum) {
+        resolved: struct {
+            index: usize,
+            payload: u64,
+        },
+        canceled: usize,
+        invalid: usize,
+        insolvent: void,
+    };
+};
+
 pub const Future = packed struct(u64) {
     id: u64,
 
@@ -120,6 +191,7 @@ pub const Future = packed struct(u64) {
     pub fn cancel(self: @This()) basalt.syscall.Error!void {
         _ = try syscall.syscall2(.future_resolve, self.id, @intFromEnum(Status.canceled));
     }
+
     pub const WaitMode = packed struct(u64) {
         /// Wait that one future resolve or cancel.
         pub const race: WaitMode = .{ .resolve_threshold = 1, .fail_fast = true };
@@ -138,7 +210,7 @@ pub const Future = packed struct(u64) {
         /// `0` represents FUTURES_LEN.
         resolve_threshold: u8,
 
-        /// If any future is cancaled, return.
+        /// If any future is canceled, return.
         fail_fast: bool,
 
         _reserved: u55 = 0,
@@ -153,8 +225,11 @@ pub const Future = packed struct(u64) {
         pending = 0,
         resolved = 1,
         canceled = 2,
-        /// Is either used by the kernel to represent an invalid future, or by the user to make it ignored by the kernel.
+        /// Is either used by the kernel to represent an invalid future.
         /// In the scenario that another task is already awaiting for that future, the kernel will consider that future as invalid from your point of view.
         invalid = 3,
+        /// Any value other than pending, resolved, canceled or invalid has no meaning for the kernel and is ignored.
+        unset = 4,
+        _,
     };
 };
