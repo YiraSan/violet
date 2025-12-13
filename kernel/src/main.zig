@@ -115,7 +115,7 @@ fn task0_main() !void {
     }
 
     task0_log.info("sleeping for 5s...", .{});
-    try basalt.timer.sleep(._5s);
+    try basalt.task.sleep(._5s);
     task0_log.info("sleep finished !", .{});
 }
 
@@ -134,7 +134,7 @@ fn task1_main() !void {
 
     task1_log.info("hello world !", .{});
 
-    var sequential_timer = try basalt.timer.sequential(._60hz);
+    var sequential_timer = try basalt.time.SequentialTimer.init(._60hz);
     defer sequential_timer.deinit();
 
     while (true) {
@@ -142,7 +142,7 @@ fn task1_main() !void {
 
         task1_log.info("elapsed ticks since last: {}", .{delta});
 
-        try basalt.timer.sleep(._1s);
+        try basalt.task.sleep(._1s);
     }
 }
 

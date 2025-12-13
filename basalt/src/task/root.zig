@@ -22,7 +22,7 @@ const builtin = @import("builtin");
 const basalt = @import("basalt");
 
 const syscall = basalt.syscall;
-const timer = basalt.timer;
+const time = basalt.time;
 
 // --- task/root.zig --- //
 
@@ -44,7 +44,7 @@ pub const Quantum = enum(u8) {
     /// 100ms
     ultra_heavy = 0x4,
 
-    pub fn toDelay(self: @This()) timer.Delay {
+    pub fn toDelay(self: @This()) time.Delay {
         return switch (self) {
             .ultra_light => ._1ms,
             .light => ._5ms,
@@ -70,6 +70,8 @@ pub const Priority = enum(u8) {
         };
     }
 };
+
+pub const sleep = time.sleep;
 
 /// Yield current task and switch to another task.
 pub fn yield() void {

@@ -75,37 +75,29 @@ pub const Delay = enum(u64) {
 };
 
 pub fn sleep(delay: Delay) !void {
-    const timer = try single(delay);
+    var timer = try SingleTimer.init(delay);
     defer timer.deinit();
 
     try timer.wait();
 }
 
-pub fn single(delay: Delay) !SingleTimer {
-    var future: Future = undefined;
-
-    _ = try syscall.syscall2(.timer_single, @intFromPtr(&future), delay.nanoseconds());
-
-    return .{ .future = future };
-}
-
-pub fn sequential(delay: Delay) !SequentialTimer {
-    var future: Future = undefined;
-
-    _ = try syscall.syscall2(.timer_sequential, @intFromPtr(&future), delay.nanoseconds());
-
-    return .{ .future = future };
-}
-
 pub const SingleTimer = struct {
     future: Future,
 
-    pub fn wait(self: SingleTimer) !void {
-        _ = try self.future.wait(null, .wait) orelse return error.Canceled;
+    pub fn init(delay: Delay) !SingleTimer {
+        var future: Future = undefined;
+
+        _ = try syscall.syscall2(.timer_single, @intFromPtr(&future), delay.nanoseconds());
+
+        return .{ .future = future };
     }
 
-    pub fn deinit(self: SingleTimer) void {
+    pub fn deinit(self: *const SingleTimer) void {
         self.future.cancel() catch {};
+    }
+
+    pub fn wait(self: *const SingleTimer) !void {
+        _ = try self.future.wait(null, .wait) orelse return error.Canceled;
     }
 };
 
@@ -113,13 +105,37 @@ pub const SequentialTimer = struct {
     future: Future,
     known_sequence: u64 = 0,
 
+    pub fn init(tick_duration: Delay) !SequentialTimer {
+        var future: Future = undefined;
+
+        _ = try syscall.syscall2(.timer_sequential, @intFromPtr(&future), tick_duration.nanoseconds());
+
+        return .{ .future = future };
+    }
+
+    pub fn deinit(self: *const SequentialTimer) void {
+        self.future.cancel() catch {};
+    }
+
+    /// @return `u64` elapsed_ticks
     pub fn wait(self: *SequentialTimer) !u64 {
-        const delta = try self.future.wait(self.known_sequence, .wait) orelse return error.Canceled;
-        self.known_sequence += delta;
+        const current_sequence = try self.future.wait(self.known_sequence, .wait) orelse return error.Canceled;
+        const delta = current_sequence - self.known_sequence;
+        self.known_sequence = current_sequence;
         return delta;
     }
 
-    pub fn deinit(self: *SequentialTimer) void {
-        self.future.cancel() catch {};
+    pub fn currentTick(self: *const SequentialTimer) u64 {
+        return self.known_sequence;
+    }
+
+    /// @return `u64` elapsed_ticks from the specified tick.
+    pub fn waitAbsolute(self: *SequentialTimer, tick: u64) !u64 {
+        var t = tick;
+        if (t == 0) t = 1;
+
+        self.known_sequence = try self.future.wait(t - 1, .wait) orelse return error.Canceled;
+
+        return self.known_sequence - tick;
     }
 };

@@ -259,9 +259,9 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
                                 task.futures_resolved += 1;
                             },
                             .multi_shot => {
-                                const delta = future.payload -% task.futures_payloads[i];
+                                const delta = @as(i128, @intCast(future.payload)) - task.futures_payloads[i];
                                 if (delta > 0) {
-                                    task.futures_payloads[i] = delta;
+                                    task.futures_payloads[i] = future.payload;
                                     task.futures_statuses[i] = .resolved;
                                     task.futures_pending -= 1;
                                     task.futures_resolved += 1;

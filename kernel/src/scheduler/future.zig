@@ -173,13 +173,11 @@ pub fn resolve(self: *Future, payload: u64) bool {
             },
         }
 
+        if (self.status == .pending) resolved = true;
         self.status = .resolved;
-        resolved = true;
     }
 
-    if (resolved) if (self.waiter) |waiter_id| {
-        self.waiter = null;
-
+    if (resolved or self.type == .multi_shot) if (self.waiter) |waiter_id| {
         if (Task.acquire(waiter_id)) |waiter| {
             defer waiter.release();
 
@@ -187,25 +185,40 @@ pub fn resolve(self: *Future, payload: u64) bool {
             defer waiter.futures_lock.unlockExclusive(lock_flags);
 
             if (self.waiter_generation == waiter.futures_generation) {
-                waiter.futures_statuses[self.waiter_index] = .resolved;
-
                 switch (self.type) {
                     .one_shot => {
+                        waiter.futures_statuses[self.waiter_index] = .resolved;
                         waiter.futures_payloads[self.waiter_index] = self.payload;
+
+                        waiter.futures_pending -= 1;
+                        waiter.futures_resolved += 1;
+
+                        self.waiter = null;
                     },
                     .multi_shot => {
-                        waiter.futures_payloads[self.waiter_index] = self.payload -% waiter.futures_payloads[self.waiter_index];
+                        const saved_flags = self.lock.lockExclusive();
+                        defer self.lock.unlockExclusive(saved_flags);
+
+                        const delta = @as(i128, @intCast(self.payload)) - waiter.futures_payloads[self.waiter_index];
+                        waiter.futures_payloads[self.waiter_index] = self.payload;
+                        if (waiter.futures_statuses[self.waiter_index] == .pending) {
+                            if (delta > 0) {
+                                waiter.futures_statuses[self.waiter_index] = .resolved;
+
+                                waiter.futures_pending -= 1;
+                                waiter.futures_resolved += 1;
+                            } else {
+                                self.status = .pending;
+                            }
+                        }
                     },
                 }
-
-                waiter.futures_pending -= 1;
-                waiter.futures_resolved += 1;
 
                 var wakeup_needed = false;
 
                 if (waiter.futures_resolved >= waiter.futures_waitmode.resolve_threshold) {
                     wakeup_needed = true; // success
-                } else if ((waiter.futures_waitmode.resolve_threshold - waiter.futures_resolved) > waiter.futures_pending) {
+                } else if (waiter.futures_waitmode.resolve_threshold > (waiter.futures_resolved + waiter.futures_pending)) {
                     wakeup_needed = true; // insolvent
                 }
 
@@ -264,7 +277,7 @@ pub fn cancel(self: *Future) bool {
                     if (waiter.futures_failfast_index == null) {
                         waiter.futures_failfast_index = self.waiter_index;
                     }
-                } else if ((waiter.futures_waitmode.resolve_threshold - waiter.futures_resolved) > waiter.futures_pending) {
+                } else if (waiter.futures_waitmode.resolve_threshold > (waiter.futures_resolved + waiter.futures_pending)) {
                     wakeup_needed = true; // insolvent
                 }
 

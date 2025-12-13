@@ -50,7 +50,7 @@ ref_count: std.atomic.Value(usize),
 state: std.atomic.Value(State),
 
 priority: basalt.task.Priority,
-quantum: basalt.timer.Delay,
+quantum: basalt.time.Delay,
 uptime_schedule: u64, // When it has been scheduled last
 uptime_suspend: u64, // When it has been suspended last
 

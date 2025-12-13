@@ -18,4 +18,4 @@ pub const module = @import("module/root.zig");
 pub const process = @import("process/root.zig");
 pub const syscall = @import("syscall/root.zig");
 pub const task = @import("task/root.zig");
-pub const timer = @import("timer/root.zig");
+pub const time = @import("time/root.zig");
