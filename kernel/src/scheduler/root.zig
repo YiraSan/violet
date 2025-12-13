@@ -205,7 +205,7 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
         }
 
         if (waitmode.resolve_threshold == 0) waitmode.resolve_threshold = task.futures_pending;
-        if (waitmode.resolve_threshold > task.futures_pending) return try syscall.fail(frame, .invalid_argument);
+        if (waitmode.resolve_threshold > task.futures_pending) return try syscall.fail(frame, .insolvent);
 
         task.futures_waitmode = waitmode;
 
@@ -305,13 +305,18 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
                 if (task.futures_waitmode.resolve_threshold > (task.futures_resolved + task.futures_pending)) {
                     return try syscall.fail(frame, .insolvent);
                 }
-
-                if (suspend_behavior == .wait) {
-                    suspendForWait();
-                } else {
-                    return try syscall.fail(frame, .would_suspend);
-                }
             }
+        }
+
+        if (task.futures_pending > 0) {
+            if (suspend_behavior == .wait) {
+                suspendForWait();
+            } else {
+                return try syscall.fail(frame, .would_suspend);
+            }
+        } else {
+            syscall.success(frame, .{ .success0 = std.math.maxInt(u16) });
+            return error._;
         }
     } else {
         return try syscall.fail(frame, .unknown_syscall);
