@@ -339,9 +339,9 @@ pub const ExceptionData = struct {
         } };
     }
 
-    pub fn save(self: *ExceptionData) void {
+    pub fn save(self: *ExceptionData, saved_spsr: ark.armv8.registers.SPSR_EL1) void {
         self.* = ExceptionData{
-            .spsr_el1 = .load(),
+            .spsr_el1 = saved_spsr,
         };
     }
 

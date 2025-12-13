@@ -37,7 +37,7 @@ pub fn init() !void {
     vmm.kernel_space = try .init(.higher, ark.armv8.registers.loadTtbr1El1(), false);
 }
 
-pub fn invalidate(address: u64, level: mem.PageLevel) void {
+pub inline fn invalidate(address: u64, level: mem.PageLevel) void {
     asm volatile ("dsb ishst");
 
     const va = address >> 12;
@@ -63,7 +63,7 @@ pub fn invalidate(address: u64, level: mem.PageLevel) void {
     );
 }
 
-pub fn invalidateGlobalTLB() void {
+pub inline fn invalidateGlobalTLB() void {
     asm volatile (
         \\ dsb ishst
         \\ tlbi vmalle1is
@@ -72,7 +72,7 @@ pub fn invalidateGlobalTLB() void {
         ::: "memory");
 }
 
-pub fn invalidateLocalTLB() void {
+pub inline fn invalidateLocalTLB() void {
     asm volatile (
         \\ dsb nshst
         \\ tlbi vmalle1
@@ -210,6 +210,7 @@ pub fn getPage(
 
     // 1 GiB page
     if (!l1_entry.not_a_block) {
+        cleanInvalidateCache(@intFromPtr(l1_entry));
         return .{
             .phys_addr = l1_entry.descriptor.block_page.output_address << 12,
         };
@@ -221,6 +222,7 @@ pub fn getPage(
 
     // 2 MiB page
     if (!l2_entry.not_a_block) {
+        cleanInvalidateCache(@intFromPtr(l2_entry));
         return .{
             .phys_addr = l2_entry.descriptor.block_page.output_address << 12,
         };
@@ -231,6 +233,7 @@ pub fn getPage(
     const l3_entry: *Entry = @ptrFromInt(boot.hhdm_base + l3_table + l3_index * 8);
     if (!l3_entry.valid) return null;
 
+    cleanInvalidateCache(@intFromPtr(l3_entry));
     return .{
         .phys_addr = l3_entry.descriptor.block_page.output_address << 12,
     };
@@ -258,6 +261,8 @@ fn ensureTable(table_phys: u64, index: u64) !u64 {
             },
         },
     };
+
+    cleanInvalidateCache(@intFromPtr(entry));
 
     return new_table;
 }
@@ -336,4 +341,16 @@ fn buildDescriptor(physical_address: u64, flags: vmm.Paging.Flags) BlockPageDesc
     }
 
     return descriptor;
+}
+
+pub inline fn cleanInvalidateCache(va: u64) void {
+    asm volatile (
+        \\ dsb ishst
+        \\ dc civac, %[va]
+        \\ dsb ish
+        \\ isb
+        :
+        : [va] "r" (va),
+        : "memory"
+    );
 }

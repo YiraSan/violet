@@ -32,6 +32,8 @@ const impl = switch (builtin.cpu.arch) {
     else => unreachable,
 };
 
+pub const invalidate = impl.invalidate;
+
 // --- mem/vmm.zig --- //
 
 pub var kernel_space: Space = undefined;

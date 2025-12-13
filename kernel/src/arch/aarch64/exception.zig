@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -109,7 +109,7 @@ pub fn init() !void {
 
 extern const exception_vector_table: [2048]u8 linksection(".text");
 
-inline fn saveFrameToTask(frame: *arch.GeneralFrame) ark.armv8.registers.SPSR_EL1 {
+inline fn saveFrameToTask(frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SPSR_EL1) void {
     const sched_local = scheduler.Local.get();
 
     if (sched_local.current_task) |current_task| {
@@ -117,14 +117,12 @@ inline fn saveFrameToTask(frame: *arch.GeneralFrame) ark.armv8.registers.SPSR_EL
         current_task.suspended = false;
         current_task.is_extended = false;
 
-        current_task.exception_data.save(); // save SPSR_EL1
+        current_task.exception_data.save(saved_spsr);
 
         current_task.stack_pointer = .{
             .general = frame,
         };
     }
-
-    return ark.armv8.registers.SPSR_EL1.load();
 }
 
 inline fn getCurrentFrame(old_frame: *arch.GeneralFrame) *arch.GeneralFrame {
@@ -166,10 +164,10 @@ inline fn exitException(old_frame: *arch.GeneralFrame, spsr: ark.armv8.registers
     }
 }
 
-fn sync_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn sync_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SPSR_EL1) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     arch.maskInterrupts();
 
-    const saved_spsr = saveFrameToTask(old_frame);
+    saveFrameToTask(old_frame, saved_spsr);
 
     const esr_el1 = ark.armv8.registers.ESR_EL1.load();
 
@@ -209,18 +207,14 @@ fn sync_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} 
                         far,
                         res.phys_addr,
                         1,
-                        switch (iss.dfsc) {
-                            .translation_fault_lv0 => unreachable,
-                            .translation_fault_lv1 => .l1G,
-                            .translation_fault_lv2 => .l2M,
-                            .translation_fault_lv3 => .l4K,
-                            else => unreachable,
-                        },
+                        .l4K,
                         res.flags,
                     ) catch |err| {
                         log.err("failed to commit on 0x{x}, {}", .{ far, err });
                         ark.cpu.halt();
                     };
+
+                    mem.vmm.invalidate(far, .l4K);
                 },
                 else => {
                     log.err("DataAbort({s}) on 0x{x}", .{ @tagName(iss.dfsc), far });
@@ -251,14 +245,14 @@ const gic = @import("gic.zig");
 pub const IrqCallback = *const fn () callconv(basalt.task.call_conv) void;
 pub var irq_callbacks: [1024]?IrqCallback linksection(".bss") = undefined;
 
-fn irq_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn irq_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SPSR_EL1) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     arch.maskInterrupts();
 
     const sched_local = scheduler.Local.get();
     const begin_uptime = kernel.drivers.Timer.getUptime();
     const begin_task = sched_local.current_task;
 
-    const saved_spsr = saveFrameToTask(old_frame);
+    saveFrameToTask(old_frame, saved_spsr);
 
     const irq_id = gic.acknowledge();
 
@@ -284,15 +278,12 @@ fn irq_handler(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }
 }
 
 // when an exception happens inside of an handler :p
-fn nested_sync_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
+fn nested_sync_handler(esr_el1: ark.armv8.registers.ESR_EL1, far_el1: u64) callconv(.{ .aarch64_aapcs = .{} }) void {
     arch.maskInterrupts();
 
-    const esr_el1 = ark.armv8.registers.ESR_EL1.load();
-
     switch (esr_el1.ec) {
-        .data_abort_same_el => {
+        .data_abort_same_el, .data_abort_lower_el => {
             const iss = esr_el1.iss.data_abort;
-            const far = ark.armv8.registers.loadFarEl1();
 
             switch (iss.dfsc) {
                 .translation_fault_lv0,
@@ -301,35 +292,29 @@ fn nested_sync_handler() callconv(.{ .aarch64_aapcs = .{} }) void {
                 .translation_fault_lv3,
                 => {
                     const local = scheduler.Local.get();
-                    const vs = if (far >= 0xffff_8000_0000_0000) &vmm.kernel_space else if (local.current_task) |current_task| current_task.process.virtualSpace() else &vmm.kernel_space;
+                    const vs = if (far_el1 >= 0xffff_8000_0000_0000) &vmm.kernel_space else if (local.current_task) |current_task| current_task.process.virtualSpace() else &vmm.kernel_space;
 
-                    const res = vs.resolveFault(far) catch |err| switch (err) {
+                    const res = vs.resolveFault(far_el1) catch |err| switch (err) {
                         vmm.Space.Error.SegmentationFault => {
-                            log.err("nested segmentation fault from kernel at address 0x{x}", .{far});
+                            log.err("nested segmentation fault from kernel at address 0x{x}", .{far_el1});
                             ark.cpu.halt();
                         },
                         else => unreachable,
                     };
 
                     vs.paging.map(
-                        far,
+                        far_el1,
                         res.phys_addr,
                         1,
-                        switch (iss.dfsc) {
-                            .translation_fault_lv0 => unreachable,
-                            .translation_fault_lv1 => .l1G,
-                            .translation_fault_lv2 => .l2M,
-                            .translation_fault_lv3 => .l4K,
-                            else => unreachable,
-                        },
+                        .l4K,
                         res.flags,
                     ) catch |err| {
-                        log.err("failed to commit on 0x{x}, {}", .{ far, err });
+                        log.err("failed to commit on 0x{x}, {}", .{ far_el1, err });
                         ark.cpu.halt();
                     };
                 },
                 else => {
-                    log.err("Nested::DataAbort({s}) on 0x{x}", .{ @tagName(iss.dfsc), far });
+                    log.err("Nested::DataAbort({s}) on 0x{x}", .{ @tagName(iss.dfsc), far_el1 });
                     ark.cpu.halt();
                 },
             }
@@ -357,13 +342,13 @@ export const el0_irq = irq_handler;
 export const el0_fiq = unexpected_exception;
 export const el0_serror = unexpected_exception;
 
-fn unexpected_exception(_: *arch.GeneralFrame) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
+fn unexpected_exception(_: *arch.GeneralFrame, _: ark.armv8.registers.SPSR_EL1) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     log.err("unexpected exception", .{});
     ark.armv8.registers.ESR_EL1.load().dump();
     ark.cpu.halt();
 }
 
-fn unexpected_nested_exception() callconv(.{ .aarch64_aapcs = .{} }) void {
+fn unexpected_nested_exception(_: ark.armv8.registers.ESR_EL1, _: u64) callconv(.{ .aarch64_aapcs = .{} }) void {
     log.err("unexpected nested exception", .{});
     ark.armv8.registers.ESR_EL1.load().dump();
     ark.cpu.halt();

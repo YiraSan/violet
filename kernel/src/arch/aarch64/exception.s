@@ -267,7 +267,17 @@ restore_extended_via_ret:
     ret
 
 .macro EXCEPTION_HANDLER handler
-    stp x0, x1, [sp, #-16]!
+    sub sp, sp, #64
+
+    stp x0, x1, [sp, #16]
+
+    mrs x0, elr_el1
+    mrs x1, spsr_el1
+    stp x0, x1, [sp, #0]
+
+    mrs x0, esr_el1
+    mrs x1, far_el1
+    stp x0, x1, [sp, #32]
 
     mrs x0, sp_el0
     mov x1, x0
@@ -275,9 +285,6 @@ restore_extended_via_ret:
     msr sp_el0, x0
 
     str x1, [x0, #OFF_GEN_SP]
-
-    mrs x1, elr_el1
-    str x1, [x0, #OFF_GEN_PC]
 
     mrs x1, tpidr_el0
     str x1, [x0, #OFF_GEN_TPIDR]
@@ -299,8 +306,20 @@ restore_extended_via_ret:
 
     str x30,      [x0, #OFF_GEN_LR]
 
-    ldp x2, x3, [sp], #16
+    ldp x2, x3, [sp, #16] 
     stp x2, x3, [x0, #(16 * 0)]
+
+    ldr x1, [sp, #0]
+    str x1, [x0, #OFF_GEN_PC]
+
+    ldr x1, [sp, #8]
+    msr spsr_el1, x1
+
+    ldp x2, x3, [sp, #32]
+    msr esr_el1, x2
+    msr far_el1, x3
+
+    add sp, sp, #64
 
     b \handler
 .endm
@@ -327,6 +346,9 @@ restore_extended_via_ret:
     mrs x11, spsr_el1
 
     stp x10, x11, [sp, #-16]!
+
+    mrs x0, esr_el1
+    mrs x1, far_el1
 
     bl \handler
 
@@ -355,47 +377,89 @@ restore_extended_via_ret:
     eret
 .endm
 
+// --- EL1t --- //
+
+_handler_el1t_sync:
+    EXCEPTION_HANDLER el1t_sync
+
+_handler_el1t_irq:
+    EXCEPTION_HANDLER el1t_irq
+
+_handler_el1t_fiq:
+    EXCEPTION_HANDLER el1t_fiq
+
+_handler_el1t_serror:
+    EXCEPTION_HANDLER el1t_serror
+
+// --- EL1h --- //
+
+_handler_el1h_sync:
+    NESTED_HANDLER el1h_sync
+
+_handler_el1h_irq:
+    NESTED_HANDLER el1h_irq
+
+_handler_el1h_fiq:
+    NESTED_HANDLER el1h_fiq
+
+_handler_el1h_serror:
+    NESTED_HANDLER el1h_serror
+
+// --- EL0 --- //
+
+_handler_el0_sync:
+    EXCEPTION_HANDLER el0_sync
+
+_handler_el0_irq:
+    EXCEPTION_HANDLER el0_irq
+
+_handler_el0_fiq:
+    EXCEPTION_HANDLER el0_fiq
+
+_handler_el0_serror:
+    EXCEPTION_HANDLER el0_serror
+
 .balign 0x800
 .globl exception_vector_table
 exception_vector_table:
 
 _el1t_sync:
-    EXCEPTION_HANDLER el1t_sync
+    b _handler_el1t_sync
 .balign 0x80
 _el1t_irq:
-    EXCEPTION_HANDLER el1t_irq
+    b _handler_el1t_irq
 .balign 0x80
 _el1t_fiq:
-    EXCEPTION_HANDLER el1t_fiq
+    b _handler_el1t_fiq
 .balign 0x80
 _el1t_serror:
-    EXCEPTION_HANDLER el1t_serror
+    b _handler_el1t_serror
 
 .balign 0x80
 _el1h_sync:
-    NESTED_HANDLER el1h_sync
+    b _handler_el1h_sync
 .balign 0x80
 _el1h_irq:
-    NESTED_HANDLER el1h_irq
+    b _handler_el1h_irq
 .balign 0x80
 _el1h_fiq:
-    NESTED_HANDLER el1h_fiq
+    b _handler_el1h_fiq
 .balign 0x80
 _el1h_serror:
-    NESTED_HANDLER el1h_serror
+    b _handler_el1h_serror
 
 .balign 0x80
 _el0_sync:
-    EXCEPTION_HANDLER el0_sync
+    b _handler_el0_sync
 .balign 0x80
 _el0_irq:
-    EXCEPTION_HANDLER el0_irq
+    b _handler_el0_irq
 .balign 0x80
 _el0_fiq:
-    EXCEPTION_HANDLER el0_fiq
+    b _handler_el0_fiq
 .balign 0x80
 _el0_serror:
-    EXCEPTION_HANDLER el0_serror
+    b _handler_el0_serror
 
 .balign 0x80
 _el0_32_sync:
