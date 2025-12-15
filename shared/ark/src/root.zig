@@ -444,10 +444,10 @@ pub const armv8 = struct {
             );
         }
 
-        pub fn storeTpidrEl0(l0_table: u64) void {
+        pub fn storeTpidrEl0(value: u64) void {
             asm volatile ("msr tpidr_el0, %[input]"
                 :
-                : [input] "r" (l0_table),
+                : [input] "r" (value),
             );
         }
 
@@ -457,10 +457,10 @@ pub const armv8 = struct {
             );
         }
 
-        pub inline fn storeTpidrroEl0(l0_table: u64) void {
+        pub inline fn storeTpidrroEl0(value: u64) void {
             asm volatile ("msr tpidrro_el0, %[input]"
                 :
-                : [input] "r" (l0_table),
+                : [input] "r" (value),
             );
         }
 
@@ -470,10 +470,10 @@ pub const armv8 = struct {
             );
         }
 
-        pub inline fn storeTpidrEl1(l0_table: u64) void {
+        pub inline fn storeTpidrEl1(value: u64) void {
             asm volatile ("msr tpidr_el1, %[input]"
                 :
-                : [input] "r" (l0_table),
+                : [input] "r" (value),
             );
         }
 
