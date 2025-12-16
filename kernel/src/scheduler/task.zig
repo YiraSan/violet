@@ -285,6 +285,20 @@ pub inline fn penalty(self: *const Task) u64 {
     return priority_penalty + userland_penalty;
 }
 
+pub inline fn updateAffinity(self: *Task) void {
+    if (self.priority != .realtime) {
+        if (self.host_id != kernel.arch.Cpu.id()) {
+            self.host_affinity -= 1;
+            if (self.host_affinity == 0) {
+                self.host_id = kernel.arch.Cpu.id();
+                self.host_affinity = 24;
+            }
+        } else {
+            self.host_affinity = @min(self.host_affinity + 1, 254);
+        }
+    }
+}
+
 // ---- //
 
 pub const Options = struct {

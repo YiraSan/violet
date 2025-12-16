@@ -222,8 +222,10 @@ pub fn resolve(self: *Future, payload: u64) bool {
                     wakeup_needed = true; // insolvent
                 }
 
-                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.waiting, .waiting_queued, .acq_rel, .monotonic) == null) {
-                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).scheduler_local;
+                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
+                    waiter.updateAffinity();
+
+                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).?.scheduler_local;
 
                     const saved_flags = cpu_sched.ready_queue_lock.lockExclusive();
                     defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags);
@@ -241,7 +243,6 @@ pub fn resolve(self: *Future, payload: u64) bool {
 }
 
 pub fn cancel(self: *Future) bool {
-    var canceled = false;
     {
         const saved_flags = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(saved_flags);
@@ -251,10 +252,9 @@ pub fn cancel(self: *Future) bool {
         }
 
         self.status = .canceled;
-        canceled = true;
     }
 
-    if (canceled) if (self.waiter) |waiter_id| {
+    if (self.waiter) |waiter_id| {
         self.waiter = null;
 
         if (Task.acquire(waiter_id)) |waiter| {
@@ -281,8 +281,8 @@ pub fn cancel(self: *Future) bool {
                     wakeup_needed = true; // insolvent
                 }
 
-                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.waiting, .waiting_queued, .acq_rel, .monotonic) == null) {
-                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).scheduler_local;
+                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
+                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).?.scheduler_local;
 
                     const saved_flags = cpu_sched.ready_queue_lock.lockExclusive();
                     defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags);
@@ -294,7 +294,7 @@ pub fn cancel(self: *Future) bool {
                 };
             }
         }
-    };
+    }
 
     return true;
 }
