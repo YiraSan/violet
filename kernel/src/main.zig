@@ -69,6 +69,11 @@ pub fn stage1() !void {
             .entry_point = @intFromPtr(&task1_entry),
         });
         try scheduler.register(task1);
+
+        const task2 = try scheduler.Task.create(test_process_id, .{
+            .entry_point = @intFromPtr(&task2_entry),
+        });
+        try scheduler.register(task2);
     }
 }
 
@@ -86,7 +91,7 @@ const task0_log = std.log.scoped(.task0);
 
 fn task0_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
     task0_main() catch |err| {
-        task0_log.err("task0 terminated with: {}", .{err});
+        task0_log.err("terminated with: {}", .{err});
     };
 
     basalt.task.terminate();
@@ -151,7 +156,7 @@ const task1_log = std.log.scoped(.task1);
 
 fn task1_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
     task1_main() catch |err| {
-        task1_log.err("task1 terminated with: {}", .{err});
+        task1_log.err("terminated with: {}", .{err});
     };
 
     basalt.task.terminate();
@@ -165,7 +170,7 @@ fn task1_main() !void {
     var sequential_timer = try basalt.time.SequentialTimer.init(._60hz);
     defer sequential_timer.deinit();
 
-    while (true) {
+    for (0..10) |_| {
         const delta = try sequential_timer.wait();
 
         task1_log.info("elapsed ticks since last: {}", .{delta});
@@ -174,16 +179,56 @@ fn task1_main() !void {
     }
 }
 
+const task2_log = std.log.scoped(.task2);
+
+fn task2_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
+    task2_main() catch |err| {
+        task2_log.err("terminated with: {}", .{err});
+    };
+
+    basalt.task.terminate();
+}
+
+fn task2_main() !void {
+    task2_log.info("hey there !", .{});
+
+    var prism = try basalt.sync.Prism.create(.{});
+    defer prism.destroy();
+
+    const facet = try basalt.sync.Facet.create(prism, basalt.process.id());
+    defer facet.drop();
+
+    const future = try facet.invoke(.{ .pair64 = .{ .arg0 = 444, .arg1 = 25565 } }, .wait);
+    future.cancel() catch {};
+
+    while (try prism.consume(.wait)) |invocation| {
+        task2_log.info("{}", .{invocation});
+    }
+}
+
 // --- zig std features --- //
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
-    // TODO this could cause a deadlock on serial.
     std.log.err("panic(0x{?x}): {s}", .{ return_address, message });
 
     // NOTE little panic handler
     const local_scheduler = scheduler.Local.get();
     if (local_scheduler.current_task) |_| {
-        basalt.task.terminate();
+        switch (builtin.cpu.arch) {
+            .aarch64 => {
+                const spsel = asm volatile (
+                    \\ msr spsel, %[out]
+                    : [out] "=r" (-> u64),
+                );
+
+                if (spsel == 0) {
+                    basalt.task.terminate();
+                } else {
+                    scheduler.task_terminate(undefined) catch {};
+                }
+            },
+            else => unreachable,
+        }
     }
 
     ark.cpu.halt();

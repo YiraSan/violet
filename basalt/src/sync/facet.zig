@@ -30,4 +30,30 @@ const Future = sync.Future;
 
 pub const Facet = packed struct(u64) {
     id: u64,
+
+    pub fn create(prism: Prism, caller_id: u64) !Facet {
+        const res = try syscall.syscall2(
+            .facet_create,
+            prism.id,
+            caller_id,
+        );
+
+        return .{ .id = res.success2 };
+    }
+
+    pub fn drop(self: Facet) void {
+        _ = syscall.syscall1(.facet_drop, self.id) catch {};
+    }
+
+    pub fn invoke(self: Facet, arg: Prism.InvocationArg, behavior: syscall.SuspendBehavior) !Future {
+        const res = try syscall.syscall4(
+            .facet_invoke,
+            self.id,
+            @intFromEnum(behavior),
+            arg.pair64.arg0,
+            arg.pair64.arg1,
+        );
+
+        return .{ .id = res.success2 };
+    }
 };

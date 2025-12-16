@@ -73,8 +73,6 @@ stack_pointer: extern union {
     extended: *kernel.arch.ExtendedFrame,
 },
 
-// next_listener: ?*Task,
-
 futures_lock: mem.RwLock,
 futures_generation: u64,
 futures_waitmode: basalt.sync.Future.WaitMode,
@@ -93,6 +91,9 @@ futures_failfast_index: ?u8,
 kernel_locals_kernel: *basalt.syscall.KernelLocals,
 kernel_locals_userland: u64,
 
+next_backpressure: ?*Task,
+prev_backpressure: ?*Task,
+
 pub fn create(process_id: Process.Id, options: Options) !Id {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
     errdefer process.release();
@@ -109,7 +110,7 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
     task.uptime_suspend = 0;
 
     task.host_id = 0;
-    task.host_affinity = 16;
+    task.host_affinity = 48;
 
     // task.next_listener = null;
 
@@ -200,6 +201,8 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     task.kernel_locals_kernel.process_id = @bitCast(process_id);
 
+    task.next_backpressure = null;
+    task.prev_backpressure = null;
 
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
@@ -310,8 +313,11 @@ pub const Options = struct {
 pub const State = enum(u8) {
     ready,
     dying,
-    waiting,
-    waiting_queued,
+    future_waiting,
+    future_waiting_queued,
+    prism_waiting,
+    prism_waiting_queued,
+    prism_backpressure,
 };
 
 pub const Error = error{

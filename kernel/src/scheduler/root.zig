@@ -56,6 +56,15 @@ pub fn init() !void {
     syscall.register(.future_create, &future_create);
     syscall.register(.future_resolve, &future_resolve);
     syscall.register(.future_await, &future_await);
+
+    syscall.register(.prism_create, &prism_create);
+    syscall.register(.prism_destroy, &prism_destroy);
+    syscall.register(.prism_consume, &prism_consume);
+    syscall.register(.prism_bind, &prism_bind);
+
+    syscall.register(.facet_create, &facet_create);
+    syscall.register(.facet_drop, &facet_drop);
+    syscall.register(.facet_invoke, &facet_invoke);
 }
 
 pub fn initCpu() !void {
@@ -143,6 +152,8 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
         if (len_raw == 0) return syscall.success(frame, .{ .success0 = std.math.maxInt(u16) });
         if (len_raw > 128) return try syscall.fail(frame, .invalid_argument);
         task.futures_userland_len = len_raw;
+
+        // TODO investigate on reducing pins without sacrifying memory on alignment padding.
 
         const futures_ptr_raw = frame.getArg(1);
         if (!syscall.pin(task, futures_ptr_raw, Future.Id, len_raw, false)) return try syscall.fail(frame, .invalid_pointer);
@@ -323,7 +334,7 @@ fn suspendForWait() void {
     if (local.current_task == null) @panic("corrupted suspendForWait call");
     var suspended_task = local.current_task;
 
-    if (suspended_task.?.state.cmpxchgStrong(.ready, .waiting, .acq_rel, .monotonic) != null) {
+    if (suspended_task.?.state.cmpxchgStrong(.ready, .future_waiting, .acq_rel, .monotonic) != null) {
         suspended_task.?.release();
         suspended_task = null;
     }
@@ -337,6 +348,283 @@ fn suspendForWait() void {
     }
 
     storeAndLoad(suspended_task, true);
+}
+
+fn prism_create(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const options_ptr_raw = frame.getArg(1);
+        if (!syscall.pin(task, options_ptr_raw, basalt.sync.Prism.Options, 1, false)) return try syscall.fail(frame, .invalid_pointer);
+        defer syscall.unpin(task, options_ptr_raw);
+        const options = @as(*const basalt.sync.Prism.Options, @ptrFromInt(options_ptr_raw)).*;
+
+        const prism_id = Prism.create(task.id, options) catch |err| switch (err) {
+            Prism.Error.InvalidOptions => return try syscall.fail(frame, .invalid_argument),
+            else => return try syscall.fail(frame, .internal_failure),
+        };
+        errdefer if (Prism.acquire(prism_id)) |prism| {
+            prism.release();
+            prism.kill();
+        };
+
+        return syscall.success(frame, .{
+            .success2 = @bitCast(prism_id),
+        });
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn prism_destroy(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const prism_id: Prism.Id = @bitCast(frame.getArg(1));
+
+        const prism = Prism.acquire(prism_id) orelse return try syscall.fail(frame, .invalid_prism);
+        defer prism.release();
+
+        if (prism.owner_id != task.process.id) return try syscall.fail(frame, .invalid_prism);
+
+        prism.kill();
+
+        return syscall.success(frame, .{});
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const prism_id: Prism.Id = @bitCast(frame.getArg(1));
+
+        const prism = Prism.acquire(prism_id) orelse return try syscall.fail(frame, .invalid_prism);
+        defer prism.release();
+
+        if (prism.binded_task_id.load(.acquire) != task.id) return try syscall.fail(frame, .invalid_prism);
+
+        const suspend_behavior: basalt.syscall.SuspendBehavior = switch (frame.getArg(2)) {
+            @intFromEnum(basalt.syscall.SuspendBehavior.no_suspend) => .no_suspend,
+            @intFromEnum(basalt.syscall.SuspendBehavior.wait) => .wait,
+            else => if (task.priority == .realtime) .no_suspend else .wait,
+        };
+
+        const saved_flags = prism.lock.lockExclusive();
+        defer prism.lock.unlockExclusive(saved_flags);
+
+        if (prism.queue_count == 0) {
+            if (suspend_behavior == .wait) {
+                std.log.warn("prism_consume: suspending when queue is empty ! TODO", .{});
+                return try syscall.fail(frame, .internal_failure);
+            } else {
+                return try syscall.fail(frame, .would_suspend);
+            }
+        } else {
+            const current_queue_ptr = if (prism.queue_is_second) prism.queue_user2 else prism.queue_user1;
+
+            syscall.success(frame, .{
+                .success1 = @intCast(prism.queue_count),
+                .success2 = current_queue_ptr,
+            });
+
+            prism.queue_cursor = 0;
+            prism.queue_count = 0;
+            prism.queue_is_second = !prism.queue_is_second;
+        }
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn prism_bind(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const prism_id: Prism.Id = @bitCast(frame.getArg(1));
+
+        const prism = Prism.acquire(prism_id) orelse return try syscall.fail(frame, .invalid_prism);
+        defer prism.release();
+
+        if (prism.owner_id != task.process.id) return try syscall.fail(frame, .invalid_prism);
+
+        prism.binded_task_id.store(task.id, .release);
+
+        return syscall.success(frame, .{});
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn facet_create(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const prism_id: Prism.Id = @bitCast(frame.getArg(1));
+
+        const caller_id: Process.Id = @bitCast(frame.getArg(2));
+
+        const facet_id = Facet.create(task.process.id, prism_id, caller_id) catch |err| switch (err) {
+            Facet.Error.InvalidPrism => return try syscall.fail(frame, .invalid_prism),
+            Facet.Error.InvalidProcess => return try syscall.fail(frame, .invalid_argument),
+            else => return try syscall.fail(frame, .internal_failure),
+        };
+
+        return syscall.success(frame, .{ .success2 = @bitCast(facet_id) });
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn facet_drop(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const facet_id: Facet.Id = @bitCast(frame.getArg(1));
+
+        const facet = Facet.acquire(facet_id) orelse return try syscall.fail(frame, .invalid_facet);
+        defer facet.release();
+
+        const prism = Prism.acquire(facet.prism_id) orelse return try syscall.fail(frame, .invalid_facet);
+        defer prism.release();
+
+        if (task.process.id != facet.caller_id and task.process.id != prism.owner_id) return try syscall.fail(frame, .invalid_facet);
+
+        syscall.success(frame, .{});
+
+        if (facet.drop() and task.process.id == facet.caller_id and prism.options.notify_on_drop) {
+            std.log.warn("notify drop! TODO", .{});
+        }
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
+}
+
+fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
+    const local = Local.get();
+
+    if (local.current_task) |task| {
+        const facet_id: Facet.Id = @bitCast(frame.getArg(1));
+
+        const facet = Facet.acquire(facet_id) orelse return try syscall.fail(frame, .invalid_facet);
+        defer facet.release();
+
+        if (facet.caller_id != task.process.id) return try syscall.fail(frame, .invalid_facet);
+
+        const prism = Prism.acquire(facet.prism_id) orelse return try syscall.fail(frame, .invalid_facet);
+        defer prism.release();
+
+        const suspend_behavior: basalt.syscall.SuspendBehavior = switch (frame.getArg(2)) {
+            @intFromEnum(basalt.syscall.SuspendBehavior.no_suspend) => .no_suspend,
+            @intFromEnum(basalt.syscall.SuspendBehavior.wait) => .wait,
+            else => if (task.priority == .realtime) .no_suspend else .wait,
+        };
+
+        var arg: basalt.sync.Prism.InvocationArg = .{
+            .pair64 = .{ .arg0 = frame.getArg(3), .arg1 = frame.getArg(4) },
+        };
+
+        switch (prism.options.arg_formats) {
+            .pair64 => {},
+            .one64_time64 => {
+                arg.one64_time64.time_ns = kernel.drivers.Timer.getUptime();
+            },
+            .one64_time32_one32 => {
+                arg.one64_time32_one32.time_ms = @intCast((kernel.drivers.Timer.getUptime() / 1000) % std.math.maxInt(u32));
+            },
+            .one64_sequence64 => {
+                arg.one64_sequence64.sequence64 = facet.sequence.fetchAdd(1, .acq_rel);
+            },
+            .one64_one32_sequence32 => {
+                arg.one64_one32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+            },
+            .one64_time32_sequence32 => {
+                arg.one64_time32_sequence32.time_ms = @intCast((kernel.drivers.Timer.getUptime() / 1000) % std.math.maxInt(u32));
+                arg.one64_time32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+            },
+            .one64_one32_one16_cpuid => {
+                arg.one64_one32_one16_cpuid.cpuid = kernel.arch.Cpu.id();
+            },
+            .one64_sequence32_one16_cpuid => {
+                arg.one64_sequence32_one16_cpuid.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+                arg.one64_sequence32_one16_cpuid.cpuid = kernel.arch.Cpu.id();
+            },
+            .one64_time32_one16_cpuid => {
+                arg.one64_time32_one16_cpuid.time_ms = @intCast((kernel.drivers.Timer.getUptime() / 1000) % std.math.maxInt(u32));
+                arg.one64_time32_one16_cpuid.cpuid = kernel.arch.Cpu.id();
+            },
+            else => return try syscall.fail(frame, .internal_failure), // unreachable code
+        }
+
+        const future_id = try Future.create(prism.owner_id, task.process.id, task.priority, .one_shot);
+        errdefer if (Future.acquire(future_id)) |future| {
+            future.release(); // current ref
+            future.release(); // consumer
+            future.release(); // producer
+        };
+
+        const invocation = basalt.sync.Prism.Invocation{
+            .facet_id = @bitCast(facet_id),
+            .future = @bitCast(future_id),
+            .arg = arg,
+        };
+
+        const saved_flags = prism.lock.lockExclusive();
+        defer prism.lock.unlockExclusive(saved_flags);
+
+        const current_queue = if (prism.queue_is_second) prism.queue_kernel2 else prism.queue_kernel1;
+
+        if (prism.queue_cursor == current_queue.len) {
+            switch (prism.options.queue_mode) {
+                .backpressure => {
+                    if (suspend_behavior == .wait) {
+                        std.log.err("facet_invoke: backpressure unimplemented.", .{});
+                        return try syscall.fail(frame, .internal_failure);
+                    } else {
+                        return try syscall.fail(frame, .would_suspend);
+                    }
+                },
+                .overwrite => {
+                    prism.queue_cursor = 0;
+
+                    const victim = current_queue[0];
+                    if (Future.acquire(@bitCast(victim.future))) |victim_fut| {
+                        _ = victim_fut.cancel();
+                        victim_fut.release(); // current ref
+                        victim_fut.release(); // consumer ref
+                    }
+                },
+            }
+        }
+
+        current_queue[prism.queue_cursor] = invocation;
+        prism.queue_cursor += 1;
+        prism.queue_count = @min(prism.queue_count + 1, current_queue.len);
+
+        syscall.success(frame, .{
+            .success2 = @bitCast(future_id),
+        });
+
+        if (prism.consumer) |consumer| {
+            prism.consumer = null;
+
+            consumer.updateAffinity();
+
+            var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
+
+            const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
+            defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
+
+            cpu_sched.ready_queue.add(.{
+                .task = consumer,
+                .priority = kernel.drivers.Timer.getUptime() + @min(consumer.penalty(), task.penalty()),
+            }) catch @panic("ready-queue oom in facet.invoke");
+        }
+    } else {
+        return try syscall.fail(frame, .unknown_syscall);
+    }
 }
 
 // --- scheduler entrypoints --- //
@@ -389,6 +677,8 @@ fn timerCallback() void {
                     const physical_tick = @max(timer_event.virtual_tick, future.consumer_priority.load(.acquire).minResolution());
 
                     timer_event.deadline += physical_tick;
+
+                    // TODO add a logic to make it possible to migrate a timer event to another core !
 
                     timer_local.event_queue.add(timer_event) catch @panic("event-queue failed in timerCallback for sequential");
                 },
@@ -620,7 +910,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         }
     }
 
-    const real_value = task.state.cmpxchgStrong(.waiting_queued, .ready, .acq_rel, .monotonic);
+    const real_value = task.state.cmpxchgStrong(.future_waiting_queued, .ready, .acq_rel, .monotonic);
 
     if (real_value == null) {
         const saved_flags = task.futures_lock.lockExclusive();

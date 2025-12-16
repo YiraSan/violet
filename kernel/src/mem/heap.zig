@@ -156,8 +156,8 @@ pub fn List(comptime T: type) type {
 pub fn SlotMap(comptime T: type) type {
     return struct {
         pub const Key = packed struct(u64) {
-            index: u32,
             generation: u32,
+            index: u32,
         };
 
         const Slot = struct {

@@ -46,7 +46,7 @@ pub fn init() !void {
                     spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.arm_sbsa_generic) or
                     spcr.interface_type == @intFromEnum(acpi.Dbg2SerialPortType.bcm2835))
                 {
-                    const virt_address = try vmm.kernel_space.allocator.alloc(4096, 0, null, 0, null);
+                    const virt_address = try vmm.kernel_space.allocator.alloc(4096, 0, null, 0, null, true);
 
                     try vmm.kernel_space.paging.map(virt_address, spcr.base_address.address, 1, .l4K, .{
                         .type = .device,
@@ -115,7 +115,7 @@ pub fn init() !void {
                             const size = std.mem.alignForward(u32, sizes[0], 0x1000);
                             const page_count = size >> mem.PageLevel.l4K.shift();
 
-                            const virt_address = try vmm.kernel_space.allocator.alloc(size, 0, null, 0, null);
+                            const virt_address = try vmm.kernel_space.allocator.alloc(size, 0, null, 0, null, true);
 
                             try vmm.kernel_space.paging.map(virt_address, addrs[0].address, page_count, .l4K, .{
                                 .type = .device,

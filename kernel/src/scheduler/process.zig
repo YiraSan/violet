@@ -94,8 +94,6 @@ fn destroy(self: *Process) void {
     while (nprism) |prism| {
         nprism = prism.next_prism;
 
-        prism.next_prism = null;
-
         prism.release();
     }
 

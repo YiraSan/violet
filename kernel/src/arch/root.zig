@@ -72,7 +72,8 @@ pub fn restoreSaved(saved: u64) void {
 // --- //
 
 /// takes 256*8 = 2048 bytes so less than a page, doesn't make sense to allocate dynamically until violetOS supports multi-cluster.
-pub var cpus: [256]?*kernel.arch.Cpu align(@alignOf(u128)) = undefined;
+pub var cpus: [256]?*Cpu = .{null} ** 256;
+pub var cpu_count: usize = 0;
 
 pub const Cpu = struct {
     cpuid: u64,
@@ -101,8 +102,8 @@ pub const Cpu = struct {
         };
     }
 
-    pub fn getCpu(idx: u8) *Cpu {
-        return cpus[idx].?;
+    pub fn getCpu(idx: u8) ?*Cpu {
+        return cpus[idx];
     }
 
     comptime {

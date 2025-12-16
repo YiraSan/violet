@@ -99,18 +99,21 @@ pub const WaitList = struct {
 pub const Future = packed struct(u64) {
     id: u64,
 
+    pub const @"null" = .{ .id = 1 };
+
+    pub fn isNull(self: Future) bool {
+        return self.id % 2 != 0;
+    }
+
     /// This create a **local** future (that has for producer and consumer the current process).
     pub fn create(future_type: Type) basalt.syscall.Error!Future {
-        var future: Future = undefined;
-
-        _ = try syscall.syscall2(.future_create, @intFromPtr(&future), @intFromEnum(future_type));
-
-        return future;
+        const res = try syscall.syscall1(.future_create, @intFromEnum(future_type));
+        return .{ .id = res.success2 };
     }
 
     /// Destroys the future by forcefully completing its lifecycle.
     ///
-    /// This helper performs a `cancel()` followed by a non-blocking `wait()`.
+    /// This helper performs a `cancel()` followed by a no-suspend `wait()`.
     ///
     /// **Why both?**
     /// In a **local** future, the current process holds *both* the Producer
@@ -118,11 +121,11 @@ pub const Future = packed struct(u64) {
     /// - `cancel()` drops the **Producer** reference.
     /// - `wait()` drops the **Consumer** reference.
     ///
-    /// Calling this ensures the kernel resource is fully deallocated (Refcount = 0),
+    /// Calling this ensures the kernel resource is fully deallocated,
     /// regardless of the current state or role.
     pub fn destroy(self: Future) void {
         self.cancel() catch {};
-        _ = self.wait(.non_blocking) catch {};
+        _ = self.wait(null, .no_suspend) catch {};
     }
 
     /// If the threshold is no more reachable, it causes an Error.Insolvent.
@@ -133,7 +136,7 @@ pub const Future = packed struct(u64) {
     pub fn waitMany(
         futures: []Future,
         /// - input(multi_shot): known_sequence
-        /// - output(multi_shot): delta_sequence
+        /// - output(multi_shot): current_sequence
         /// - output(one_shot): result_value
         payloads: []u64,
         statuses: []Status,
@@ -179,7 +182,7 @@ pub const Future = packed struct(u64) {
     /// (one-shot) `payload` is the result value of the future.
     ///
     /// (multi-shot) `payload` is the sequence increment (0 is ignored by the kernel).
-    pub fn resolve(self: @This(), payload: u64) basalt.syscall.Error!void {
+    pub fn resolve(self: Future, payload: u64) basalt.syscall.Error!void {
         _ = try syscall.syscall3(.future_resolve, self.id, @intFromEnum(Status.resolved), payload);
     }
 
@@ -188,7 +191,7 @@ pub const Future = packed struct(u64) {
     /// This signals the intent to abort the pending operation.
     ///
     /// Use `destroy()` instead of `cancel()` for local future if you are the consumer.
-    pub fn cancel(self: @This()) basalt.syscall.Error!void {
+    pub fn cancel(self: Future) basalt.syscall.Error!void {
         _ = try syscall.syscall2(.future_resolve, self.id, @intFromEnum(Status.canceled));
     }
 
@@ -225,7 +228,7 @@ pub const Future = packed struct(u64) {
         pending = 0,
         resolved = 1,
         canceled = 2,
-        /// Is either used by the kernel to represent an invalid future.
+        /// Used by the kernel to represent an invalid future.
         /// In the scenario that another task is already awaiting for that future, the kernel will consider that future as invalid from your point of view.
         invalid = 3,
         /// Any value other than pending, resolved, canceled or invalid has no meaning for the kernel and is ignored.

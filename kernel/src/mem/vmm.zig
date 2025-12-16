@@ -102,7 +102,15 @@ pub const Allocator = struct {
         self.regions.deinit();
     }
 
-    pub fn alloc(self: *@This(), size: u64, alignment: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !u64 {
+    pub fn alloc(
+        self: *@This(),
+        size: u64,
+        alignment: u64,
+        object: ?*Object,
+        offset: u64,
+        flags: ?Object.Flags,
+        syscall_protect: bool,
+    ) !u64 {
         if (size == 0) return 0;
 
         const lock_flags = self.lock.lockExclusive();
@@ -146,7 +154,7 @@ pub const Allocator = struct {
             .object = object,
             .offset = offset,
             .flags = flags,
-            .syscall_pinned = .init(0),
+            .syscall_pinned = .init(if (syscall_protect) 1 else 0),
         };
 
         _ = try self.regions.insert(candidate_start, new_region);
@@ -361,11 +369,12 @@ pub const Space = struct {
         alignment: u64,
         offset: u64,
         flags: ?Object.Flags,
+        syscall_protect: bool,
     ) !u64 {
         const object = Object.acquire(object_id) orelse return Error.InvalidObject;
         errdefer object.release();
 
-        const vaddr = try self.allocator.alloc(size, alignment, object, offset, flags);
+        const vaddr = try self.allocator.alloc(size, alignment, object, offset, flags, syscall_protect);
 
         return vaddr;
     }

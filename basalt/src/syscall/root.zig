@@ -81,9 +81,10 @@ pub const Code = enum(u64) {
     prism_create = 0x40,
     prism_destroy = 0x41,
     prism_consume = 0x42,
+    prism_bind = 0x43,
 
     facet_create = 0x51,
-    facet_destroy = 0x52,
+    facet_drop = 0x52,
     facet_invoke = 0x53,
 
     future_create = 0x61,
@@ -102,6 +103,7 @@ pub const Error = error{
     InvalidArgument,
     InvalidPrism,
     InvalidFuture,
+    InvalidFacet,
 
     WouldSuspend,
     Insolvent,
@@ -115,9 +117,10 @@ pub const ErrorCode = enum(u16) {
     invalid_argument = 3,
     invalid_prism = 4,
     invalid_future = 5,
+    invalid_facet = 6,
 
-    would_suspend = 6,
-    insolvent = 7,
+    would_suspend = 7,
+    insolvent = 8,
 
     pub fn toError(self: @This()) Error!void {
         switch (self) {
@@ -128,6 +131,7 @@ pub const ErrorCode = enum(u16) {
             .invalid_argument => return Error.InvalidArgument,
             .invalid_prism => return Error.InvalidPrism,
             .invalid_future => return Error.InvalidFuture,
+            .invalid_facet => return Error.InvalidFacet,
 
             .would_suspend => return Error.WouldSuspend,
 

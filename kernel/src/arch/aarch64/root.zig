@@ -63,6 +63,8 @@ pub fn initCpus() !void {
                             const cpu_ptr: *kernel.arch.Cpu = @ptrFromInt(kernel.boot.hhdm_base + try mem.phys.allocContiguous(64, true));
                             kernel.arch.cpus[mpidr.aff0] = cpu_ptr;
                             cpu_ptr.cpuid = gicc.mpidr;
+
+                            kernel.arch.cpu_count += 1;
                         },
                         else => {},
                     }

@@ -25,6 +25,7 @@ const mem = kernel.mem;
 const scheduler = kernel.scheduler;
 
 const heap = mem.heap;
+const vmm = mem.vmm;
 
 const Facet = scheduler.Facet;
 const Future = scheduler.Future;
@@ -41,41 +42,86 @@ var prisms_map: PrismMap = .init();
 var prisms_map_lock: mem.RwLock = .{};
 
 id: Id,
+options: basalt.sync.Prism.Options,
+
 owner_id: Process.Id,
+binded_task_id: std.atomic.Value(Task.Id),
 
 ref_count: std.atomic.Value(usize),
+state: std.atomic.Value(State),
+
 next_prism: ?*Prism,
+prev_prism: ?*Prism,
 
-// queue_listener_lock: mem.RwLock,
+facet_head: ?*Facet,
 
-// listeners_head: ?*Task,
-// listeners_tail: ?*Task,
-// /// if `true` : a listener has already being dispatched to swap the queue.
-// listener_dispatched: bool,
+lock: mem.RwLock,
 
-// queue_mode: basalt.sync.Prism.QueueMode,
-// /// if `true` : second two is the write queue.
-// queue_is2: bool,
-// queue_cursor: usize,
+backpressure_head: ?*Task,
+backpressure_tail: ?*Task,
 
-// queue_kernel1: []Invocation,
-// queue_kernel2: []Invocation,
+queue_is_second: bool,
+queue_cursor: usize,
+queue_count: usize,
 
-// queue_user1: u64,
-// queue_user2: u64,
+queue_kernel1: []basalt.sync.Prism.Invocation,
+queue_kernel2: []basalt.sync.Prism.Invocation,
 
-pub fn create(owner_id: Process.Id, options: basalt.sync.Prism.Options) !Id {
+queue_user1: u64,
+queue_user2: u64,
+
+consumer: ?*Task,
+
+pub fn create(binded_task_id: Task.Id, options: basalt.sync.Prism.Options) !Id {
     if (options.queue_size == 0 or options.queue_size > 32) return Error.InvalidOptions;
     if (options.queue_mode != .backpressure and options.queue_mode != .overwrite) return Error.InvalidOptions;
+    if (!options.arg_formats.isValid()) return Error.InvalidOptions;
 
-    const owner = Process.acquire(owner_id) orelse return Error.InvalidProcess;
-    defer owner.release();
+    const binded_task = Task.acquire(binded_task_id) orelse return Error.InvalidTask;
+    defer binded_task.release();
+
+    if (!binded_task.process.isPrivileged() and options.arg_formats.trustedModulesOnly()) return Error.InvalidOptions;
 
     var prism: Prism = undefined;
 
-    prism.owner_id = owner_id;
+    prism.options = options;
 
-    prism.ref_count = .init(1);
+    prism.owner_id = binded_task.process.id;
+    prism.binded_task_id = .init(binded_task_id);
+
+    prism.ref_count = .init(1); // process reference
+    prism.state = .init(.alive);
+
+    prism.facet_head = null;
+
+    prism.lock = .{};
+
+    prism.backpressure_head = null;
+    prism.backpressure_tail = null;
+
+    prism.queue_is_second = false;
+    prism.queue_cursor = 0;
+    prism.queue_count = 0;
+
+    const queue_count = options.queue_size * INVOCATIONS_PER_PAGE;
+
+    const buffer_size = queue_count * @sizeOf(basalt.sync.Prism.Invocation);
+    const double_buffer_size = buffer_size * 2;
+
+    const queue_object = try vmm.Object.create(double_buffer_size, .{});
+
+    prism.queue_kernel1.ptr = @ptrFromInt(try vmm.kernel_space.map(queue_object, double_buffer_size, 0, 0, .{ .writable = true }, true));
+    errdefer vmm.kernel_space.unmap(@intFromPtr(prism.queue_kernel1.ptr), false) catch {};
+    prism.queue_kernel2.ptr = @ptrFromInt(@intFromPtr(prism.queue_kernel1.ptr) + buffer_size);
+
+    prism.queue_kernel1.len = queue_count;
+    prism.queue_kernel2.len = queue_count;
+
+    prism.queue_user1 = try binded_task.process.virtualSpace().map(queue_object, double_buffer_size, 0, 0, .{}, true);
+    errdefer binded_task.process.virtualSpace().unmap(prism.queue_user1, false) catch {};
+    prism.queue_user2 = prism.queue_user1 + buffer_size;
+
+    prism.consumer = null;
 
     const lock_flags = prisms_map_lock.lockExclusive();
     defer prisms_map_lock.unlockExclusive(lock_flags);
@@ -84,8 +130,14 @@ pub fn create(owner_id: Process.Id, options: basalt.sync.Prism.Options) !Id {
     var prism_ptr = prisms_map.get(slot_key) orelse unreachable;
     prism_ptr.id = slot_key;
 
-    prism_ptr.next_prism = owner.prism_head;
-    owner.prism_head = prism_ptr;
+    prism_ptr.next_prism = binded_task.process.prism_head;
+    prism_ptr.prev_prism = null;
+
+    if (binded_task.process.prism_head) |last_head| {
+        last_head.prev_prism = prism_ptr;
+    }
+
+    binded_task.process.prism_head = prism_ptr;
 
     return slot_key;
 }
@@ -98,9 +150,43 @@ fn destroy(self: *Prism) void {
         return;
     }
 
-    defer prisms_map.remove(self.id);
+    if (Task.acquire(self.binded_task_id.load(.acquire))) |binded_task| {
+        defer binded_task.release();
 
-    // TODO release queue buffers.
+        binded_task.process.virtualSpace().unmap(self.queue_user1, false) catch {};
+    }
+
+    vmm.kernel_space.unmap(@intFromPtr(self.queue_kernel1.ptr), false) catch {};
+
+    // TODO wakeup backpressured tasks.
+
+    prisms_map.remove(self.id);
+}
+
+pub fn kill(self: *Prism) void {
+    if (self.state.cmpxchgStrong(.alive, .dying, .acq_rel, .monotonic) == null) {
+        defer self.release(); // process reference
+
+        const lock_flags = prisms_map_lock.lockExclusive();
+        defer prisms_map_lock.unlockExclusive(lock_flags);
+
+        if (Process.acquire(self.owner_id)) |process| {
+            defer process.release();
+
+            if (self.next_prism) |next| {
+                next.prev_prism = self.prev_prism;
+            }
+
+            if (self.prev_prism) |prev| {
+                prev.next_prism = self.next_prism;
+            } else {
+                process.prism_head = self.next_prism;
+            }
+        }
+
+        self.next_prism = null;
+        self.prev_prism = null;
+    }
 }
 
 pub fn acquire(id: Id) ?*Prism {
@@ -108,6 +194,7 @@ pub fn acquire(id: Id) ?*Prism {
     defer prisms_map_lock.unlockShared(lock_flags);
 
     const prism: *Prism = prisms_map.get(id) orelse return null;
+    if (prism.state.load(.acquire) == .dying) return null;
 
     _ = prism.ref_count.fetchAdd(1, .acq_rel);
 
@@ -122,16 +209,14 @@ pub fn release(self: *Prism) void {
 
 // ---- //
 
-const INVOCATIONS_PER_PAGE = mem.PageLevel.l4K.size() / @sizeOf(Invocation); // 128
-
-pub const Invocation = packed struct(u256) {
-    facet: Facet.Id,
-    future: Future.Id,
-    arg0: u64,
-    arg1: u64,
-};
+const INVOCATIONS_PER_PAGE = mem.PageLevel.l4K.size() / @sizeOf(basalt.sync.Prism.Invocation); // 128 invocations per page
 
 pub const Error = error{
-    InvalidProcess,
+    InvalidTask,
     InvalidOptions,
+};
+
+pub const State = enum(u8) {
+    dying,
+    alive,
 };
