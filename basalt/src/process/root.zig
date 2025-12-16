@@ -24,6 +24,10 @@ const syscall = basalt.syscall;
 
 // --- process/root.zig --- //
 
+pub fn id() u64 {
+    return syscall.KernelLocals.get().process_id;
+}
+
 /// Terminate current process.
 pub fn terminate() noreturn {
     _ = syscall.syscall0(.process_terminate) catch {};

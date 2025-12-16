@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const ark = @import("ark");
 
 // --- imports --- //
 
@@ -329,3 +330,19 @@ pub inline fn syscall7(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, a
         .success2 = res.success2,
     };
 }
+
+pub const KernelLocals = extern struct {
+    process_id: u64,
+    task_id: u64,
+
+    pub inline fn get() *const KernelLocals {
+        switch (builtin.cpu.arch) {
+            .aarch64 => {
+                const tpidrro_el0 = ark.armv8.registers.loadTpidrroEl0();
+
+                return @ptrFromInt(tpidrro_el0);
+            },
+            else => unreachable,
+        }
+    }
+};

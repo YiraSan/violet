@@ -90,6 +90,9 @@ futures_userland_statuses_ptr: u64,
 
 futures_failfast_index: ?u8,
 
+kernel_locals_kernel: *basalt.syscall.KernelLocals,
+kernel_locals_userland: u64,
+
 pub fn create(process_id: Process.Id, options: Options) !Id {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
     errdefer process.release();
@@ -112,19 +115,27 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     // TODO GUARD PAGES
 
-    const object = try vmm.Object.create(STACK_SIZE, .{ .writable = true });
+    const stack_object = try vmm.Object.create(STACK_SIZE, .{ .writable = true });
 
     const vs = task.process.virtualSpace();
     task.base_stack = try vs.map(
-        object,
+        stack_object,
         STACK_SIZE,
         0,
         0,
         null,
+        true,
     );
     errdefer vs.unmap(task.base_stack, false) catch {};
 
-    const kernel_stack_base = try vmm.kernel_space.map(object, STACK_SIZE, 0, 0, null);
+    const kernel_stack_base = try vmm.kernel_space.map(
+        stack_object,
+        STACK_SIZE,
+        0,
+        0,
+        null,
+        true,
+    );
     defer vmm.kernel_space.unmap(kernel_stack_base, false) catch {};
 
     task.exception = true;
@@ -165,6 +176,31 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     task.futures_failfast_index = null;
 
+    const locals_object = try vmm.Object.create(@sizeOf(basalt.syscall.KernelLocals), .{});
+
+    task.kernel_locals_userland = try vs.map(
+        locals_object,
+        @sizeOf(basalt.syscall.KernelLocals),
+        0,
+        0,
+        null,
+        true,
+    );
+    errdefer vs.unmap(task.kernel_locals_userland, false) catch {};
+
+    task.kernel_locals_kernel = @ptrFromInt(try vmm.kernel_space.map(
+        locals_object,
+        @sizeOf(basalt.syscall.KernelLocals),
+        0,
+        0,
+        .{ .writable = true },
+        true,
+    ));
+    errdefer vmm.kernel_space.unmap(@intFromPtr(task.kernel_locals_kernel), false) catch {};
+
+    task.kernel_locals_kernel.process_id = @bitCast(process_id);
+
+
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
@@ -173,6 +209,8 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
     task_ptr.id = slot_key;
 
     _ = task_ptr.process.task_count.fetchAdd(1, .acq_rel);
+
+    task.kernel_locals_kernel.task_id = @bitCast(slot_key);
 
     return slot_key;
 }
@@ -206,6 +244,9 @@ fn destroy(self: *Task) void {
     defer tasks_map.remove(self.id);
 
     self.process.virtualSpace().unmap(self.base_stack, false) catch {};
+    self.process.virtualSpace().unmap(self.kernel_locals_userland, false) catch {};
+
+    vmm.kernel_space.unmap(@intFromPtr(self.kernel_locals_kernel), false) catch {};
 }
 
 pub fn acquire(id: Id) ?*Task {

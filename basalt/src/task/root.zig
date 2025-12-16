@@ -71,6 +71,10 @@ pub const Priority = enum(u8) {
     }
 };
 
+pub fn id() u64 {
+    return syscall.KernelLocals.get().task_id;
+}
+
 pub const sleep = time.sleep;
 
 /// Yield current task and switch to another task.

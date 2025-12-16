@@ -32,6 +32,13 @@ pub fn build(b: *std.Build) void {
 
     mod.addImport("basalt", mod);
 
+    const ark_dep = b.dependency("ark", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const ark_mod = ark_dep.module("ark");
+    mod.addImport("ark", ark_mod);
+
     const main_mod = b.addModule("basalt_main", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,

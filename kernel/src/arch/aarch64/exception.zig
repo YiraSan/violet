@@ -64,6 +64,8 @@ export fn internal_exit(old_frame: *arch.GeneralFrame) callconv(.{ .aarch64_aapc
     const sched_local = scheduler.Local.get();
 
     if (sched_local.current_task) |current_task| {
+        ark.armv8.registers.storeTpidrroEl0(current_task.kernel_locals_userland);
+
         if (current_task.exception) {
             if (current_task.is_extended) {
                 _ = @as(*volatile arch.ExtendedFrame, @ptrCast(current_task.stack_pointer.extended)).*;
@@ -148,6 +150,8 @@ inline fn exitException(old_frame: *arch.GeneralFrame, spsr: ark.armv8.registers
     arch.maskInterrupts();
 
     if (sched_local.current_task) |current_task| {
+        ark.armv8.registers.storeTpidrroEl0(current_task.kernel_locals_userland);
+
         // NOTE reading the frame before the restore makes sure no nested exception overwrites the SPSR.
         if (current_task.is_extended) {
             _ = @as(*volatile arch.ExtendedFrame, @ptrCast(current_task.stack_pointer.extended)).*;
