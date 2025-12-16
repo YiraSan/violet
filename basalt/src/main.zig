@@ -25,13 +25,13 @@ const mod = @import("mod");
 // --- main.zig --- //
 
 const entry_point = if (basalt.module.is_module) struct {
-    export fn _start(umbilical: basalt.sync.Facet, kernel_indirection_table: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) void {
+    export fn _start(umbilical: basalt.sync.Facet, kernel_indirection_table: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
         basalt.module.kernel_indirection_table = kernel_indirection_table;
         setup_routine(umbilical);
         main_entry();
     }
 } else struct {
-    export fn _start(umbilical: basalt.sync.Facet) callconv(basalt.task.call_conv) void {
+    export fn _start(umbilical: basalt.sync.Facet) callconv(basalt.task.call_conv) noreturn {
         setup_routine(umbilical);
         main_entry();
     }
@@ -41,8 +41,9 @@ fn setup_routine(umbilical: basalt.sync.Facet) void {
     _ = umbilical;
 }
 
-fn main_entry() void {
+fn main_entry() noreturn {
     mod.main() catch {}; // TODO log the err.
+    basalt.task.terminate();
 }
 
 // --- zig std features --- //
