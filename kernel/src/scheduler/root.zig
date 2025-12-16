@@ -517,39 +517,67 @@ inline fn chooseTask() void {
     const local = Local.get();
 
     if (local.current_task == null) {
-        const now = kernel.drivers.Timer.getUptime();
+        {
+            const saved_flags = local.ready_queue_lock.lockExclusive();
+            defer local.ready_queue_lock.unlockExclusive(saved_flags);
 
-        const saved_flags = local.ready_queue_lock.lockExclusive();
-        defer local.ready_queue_lock.unlockExclusive(saved_flags);
+            while (newbie_queue.pop()) |new_task_id| {
+                if (Task.acquire(new_task_id)) |new_task| {
+                    if (new_task.isDying()) {
+                        new_task.release();
+                        continue;
+                    }
 
-        while (newbie_queue.pop()) |new_task_id| {
-            if (Task.acquire(new_task_id)) |new_task| {
-                if (new_task.isDying()) {
-                    new_task.release();
+                    new_task.host_id = kernel.arch.Cpu.id();
+
+                    local.ready_queue.add(.{
+                        .priority = kernel.drivers.Timer.getUptime() + new_task.penalty(),
+                        .task = new_task,
+                    }) catch @panic("ready-queue oom in chooseTask()");
+                }
+            }
+
+            while (local.ready_queue.pop()) |item| {
+                if (item.task.isDying()) {
+                    item.task.release();
                     continue;
                 }
 
-                new_task.host_id = kernel.arch.Cpu.id();
-
-                local.ready_queue.add(.{
-                    .priority = now + new_task.penalty(),
-                    .task = new_task,
-                }) catch @panic("ready-queue oom in chooseTask()");
+                local.current_task = item.task;
+                break;
             }
-        }
-
-        while (local.ready_queue.pop()) |item| {
-            if (item.task.isDying()) {
-                item.task.release();
-                continue;
-            }
-
-            local.current_task = item.task;
-            break;
         }
 
         if (local.current_task == null) {
-            // TODO work stealing (ignore realtime task)
+            const current_cpuid = kernel.arch.Cpu.id();
+            const max_slots = kernel.arch.cpus.len;
+
+            const start_index = (current_cpuid + 1) % max_slots;
+
+            var i: usize = 0;
+            while (i < max_slots) : (i += 1) {
+                const victim_index = (start_index + i) % max_slots;
+                if (victim_index == current_cpuid) continue;
+
+                if (kernel.arch.cpus[victim_index]) |victim_cpu| {
+                    if (victim_cpu.scheduler_local.ready_queue_lock.tryLockExclusive()) |saved_flags| {
+                        defer victim_cpu.scheduler_local.ready_queue_lock.unlockExclusive(saved_flags);
+
+                        if (victim_cpu.scheduler_local.ready_queue.peek()) |peeked_item| {
+                            if (peeked_item.task.priority != .realtime) {
+                                _ = victim_cpu.scheduler_local.ready_queue.pop();
+
+                                peeked_item.task.host_id = current_cpuid;
+                                peeked_item.task.host_affinity = 48;
+
+                                local.current_task = peeked_item.task;
+
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
