@@ -83,20 +83,15 @@ fn future_create(frame: *kernel.arch.GeneralFrame) !void {
     const local = Local.get();
 
     if (local.current_task) |task| {
-        const future_id_ptr_raw = frame.getArg(1);
-        if (!syscall.pin(task, future_id_ptr_raw, Future.Id, 1, true)) return try syscall.fail(frame, .invalid_pointer);
-        defer syscall.unpin(task, future_id_ptr_raw);
-        const future_id_ptr: *Future.Id = @ptrFromInt(future_id_ptr_raw);
-
-        const future_type_raw = frame.getArg(2);
+        const future_type_raw = frame.getArg(1);
         if (future_type_raw != @intFromEnum(basalt.sync.Future.Type.one_shot) and future_type_raw != @intFromEnum(basalt.sync.Future.Type.multi_shot)) return try syscall.fail(frame, .invalid_argument);
         const future_type: basalt.sync.Future.Type = @enumFromInt(future_type_raw);
 
         const future = Future.create(task.process.id, task.process.id, task.priority, future_type) catch return try syscall.fail(frame, .internal_failure);
 
-        future_id_ptr.* = future;
-
-        return syscall.success(frame, .{});
+        return syscall.success(frame, .{
+            .success2 = @bitCast(future),
+        });
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }

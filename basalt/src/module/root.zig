@@ -33,7 +33,7 @@ pub const PtrResult = extern struct {
 };
 
 pub const KernelIndirectionTable = extern struct {
-    call_system: *const fn (code: syscall.Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) callconv(basalt.task.call_conv) syscall.Result,
+    call_system: *const fn (code: syscall.Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64, arg7: u64) callconv(basalt.task.call_conv) extern struct { syscall_result: syscall.Result, success2: u64 },
 };
 
 pub var kernel_indirection_table: *const KernelIndirectionTable = if (build_options.module_mode) undefined else unreachable;

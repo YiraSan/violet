@@ -85,11 +85,9 @@ pub const SingleTimer = struct {
     future: Future,
 
     pub fn init(delay: Delay) !SingleTimer {
-        var future: Future = undefined;
+        const result = try syscall.syscall1(.timer_sequential, delay.nanoseconds());
 
-        _ = try syscall.syscall2(.timer_single, @intFromPtr(&future), delay.nanoseconds());
-
-        return .{ .future = future };
+        return .{ .future = @bitCast(result.success2) };
     }
 
     pub fn deinit(self: *const SingleTimer) void {
@@ -110,11 +108,9 @@ pub const SequentialTimer = struct {
     known_sequence: u64 = 0,
 
     pub fn init(tick_duration: Delay) !SequentialTimer {
-        var future: Future = undefined;
+        const result = try syscall.syscall1(.timer_sequential, tick_duration.nanoseconds());
 
-        _ = try syscall.syscall2(.timer_sequential, @intFromPtr(&future), tick_duration.nanoseconds());
-
-        return .{ .future = future };
+        return .{ .future = @bitCast(result.success2) };
     }
 
     pub fn deinit(self: *const SequentialTimer) void {

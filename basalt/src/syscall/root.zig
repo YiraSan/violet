@@ -143,200 +143,189 @@ pub const Result = packed struct(u64) {
             error_code: ErrorCode = .unknown_syscall, // bit 16-31
             _reserved1: u32 = 0, // bit 32-63
         },
-        success: SuccessValues,
+        success: packed struct(u48) {
+            success0: u16 = 0, // bit 16-31
+            success1: u32 = 0, // bit 32-63
+        },
     },
 };
 
-pub const SuccessValues = packed struct(u48) {
-    success0: u16 = 0, // bit 16-31
-    success1: u32 = 0, // bit 32-63
+pub const ReturnValues = struct {
+    success0: u16 = 0,
+    success1: u32 = 0,
+    success2: u64 = 0,
 };
 
-pub inline fn syscall0(code: Code) Error!SuccessValues {
+inline fn syscall_fn(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64, arg7: u64) extern struct { syscall_result: Result, success2: u64 } {
+    var syscall_result: Result = undefined;
+    var success2: u64 = undefined;
+
     switch (builtin.cpu.arch) {
         .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, 0, 0, 0, 0, 0, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                    : "memory", "cc"
-                );
-
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
+            asm volatile (
+                \\ svc #0
+                : [out0] "={x0}" (syscall_result),
+                  [out1] "={x1}" (success2),
+                : [code] "{x0}" (code),
+                  [arg1] "{x1}" (arg1),
+                  [arg2] "{x2}" (arg2),
+                  [arg3] "{x3}" (arg3),
+                  [arg4] "{x4}" (arg4),
+                  [arg5] "{x5}" (arg5),
+                  [arg6] "{x6}" (arg6),
+                  [arg7] "{x7}" (arg7),
+                : "memory", "cc"
+            );
         },
         else => unreachable,
     }
+
+    return .{
+        .syscall_result = syscall_result,
+        .success2 = success2,
+    };
 }
 
-pub inline fn syscall1(code: Code, arg1: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, 0, 0, 0, 0, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                    : "memory", "cc"
-                );
+pub inline fn syscall0(code: Code) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, undefined, undefined, undefined, undefined, undefined, undefined, undefined)
+    else
+        syscall_fn(code, undefined, undefined, undefined, undefined, undefined, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }
 
-pub inline fn syscall2(code: Code, arg1: u64, arg2: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, arg2, 0, 0, 0, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                      [arg2] "{x2}" (arg2),
-                    : "memory", "cc"
-                );
+pub inline fn syscall1(code: Code, arg1: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, undefined, undefined, undefined, undefined, undefined, undefined)
+    else
+        syscall_fn(code, arg1, undefined, undefined, undefined, undefined, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }
 
-pub inline fn syscall3(code: Code, arg1: u64, arg2: u64, arg3: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, 0, 0, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                      [arg2] "{x2}" (arg2),
-                      [arg3] "{x3}" (arg3),
-                    : "memory", "cc"
-                );
+pub inline fn syscall2(code: Code, arg1: u64, arg2: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, undefined, undefined, undefined, undefined, undefined)
+    else
+        syscall_fn(code, arg1, arg2, undefined, undefined, undefined, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }
 
-pub inline fn syscall4(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, 0, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                      [arg2] "{x2}" (arg2),
-                      [arg3] "{x3}" (arg3),
-                      [arg4] "{x4}" (arg4),
-                    : "memory", "cc"
-                );
+pub inline fn syscall3(code: Code, arg1: u64, arg2: u64, arg3: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, undefined, undefined, undefined, undefined)
+    else
+        syscall_fn(code, arg1, arg2, arg3, undefined, undefined, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }
 
-pub inline fn syscall5(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, arg5, 0)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                      [arg2] "{x2}" (arg2),
-                      [arg3] "{x3}" (arg3),
-                      [arg4] "{x4}" (arg4),
-                      [arg5] "{x5}" (arg5),
-                    : "memory", "cc"
-                );
+pub inline fn syscall4(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, undefined, undefined, undefined)
+    else
+        syscall_fn(code, arg1, arg2, arg3, arg4, undefined, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }
 
-pub inline fn syscall6(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) Error!SuccessValues {
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const result: Result = if (comptime module.is_module)
-                module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, arg5, arg6)
-            else
-                asm volatile (
-                    \\ svc #0
-                    : [output] "={x0}" (-> Result),
-                    : [code] "{x0}" (code),
-                      [arg1] "{x1}" (arg1),
-                      [arg2] "{x2}" (arg2),
-                      [arg3] "{x3}" (arg3),
-                      [arg4] "{x4}" (arg4),
-                      [arg5] "{x5}" (arg5),
-                      [arg6] "{x6}" (arg6),
-                    : "memory", "cc"
-                );
+pub inline fn syscall5(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, arg5, undefined, undefined)
+    else
+        syscall_fn(code, arg1, arg2, arg3, arg4, arg5, undefined, undefined);
 
-            if (!result.is_success) {
-                try result.value.err.error_code.toError();
-                unreachable;
-            }
-
-            return result.value.success;
-        },
-        else => unreachable,
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
     }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
+}
+
+pub inline fn syscall6(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, arg5, arg6, undefined)
+    else
+        syscall_fn(code, arg1, arg2, arg3, arg4, arg5, arg6, undefined);
+
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
+    }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
+}
+
+pub inline fn syscall7(code: Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64, arg7: u64) Error!ReturnValues {
+    const res = if (comptime module.is_module)
+        module.kernel_indirection_table.call_system(code, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+    else
+        syscall_fn(code, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+
+    if (!res.syscall_result.is_success) {
+        try res.syscall_result.value.err.error_code.toError();
+        unreachable;
+    }
+
+    return .{
+        .success0 = res.syscall_result.value.success.success0,
+        .success1 = res.syscall_result.value.success.success1,
+        .success2 = res.success2,
+    };
 }

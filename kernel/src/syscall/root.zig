@@ -68,13 +68,15 @@ fn null_syscall(frame: *kernel.arch.GeneralFrame) !void {
     success(frame, .{});
 }
 
-pub fn success(frame: *kernel.arch.GeneralFrame, values: basalt.syscall.SuccessValues) void {
+pub fn success(frame: *kernel.arch.GeneralFrame, values: basalt.syscall.ReturnValues) void {
     frame.setArg(0, @bitCast(basalt.syscall.Result{
         .is_success = true,
         .value = .{
-            .success = values,
+            .success = .{ .success0 = values.success0, .success1 = values.success1 },
         },
     }));
+
+    frame.setArg(1, values.success2);
 }
 
 pub fn fail(frame: *kernel.arch.GeneralFrame, code: basalt.syscall.ErrorCode) !void {

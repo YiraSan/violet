@@ -31,11 +31,9 @@ pub const Prism = packed struct(u64) {
     id: u64,
 
     pub fn create(options: Options) !Prism {
-        var interface_id: u64 = undefined;
-
-        _ = try syscall.syscall2(.prism_create, @intFromPtr(&interface_id), @intFromPtr(&options));
-
-        return .{ .id = interface_id };
+        const res = try syscall.syscall1(.prism_create, @intFromPtr(&options));
+        return .{ .id = res.success2 };
+    }
     }
 
     pub fn invoke(self: *const Prism, arg0: u64, arg1: u64, behavior: syscall.BlockingBehavior) !Future {

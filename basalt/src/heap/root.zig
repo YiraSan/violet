@@ -34,14 +34,13 @@ pub const PAGE_SIZE = 0x1000;
 /// violetOS prohibits creating Read-Only or Executable memory directly to enforce
 /// a secure lifecycle: write data/code first, then seal the region.
 pub fn map(page_count: usize, alignment: std.mem.Alignment) ![]u8 {
-    var ptr: [*]u8 = undefined;
-
-    _ = try syscall.syscall3(
+    const result = try syscall.syscall2(
         .mem_map,
-        @intFromPtr(&ptr),
         page_count,
         alignment.toByteUnits(),
     );
+
+    const ptr: [*]u8 = @ptrFromInt(result.success2);
 
     const size = page_count * PAGE_SIZE;
     return ptr[0..size];

@@ -50,12 +50,7 @@ fn timer_single(frame: *kernel.arch.GeneralFrame) !void {
     const sched_local = scheduler.Local.get();
 
     if (sched_local.current_task) |task| {
-        const future_id_ptr_raw = frame.getArg(1);
-        if (!syscall.pin(task, future_id_ptr_raw, Future.Id, 1, true)) return try syscall.fail(frame, .invalid_pointer);
-        defer syscall.unpin(task, future_id_ptr_raw);
-        const future_id_ptr: *Future.Id = @ptrFromInt(future_id_ptr_raw);
-
-        const virtual_tick = frame.getArg(2);
+        const virtual_tick = frame.getArg(1);
         if (virtual_tick == 0) return try syscall.fail(frame, .invalid_argument);
 
         const physical_tick = @max(virtual_tick, task.priority.minResolution());
@@ -78,11 +73,11 @@ fn timer_single(frame: *kernel.arch.GeneralFrame) !void {
             .tick_count = 0,
         });
 
-        future_id_ptr.* = future_id;
-
         rearmEvent(task);
 
-        syscall.success(frame, .{});
+        syscall.success(frame, .{
+            .success2 = @bitCast(future_id),
+        });
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
@@ -92,12 +87,7 @@ fn timer_sequential(frame: *kernel.arch.GeneralFrame) !void {
     const sched_local = scheduler.Local.get();
 
     if (sched_local.current_task) |task| {
-        const future_id_ptr_raw = frame.getArg(1);
-        if (!syscall.pin(task, future_id_ptr_raw, Future.Id, 1, true)) return try syscall.fail(frame, .invalid_pointer);
-        defer syscall.unpin(task, future_id_ptr_raw);
-        const future_id_ptr: *Future.Id = @ptrFromInt(future_id_ptr_raw);
-
-        const virtual_tick = frame.getArg(2);
+        const virtual_tick = frame.getArg(1);
         if (virtual_tick == 0) return try syscall.fail(frame, .invalid_argument);
 
         const physical_tick = @max(virtual_tick, task.priority.minResolution());
@@ -120,11 +110,11 @@ fn timer_sequential(frame: *kernel.arch.GeneralFrame) !void {
             .tick_count = 0,
         });
 
-        future_id_ptr.* = future_id;
-
         rearmEvent(task);
 
-        syscall.success(frame, .{});
+        syscall.success(frame, .{
+            .success2 = @bitCast(future_id),
+        });
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }

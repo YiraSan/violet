@@ -40,17 +40,10 @@ fn mem_map(frame: *kernel.arch.GeneralFrame) !void {
     const sched_local = scheduler.Local.get();
 
     if (sched_local.current_task) |task| {
-        const vs = task.process.virtualSpace();
-
-        const address_addr = frame.getArg(1);
-        if (!syscall.pin(task, address_addr, u64, 1, true)) return try syscall.fail(frame, .invalid_pointer);
-        defer syscall.unpin(task, address_addr);
-        const address_ptr: *u64 = @ptrFromInt(address_addr);
-
-        const count = frame.getArg(2); // TODO maybe add a limit or something.
+        const count = frame.getArg(1); // TODO maybe add a limit or something.
         const size = count * basalt.heap.PAGE_SIZE;
 
-        const alignment = frame.getArg(3);
+        const alignment = frame.getArg(2);
         if (!std.mem.isValidAlign(alignment)) return try syscall.fail(frame, .invalid_argument);
 
         var errored = false;
@@ -60,18 +53,21 @@ fn mem_map(frame: *kernel.arch.GeneralFrame) !void {
             obj.release();
         };
 
-        address_ptr.* = vs.map(
+        const addr = task.process.virtualSpace().map(
             object,
             size,
             alignment,
             0,
             .{ .writable = true },
+            false,
         ) catch {
             errored = true;
             return try syscall.fail(frame, .internal_failure);
         };
 
-        return syscall.success(frame, .{});
+        return syscall.success(frame, .{
+            .success2 = addr,
+        });
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
