@@ -150,7 +150,7 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
     if (local.current_task) |task| {
         const len_raw = frame.getArg(4);
         if (len_raw == 0) return syscall.success(frame, .{ .success0 = std.math.maxInt(u16) });
-        if (len_raw > 128) return try syscall.fail(frame, .invalid_argument);
+        if (len_raw > Task.MAX_FUTURES) return try syscall.fail(frame, .invalid_argument);
         task.futures_userland_len = len_raw;
 
         // TODO investigate on reducing pins without sacrifying memory on alignment padding.
@@ -316,7 +316,7 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
 
         if (task.futures_pending > 0) {
             if (suspend_behavior == .wait) {
-                suspendForWait();
+                suspendFor(.future_waiting);
             } else {
                 return try syscall.fail(frame, .would_suspend);
             }
@@ -329,12 +329,12 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
     }
 }
 
-fn suspendForWait() void {
+fn suspendFor(state: Task.State) void {
     const local = Local.get();
-    if (local.current_task == null) @panic("corrupted suspendForWait call");
+    if (local.current_task == null) @panic("corrupted suspend call");
     var suspended_task = local.current_task;
 
-    if (suspended_task.?.state.cmpxchgStrong(.ready, .future_waiting, .acq_rel, .monotonic) != null) {
+    if (suspended_task.?.state.cmpxchgStrong(.ready, state, .acq_rel, .monotonic) == .dying) {
         suspended_task.?.release();
         suspended_task = null;
     }
@@ -413,13 +413,16 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
         };
 
         const saved_flags = prism.lock.lockExclusive();
-        defer prism.lock.unlockExclusive(saved_flags);
 
         if (prism.queue_count == 0) {
             if (suspend_behavior == .wait) {
-                std.log.warn("prism_consume: suspending when queue is empty ! TODO", .{});
-                return try syscall.fail(frame, .internal_failure);
+                prism.consumer = task;
+                task.waited_prism = prism.id;
+
+                prism.lock.unlockExclusive(saved_flags);
+                suspendFor(.prism_waiting);
             } else {
+                prism.lock.unlockExclusive(saved_flags);
                 return try syscall.fail(frame, .would_suspend);
             }
         } else {
@@ -433,6 +436,8 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
             prism.queue_cursor = 0;
             prism.queue_count = 0;
             prism.queue_is_second = !prism.queue_is_second;
+
+            prism.lock.unlockExclusive(saved_flags);
         }
     } else {
         return try syscall.fail(frame, .unknown_syscall);
@@ -450,7 +455,26 @@ fn prism_bind(frame: *kernel.arch.GeneralFrame) !void {
 
         if (prism.owner_id != task.process.id) return try syscall.fail(frame, .invalid_prism);
 
+        const saved_flags = prism.lock.lockExclusive();
+        defer prism.lock.unlockExclusive(saved_flags);
+
         prism.binded_task_id.store(task.id, .release);
+
+        if (prism.consumer) |consumer| {
+            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_invalided, .acq_rel, .monotonic) == null) {
+                prism.consumer = null;
+
+                var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
+
+                const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
+                defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
+
+                cpu_sched.ready_queue.add(.{
+                    .task = consumer,
+                    .priority = kernel.drivers.Timer.getUptime() + consumer.penalty(),
+                }) catch @panic("ready-queue oom in facet.invoke");
+            }
+        }
 
         return syscall.success(frame, .{});
     } else {
@@ -494,7 +518,8 @@ fn facet_drop(frame: *kernel.arch.GeneralFrame) !void {
 
         syscall.success(frame, .{});
 
-        if (facet.drop() and task.process.id == facet.caller_id and prism.options.notify_on_drop) {
+        if (facet.drop() and task.process.id == facet.caller_id and task.id != prism.binded_task_id.load(.acquire) // without this check, this could cause a deadlock !
+        and prism.options.notify_on_drop) {
             std.log.warn("notify drop! TODO", .{});
         }
     } else {
@@ -608,19 +633,21 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
         });
 
         if (prism.consumer) |consumer| {
-            prism.consumer = null;
+            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_queued, .acq_rel, .monotonic) == null) {
+                prism.consumer = null;
 
-            consumer.updateAffinity();
+                consumer.updateAffinity();
 
-            var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
+                var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
 
-            const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
-            defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
+                const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
+                defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
 
-            cpu_sched.ready_queue.add(.{
-                .task = consumer,
-                .priority = kernel.drivers.Timer.getUptime() + @min(consumer.penalty(), task.penalty()),
-            }) catch @panic("ready-queue oom in facet.invoke");
+                cpu_sched.ready_queue.add(.{
+                    .task = consumer,
+                    .priority = kernel.drivers.Timer.getUptime() + @min(consumer.penalty(), task.penalty()),
+                }) catch @panic("ready-queue oom in facet.invoke");
+            }
         }
     } else {
         return try syscall.fail(frame, .unknown_syscall);
@@ -910,37 +937,70 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         }
     }
 
-    const real_value = task.state.cmpxchgStrong(.future_waiting_queued, .ready, .acq_rel, .monotonic);
+    const value = task.state.load(.acquire);
+    const frame = if (task.is_extended) &task.stack_pointer.extended.general_frame else task.stack_pointer.general;
 
-    if (real_value == null) {
-        const saved_flags = task.futures_lock.lockExclusive();
-        defer task.futures_lock.unlockExclusive(saved_flags);
+    switch (value) {
+        .ready => {},
+        .future_waiting_queued => {
+            const saved_flags = task.futures_lock.lockExclusive();
+            defer task.futures_lock.unlockExclusive(saved_flags);
 
-        task.futures_generation +%= 1;
+            task.futures_generation +%= 1;
 
-        const payloads = @as([*]u64, @ptrFromInt(task.futures_userland_payloads_ptr))[0..task.futures_userland_len];
-        defer syscall.unpin(task, task.futures_userland_payloads_ptr);
+            const payloads = @as([*]u64, @ptrFromInt(task.futures_userland_payloads_ptr))[0..task.futures_userland_len];
+            defer syscall.unpin(task, task.futures_userland_payloads_ptr);
 
-        const statuses = @as([*]basalt.sync.Future.Status, @ptrFromInt(task.futures_userland_statuses_ptr))[0..task.futures_userland_len];
-        defer syscall.unpin(task, task.futures_userland_statuses_ptr);
+            const statuses = @as([*]basalt.sync.Future.Status, @ptrFromInt(task.futures_userland_statuses_ptr))[0..task.futures_userland_len];
+            defer syscall.unpin(task, task.futures_userland_statuses_ptr);
 
-        @memcpy(payloads[0..task.futures_userland_len], task.futures_payloads[0..task.futures_userland_len]);
-        @memcpy(statuses[0..task.futures_userland_len], task.futures_statuses[0..task.futures_userland_len]);
+            @memcpy(payloads[0..task.futures_userland_len], task.futures_payloads[0..task.futures_userland_len]);
+            @memcpy(statuses[0..task.futures_userland_len], task.futures_statuses[0..task.futures_userland_len]);
 
-        const frame = if (task.is_extended) &task.stack_pointer.extended.general_frame else task.stack_pointer.general;
-
-        if (task.futures_resolved >= task.futures_waitmode.resolve_threshold) {
-            syscall.success(frame, .{ .success0 = std.math.maxInt(u16) });
-        } else if (task.futures_waitmode.resolve_threshold > (task.futures_resolved + task.futures_pending)) {
-            syscall.fail(frame, .insolvent) catch {};
-        } else if (task.futures_waitmode.fail_fast) {
-            if (task.futures_failfast_index) |fidx| {
-                syscall.success(frame, .{ .success0 = @intCast(fidx) });
-            } else {
-                log.err("future spurious wakeup", .{});
+            if (task.futures_resolved >= task.futures_waitmode.resolve_threshold) {
+                syscall.success(frame, .{ .success0 = std.math.maxInt(u16) });
+            } else if (task.futures_waitmode.resolve_threshold > (task.futures_resolved + task.futures_pending)) {
+                syscall.fail(frame, .insolvent) catch {};
+            } else if (task.futures_waitmode.fail_fast) {
+                if (task.futures_failfast_index) |fidx| {
+                    syscall.success(frame, .{ .success0 = @intCast(fidx) });
+                } else {
+                    log.err("future spurious wakeup", .{});
+                }
             }
-        }
-    } else if (real_value == .dying) {
+        },
+        .prism_waiting_queued => {
+            if (task.waited_prism) |waited_prism| {
+                if (Prism.acquire(waited_prism)) |prism| {
+                    defer prism.release();
+
+                    const saved_flags = prism.lock.lockExclusive();
+                    defer prism.lock.unlockExclusive(saved_flags);
+
+                    const current_queue_ptr = if (prism.queue_is_second) prism.queue_user2 else prism.queue_user1;
+
+                    syscall.success(frame, .{
+                        .success1 = @intCast(prism.queue_count),
+                        .success2 = current_queue_ptr,
+                    });
+
+                    prism.queue_cursor = 0;
+                    prism.queue_count = 0;
+                    prism.queue_is_second = !prism.queue_is_second;
+                } else {
+                    syscall.fail(frame, .invalid_prism) catch {};
+                }
+            } else {
+                syscall.fail(frame, .invalid_prism) catch {};
+            }
+        },
+        .prism_waiting_invalided => {
+            syscall.fail(frame, .invalid_prism) catch {};
+        },
+        else => @panic("corrupted task state at reloading"),
+    }
+
+    if (task.state.cmpxchgStrong(value, .ready, .acq_rel, .monotonic) == .dying) {
         return task_terminate(undefined) catch {};
     }
 

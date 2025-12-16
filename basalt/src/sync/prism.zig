@@ -133,6 +133,9 @@ pub const Prism = struct {
         /// Notify the prism consumer that a facet has been dropped.
         ///
         /// The message can be identified in the queue by a Future.null.
+        ///
+        /// If the binded task drop the facet, the notification won't be produced.
+        /// This is completely useless, as the task in charge of the prism has dropped the facet, so the destruction is probably already done.
         notify_on_drop: bool = true,
     };
 };
