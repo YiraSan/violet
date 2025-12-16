@@ -17,6 +17,7 @@
 const std = @import("std");
 const ark = @import("ark");
 const basalt = @import("basalt");
+const build_options = @import("build_options");
 
 // --- imports --- //
 
@@ -29,6 +30,7 @@ const syscall = kernel.syscall;
 const heap = mem.heap;
 const vmm = mem.vmm;
 
+const Prism = scheduler.Prism;
 const Process = scheduler.Process;
 
 // --- scheduler/task.zig --- //
@@ -39,6 +41,11 @@ pub const Id = TaskMap.Key;
 
 pub const STACK_PAGE_COUNT = 16; // 64 KiB
 pub const STACK_SIZE = STACK_PAGE_COUNT * mem.PageLevel.l4K.size();
+
+pub const MAX_FUTURES = build_options.max_futures orelse 32;
+comptime {
+    if (MAX_FUTURES > 128) @compileError("max_futures cannot be greater than 128.");
+}
 
 var tasks_map: TaskMap = .init();
 var tasks_map_lock: mem.RwLock = .{};
@@ -73,26 +80,28 @@ stack_pointer: extern union {
     extended: *kernel.arch.ExtendedFrame,
 },
 
-futures_lock: mem.RwLock,
-futures_generation: u64,
-futures_waitmode: basalt.sync.Future.WaitMode,
-futures_payloads: [128]u64,
-futures_statuses: [128]basalt.sync.Future.Status,
-futures_pending: u8,
-futures_resolved: u8,
-futures_canceled: u8,
-
-futures_userland_len: u64,
-futures_userland_payloads_ptr: u64,
-futures_userland_statuses_ptr: u64,
-
-futures_failfast_index: ?u8,
-
 kernel_locals_kernel: *basalt.syscall.KernelLocals,
 kernel_locals_userland: u64,
 
 next_backpressure: ?*Task,
 prev_backpressure: ?*Task,
+
+backpressure_invocation: basalt.sync.Prism.Invocation,
+
+waited_prism: ?Prism.Id,
+
+futures_lock: mem.RwLock,
+futures_generation: u64,
+futures_waitmode: basalt.sync.Future.WaitMode,
+futures_payloads: [MAX_FUTURES]u64,
+futures_statuses: [MAX_FUTURES]basalt.sync.Future.Status,
+futures_pending: u8,
+futures_resolved: u8,
+futures_canceled: u8,
+futures_userland_len: u64,
+futures_userland_payloads_ptr: u64,
+futures_userland_statuses_ptr: u64,
+futures_failfast_index: ?u8,
 
 pub fn create(process_id: Process.Id, options: Options) !Id {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
@@ -163,20 +172,6 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
         kernel_stack_pointer.general_frame.setArg(1, @intFromPtr(&syscall.kernel_indirection_table));
     }
 
-    task.futures_lock = .{};
-    task.futures_generation = 0;
-    task.futures_waitmode = undefined;
-    task.futures_payloads = undefined;
-    task.futures_statuses = undefined;
-    task.futures_pending = 0;
-    task.futures_resolved = 0;
-    task.futures_canceled = 0;
-
-    task.futures_userland_payloads_ptr = 0;
-    task.futures_userland_statuses_ptr = 0;
-
-    task.futures_failfast_index = null;
-
     const locals_object = try vmm.Object.create(@sizeOf(basalt.syscall.KernelLocals), .{});
 
     task.kernel_locals_userland = try vs.map(
@@ -203,6 +198,22 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     task.next_backpressure = null;
     task.prev_backpressure = null;
+
+    task.waited_prism = null;
+
+    task.futures_lock = .{};
+    task.futures_generation = 0;
+    task.futures_waitmode = undefined;
+    task.futures_payloads = undefined;
+    task.futures_statuses = undefined;
+    task.futures_pending = 0;
+    task.futures_resolved = 0;
+    task.futures_canceled = 0;
+
+    task.futures_userland_payloads_ptr = 0;
+    task.futures_userland_statuses_ptr = 0;
+
+    task.futures_failfast_index = null;
 
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
@@ -315,8 +326,11 @@ pub const State = enum(u8) {
     dying,
     future_waiting,
     future_waiting_queued,
+
     prism_waiting,
+    prism_waiting_invalided,
     prism_waiting_queued,
+
     prism_backpressure,
 };
 

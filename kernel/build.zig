@@ -18,6 +18,7 @@ const basalt = @import("basalt");
 pub fn build(b: *std.Build) !void {
     const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
     const use_uefi = b.option(bool, "use_uefi", "Kernel entry point will be configured for UEFI.") orelse true;
+    const max_futures = b.option(usize, "max_futures", "Configure how much future a task can await at a time.");
     const optimize = b.standardOptimizeOption(.{});
 
     var features_sub = std.Target.Cpu.Feature.Set.empty;
@@ -50,6 +51,7 @@ pub fn build(b: *std.Build) !void {
     build_options.addOption(basalt.Platform, "platform", platform);
     build_options.addOption(bool, "use_uefi", use_uefi);
     build_options.addOption([]const u8, "version", try getVersion(b));
+    build_options.addOption(?usize, "max_futures", max_futures);
     kernel_mod.addImport("build_options", build_options.createModule());
 
     const ark_dep = b.dependency("ark", .{

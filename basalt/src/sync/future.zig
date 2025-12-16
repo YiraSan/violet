@@ -26,9 +26,9 @@ const syscall = basalt.syscall;
 // --- sync/future.zig --- //
 
 pub const WaitList = struct {
-    futures: [128]Future = undefined,
-    payloads: [128]u64 = undefined,
-    statuses: [128]Future.Status = .{.unset} ** 128,
+    futures: [32]Future = undefined,
+    payloads: [32]u64 = undefined,
+    statuses: [32]Future.Status = .{.unset} ** 32,
 
     pub const init = WaitList{};
 
@@ -45,13 +45,13 @@ pub const WaitList = struct {
     }
 
     pub fn reset(self: *WaitList, index: usize) void {
-        if (index < 128) {
+        if (index < 32) {
             self.statuses[index] = .pending;
         }
     }
 
     pub fn remove(self: *WaitList, index: usize) void {
-        if (index < 128) {
+        if (index < 32) {
             self.statuses[index] = .unset;
         }
     }
