@@ -34,7 +34,7 @@ const gic = @import("gic.zig");
 const MAX_IRQS = 1020;
 
 const GICD_SIZE = 0x10000;
-const GICC_SIZE = 0x1000;
+const GICC_SIZE = 0x2000;
 
 var gicd_base: u64 = undefined;
 var gicc_base: [128]u64 = undefined;
@@ -77,12 +77,6 @@ pub fn init() !void {
 
     disableAllExceptSGI();
 
-    // // Route SPIs (>=32) to CPU0 (not required for PPIs)
-    // i = 32;
-    // while (i < 64) : (i += 4) {
-    //     mmio_write(u32, gicd_base + 0x800 + i, 0x01010101); // GICD_ITARGETSRn
-    // }
-
     enableDistributor();
 }
 
@@ -94,12 +88,9 @@ pub fn enableDistributor() void {
     const ctlr: *volatile u32 = @ptrFromInt(gicd_base + GICD_CTLR);
 
     ctlr.* = 1;
-
     asm volatile ("dsb sy" ::: "memory");
 
-    // Wait until the distributor is enabled
     while ((ctlr.* & 0x1) == 0) {}
-
     asm volatile ("dsb sy" ::: "memory");
 }
 
@@ -141,7 +132,6 @@ pub fn disableIRQ(irq: u32) void {
     asm volatile ("dsb sy" ::: "memory");
 }
 
-/// Because cpu wakeups probably uses SGIs.
 fn disableAllExceptSGI() void {
     var irq: usize = 16;
     while (irq < MAX_IRQS) : (irq += 32) {
@@ -249,14 +239,20 @@ pub fn initCpu() !void {
 
     const gicc_base_addr = gicc_base[interface_number];
 
-    // Set minimum interrupt priority (lower value = higher priority)
     @as(*volatile u32, @ptrFromInt(gicc_base_addr + GICC_PMR)).* = 0xf0;
-
     asm volatile ("dsb sy" ::: "memory");
 
-    // Enable Group 0 and Group 1 interrupts
-    @as(*volatile u32, @ptrFromInt(gicc_base_addr + GICC_CTLR)).* = 1;
+    const igroupr0: *volatile u32 = @ptrFromInt(gicd_base + GICD_IGROUPRn);
+    igroupr0.* |= 0x0000FFFF;
 
+    const isenabler0: *volatile u32 = @ptrFromInt(gicd_base + GICD_ISENABLERn);
+    isenabler0.* |= 0x0000FFFF;
+
+    for (0..16) |i| {
+        setPriority(@intCast(i), 0x0);
+    }
+
+    @as(*volatile u32, @ptrFromInt(gicc_base_addr + GICC_CTLR)).* = 0x1;
     asm volatile ("dsb sy" ::: "memory");
 }
 
@@ -268,4 +264,30 @@ pub fn acknowledge() u32 {
 pub fn endOfInterrupt(irq_id: u32) void {
     const interface_number = getInterfaceNumber();
     @as(*volatile u32, @ptrFromInt(gicc_base[interface_number] + GICC_EOIR)).* = irq_id;
+}
+
+pub fn setPriority(irq: u32, priority: u8) void {
+    const offset = (irq / 4) * 4;
+    const shift = (irq % 4) * 8;
+    const ipriorityr: *volatile u32 = @ptrFromInt(gicd_base + GICD_IPRIORITYRn + offset);
+
+    var val = ipriorityr.*;
+    val &= ~(@as(u32, 0xFF) << @intCast(shift));
+    val |= (@as(u32, priority) << @intCast(shift));
+    ipriorityr.* = val;
+}
+
+const GICD_SGIR = 0xF00;
+
+pub fn sendIPI(target_cpu_id: u32, vector: u32) void {
+    if (vector > 15) @panic("SGI vector > 15");
+
+    const nsatt: u32 = 1 << 15;
+
+    const target_list = @as(u32, 1) << @intCast(target_cpu_id);
+    const val: u32 = (target_list << 16) | nsatt | vector;
+
+    const sgir: *volatile u32 = @ptrFromInt(gicd_base + GICD_SGIR);
+    sgir.* = val;
+    asm volatile ("dsb sy" ::: "memory");
 }

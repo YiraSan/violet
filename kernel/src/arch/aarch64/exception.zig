@@ -247,7 +247,7 @@ fn sync_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.S
 const gic = @import("gic.zig");
 
 pub const IrqCallback = *const fn () callconv(basalt.task.call_conv) void;
-pub var irq_callbacks: [1024]?IrqCallback linksection(".bss") = undefined;
+pub var irq_callbacks: [1022]?IrqCallback = .{null} ** 1022;
 
 fn irq_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SPSR_EL1) callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     arch.maskInterrupts();
@@ -268,7 +268,7 @@ fn irq_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SP
         log.warn("Unhandled IRQ ID: {}", .{irq_id});
     }
 
-    gic.endOfInterrupt(irq_id);
+    if (irq_id < 1023) gic.endOfInterrupt(irq_id);
 
     const elapsed = kernel.drivers.Timer.getUptime() - begin_uptime;
 

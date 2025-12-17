@@ -29,6 +29,7 @@ const impl = switch (builtin.cpu.arch) {
     else => unreachable,
 };
 
+pub const sendIPI = impl.sendIPI;
 pub const extend_frame = impl.extend_frame;
 
 pub const GeneralFrame = impl.GeneralFrame;
@@ -82,6 +83,13 @@ pub const Cpu = struct {
     phys_local: kernel.mem.phys.Local,
     scheduler_local: kernel.scheduler.Local,
     timer_local: kernel.drivers.Timer.Local,
+
+    pub fn premptCpu(self: *@This(), force: bool) void {
+        if (self.scheduler_local.is_idling.load(.acquire) or force) {
+            // IPI 1 is timerCallback (which is scheduler preemption)
+            sendIPI(@intCast(self.cpuid), 1);
+        }
+    }
 
     pub fn id() u8 {
         switch (builtin.cpu.arch) {

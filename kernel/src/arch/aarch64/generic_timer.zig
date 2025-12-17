@@ -43,13 +43,11 @@ pub fn init() !void {
                     gsiv = gtdt.el1_virtual_gsiv;
                     is_virtual = true;
                     Timer.selected_timer = .generic_timer;
-                    gic.configure(gtdt.el1_virtual_gsiv, .level, .active_low);
                 } else if (gtdt.el1_non_secure_gsiv != 0) {
                     exception.irq_callbacks[gtdt.el1_non_secure_gsiv] = &callback;
                     gsiv = gtdt.el1_non_secure_gsiv;
                     is_virtual = false;
                     Timer.selected_timer = .generic_timer;
-                    gic.configure(gtdt.el1_non_secure_gsiv, .level, .active_low);
                 } else {
                     @panic("generic_timer isn't available.");
                 }
@@ -62,6 +60,8 @@ pub fn init() !void {
 }
 
 pub fn enableCpu() !void {
+    gic.configure(gsiv, .level, .active_low);
+    gic.setPriority(gsiv, 0x80);
     gic.enableIRQ(gsiv);
 }
 

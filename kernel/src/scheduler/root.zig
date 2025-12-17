@@ -74,6 +74,8 @@ pub fn initCpu() !void {
         .entry_point = @intFromPtr(&idle_task),
     });
 
+    local.is_idling = .init(false);
+
     local.idle_task = Task.acquire(idle_task_id) orelse unreachable;
     local.idle_task.quantum = @enumFromInt(std.time.ns_per_s);
 
@@ -464,7 +466,8 @@ fn prism_bind(frame: *kernel.arch.GeneralFrame) !void {
             if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_invalided, .acq_rel, .monotonic) == null) {
                 prism.consumer = null;
 
-                var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
+                var cpu_local = kernel.arch.Cpu.getCpu(consumer.host_id).?;
+                var cpu_sched = &cpu_local.scheduler_local;
 
                 const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
                 defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
@@ -473,6 +476,10 @@ fn prism_bind(frame: *kernel.arch.GeneralFrame) !void {
                     .task = consumer,
                     .priority = kernel.drivers.Timer.getUptime() + consumer.penalty(),
                 }) catch @panic("ready-queue oom in facet.invoke");
+
+                if (consumer.host_id != kernel.arch.Cpu.id()) {
+                    cpu_local.premptCpu(consumer.priority == .realtime);
+                }
             }
         }
 
@@ -638,7 +645,8 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
 
                 consumer.updateAffinity();
 
-                var cpu_sched = &kernel.arch.Cpu.getCpu(consumer.host_id).?.scheduler_local;
+                var cpu_local = kernel.arch.Cpu.getCpu(consumer.host_id).?;
+                var cpu_sched = &cpu_local.scheduler_local;
 
                 const saved_flags1 = cpu_sched.ready_queue_lock.lockExclusive();
                 defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags1);
@@ -647,6 +655,10 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
                     .task = consumer,
                     .priority = kernel.drivers.Timer.getUptime() + @min(consumer.penalty(), task.penalty()),
                 }) catch @panic("ready-queue oom in facet.invoke");
+
+                if (consumer.host_id != kernel.arch.Cpu.id()) {
+                    cpu_local.premptCpu(consumer.priority == .realtime);
+                }
             }
         }
     } else {
@@ -773,6 +785,8 @@ pub const ScheduledItem = struct {
 };
 
 pub const Local = struct {
+    is_idling: std.atomic.Value(bool),
+
     idle_task: *Task,
 
     ready_queue: heap.PriorityQueue(ScheduledItem, ScheduledItem.compare),
@@ -1004,9 +1018,6 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         return task_terminate(undefined) catch {};
     }
 
-    kernel.drivers.Timer.arm(task.quantum.nanoseconds());
-    kernel.drivers.Timer.rearmEvent(task);
-
     const should_log = if (last_task) |lt| lt.id != task.id else true;
     if (should_log) {
         if (task.process.id == idle_process_id) {
@@ -1015,6 +1026,15 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
             log.debug("cpu{} switched to task {}:{}", .{ kernel.arch.Cpu.id(), task.process.id.index, task.id.index });
         }
     }
+
+    if (task.process.id == idle_process_id) {
+        local.is_idling.store(true, .release);
+    } else {
+        local.is_idling.store(false, .release);
+    }
+
+    kernel.drivers.Timer.arm(task.quantum.nanoseconds());
+    kernel.drivers.Timer.rearmEvent(task);
 }
 
 inline fn getElapsed(task: *Task) usize {

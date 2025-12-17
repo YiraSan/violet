@@ -73,11 +73,23 @@ pub fn endOfInterrupt(irq: u32) void {
     }
 }
 
+pub fn sendIPI(cpu_id: u32, vector: u32) void {
+    switch (gic_version) {
+        .v2 => gic_v2.sendIPI(cpu_id, vector),
+    }
+}
+
 pub const TriggerMode = enum { level, edge };
 pub const Polarity = enum { active_high, active_low };
 
 pub fn configure(irq: u32, trigger_mode: TriggerMode, polarity: Polarity) void {
     switch (gic_version) {
         .v2 => gic_v2.configure(irq, trigger_mode, polarity),
+    }
+}
+
+pub fn setPriority(irq: u32, priority: u8) void {
+    switch (gic_version) {
+        .v2 => gic_v2.setPriority(irq, priority),
     }
 }

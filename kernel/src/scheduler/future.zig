@@ -225,7 +225,8 @@ pub fn resolve(self: *Future, payload: u64) bool {
                 if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
                     waiter.updateAffinity();
 
-                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).?.scheduler_local;
+                    var cpu_local = kernel.arch.Cpu.getCpu(waiter.host_id).?;
+                    var cpu_sched = &cpu_local.scheduler_local;
 
                     const saved_flags = cpu_sched.ready_queue_lock.lockExclusive();
                     defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags);
@@ -234,6 +235,10 @@ pub fn resolve(self: *Future, payload: u64) bool {
                         .task = waiter,
                         .priority = kernel.drivers.Timer.getUptime() + waiter.penalty(),
                     }) catch @panic("ready-queue oom in future.awake");
+
+                    if (waiter.host_id != kernel.arch.Cpu.id()) {
+                        cpu_local.premptCpu(waiter.priority == .realtime);
+                    }
                 };
             }
         }
@@ -282,7 +287,8 @@ pub fn cancel(self: *Future) bool {
                 }
 
                 if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
-                    var cpu_sched = &kernel.arch.Cpu.getCpu(waiter.host_id).?.scheduler_local;
+                    var cpu_local = kernel.arch.Cpu.getCpu(waiter.host_id).?;
+                    var cpu_sched = &cpu_local.scheduler_local;
 
                     const saved_flags = cpu_sched.ready_queue_lock.lockExclusive();
                     defer cpu_sched.ready_queue_lock.unlockExclusive(saved_flags);
@@ -291,6 +297,10 @@ pub fn cancel(self: *Future) bool {
                         .task = waiter,
                         .priority = kernel.drivers.Timer.getUptime() + waiter.penalty(),
                     }) catch @panic("ready-queue oom in future.awake");
+
+                    if (waiter.host_id != kernel.arch.Cpu.id()) {
+                        cpu_local.premptCpu(waiter.priority == .realtime);
+                    }
                 };
             }
         }

@@ -32,6 +32,7 @@ const gic = @import("gic.zig");
 const generic_timer = @import("generic_timer.zig");
 const psci = @import("psci.zig");
 
+pub const sendIPI = gic.sendIPI;
 pub const extend_frame = exception.extend_frame;
 
 comptime {
@@ -65,6 +66,8 @@ pub fn initCpus() !void {
                             cpu_ptr.cpuid = gicc.mpidr;
 
                             kernel.arch.cpu_count += 1;
+
+                            exception.irq_callbacks[1] = @ptrCast(&kernel.drivers.Timer.callback);
                         },
                         else => {},
                     }
