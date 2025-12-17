@@ -99,7 +99,7 @@ pub const WaitList = struct {
 pub const Future = packed struct(u64) {
     id: u64,
 
-    pub const @"null" = .{ .id = 1 };
+    pub const @"null" = Future{ .id = 1 };
 
     pub fn isNull(self: Future) bool {
         return self.id % 2 != 0;

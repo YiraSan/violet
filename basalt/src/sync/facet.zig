@@ -31,6 +31,12 @@ const Future = sync.Future;
 pub const Facet = packed struct(u64) {
     id: u64,
 
+    pub const @"null" = Facet{ .id = 1 };
+
+    pub fn isNull(self: Facet) bool {
+        return self.id % 2 != 0;
+    }
+
     pub fn create(prism: Prism, caller_id: u64) !Facet {
         const res = try syscall.syscall2(
             .facet_create,

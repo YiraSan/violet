@@ -170,12 +170,23 @@ fn task1_main() !void {
     var sequential_timer = try basalt.time.SequentialTimer.init(._60hz);
     defer sequential_timer.deinit();
 
-    for (0..10) |_| {
+    for (0..5) |_| {
         const delta = try sequential_timer.wait();
 
         task1_log.info("elapsed ticks since last: {}", .{delta});
 
         try basalt.task.sleep(._1s);
+    }
+
+    while (facet_shared.load(.acquire).isNull()) {
+        std.atomic.spinLoopHint();
+    }
+    var facet: basalt.sync.Facet = facet_shared.load(.acquire);
+
+    const future = try facet.invoke(.{ .pair64 = .{ .arg0 = 444, .arg1 = 25565 } }, .wait);
+
+    if (try future.wait(null, .wait)) |return_value| {
+        task1_log.info("successfuly returned with value {}", .{return_value});
     }
 }
 
@@ -189,6 +200,8 @@ fn task2_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTa
     basalt.task.terminate();
 }
 
+var facet_shared: std.atomic.Value(basalt.sync.Facet) = .init(.null);
+
 fn task2_main() !void {
     task2_log.info("hey there !", .{});
 
@@ -198,11 +211,10 @@ fn task2_main() !void {
     const facet = try basalt.sync.Facet.create(prism, basalt.process.id());
     defer facet.drop();
 
-    const future = try facet.invoke(.{ .pair64 = .{ .arg0 = 444, .arg1 = 25565 } }, .wait);
-    future.cancel() catch {};
+    facet_shared.store(facet, .release);
 
     while (try prism.consume(.wait)) |invocation| {
-        task2_log.info("{}", .{invocation});
+        try invocation.future.resolve(invocation.arg.pair64.arg0 + invocation.arg.pair64.arg1);
     }
 }
 
