@@ -74,6 +74,11 @@ pub fn stage1() !void {
             .entry_point = @intFromPtr(&task2_entry),
         });
         try scheduler.register(task2);
+
+        const task3 = try scheduler.Task.create(test_process_id, .{
+            .entry_point = @intFromPtr(&task3_entry),
+        });
+        try scheduler.register(task3);
     }
 }
 
@@ -177,18 +182,9 @@ fn task1_main() !void {
 
         try basalt.task.sleep(._1s);
     }
-
-    while (facet_shared.load(.acquire).isNull()) {
-        std.atomic.spinLoopHint();
-    }
-    var facet: basalt.sync.Facet = facet_shared.load(.acquire);
-
-    const future = try facet.invoke(.{ .pair64 = .{ .arg0 = 444, .arg1 = 25565 } }, .wait);
-
-    if (try future.wait(null, .wait)) |return_value| {
-        task1_log.info("successfuly returned with value {}", .{return_value});
-    }
 }
+
+const PING_PONG_ITERATIONS: u64 = 100_000;
 
 const task2_log = std.log.scoped(.task2);
 
@@ -200,7 +196,7 @@ fn task2_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTa
     basalt.task.terminate();
 }
 
-var facet_shared: std.atomic.Value(basalt.sync.Facet) = .init(.null);
+var task2_facet: std.atomic.Value(basalt.sync.Facet) = .init(.null);
 
 fn task2_main() !void {
     task2_log.info("hey there !", .{});
@@ -211,11 +207,50 @@ fn task2_main() !void {
     const facet = try basalt.sync.Facet.create(prism, basalt.process.id());
     defer facet.drop();
 
-    facet_shared.store(facet, .release);
+    task2_facet.store(facet, .release);
 
     while (try prism.consume(.wait)) |invocation| {
-        try invocation.future.resolve(invocation.arg.pair64.arg0 + invocation.arg.pair64.arg1);
+        const val = invocation.arg.pair64.arg0 + 1;
+        try invocation.future.resolve(val);
+        if (val >= PING_PONG_ITERATIONS) break;
     }
+}
+
+const task3_log = std.log.scoped(.task3);
+
+fn task3_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTable) callconv(basalt.task.call_conv) noreturn {
+    task3_main() catch |err| {
+        task3_log.err("terminated with: {}", .{err});
+    };
+
+    basalt.task.terminate();
+}
+
+fn task3_main() !void {
+    task3_log.info("here to benchmark for {} iterations !", .{PING_PONG_ITERATIONS});
+
+    while (task2_facet.load(.acquire).isNull()) {
+        std.atomic.spinLoopHint();
+    }
+    var out_facet: basalt.sync.Facet = task2_facet.load(.acquire);
+
+    const start_time = drivers.Timer.getUptime();
+
+    var counter: u64 = 0;
+    while (counter < PING_PONG_ITERATIONS) : (counter += 1) {
+        const future = try out_facet.invoke(.{ .pair64 = .{ .arg0 = counter, .arg1 = 0 } }, .wait);
+
+        const result = try future.wait(null, .wait) orelse return task3_log.info("benchmark failed", .{});
+
+        if (result != counter + 1) {
+            task3_log.err("missmatch! sent {} got {}", .{ counter, result });
+            break;
+        }
+    }
+
+    const end_time = drivers.Timer.getUptime();
+
+    task3_log.info("benchmark done in {} ns", .{end_time - start_time});
 }
 
 // --- zig std features --- //

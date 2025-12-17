@@ -919,10 +919,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
     if (local.current_task) |current_task| {
         if (last_task) |last| {
             if (current_task.id == last.id) {
-                if (current_task.process.id != idle_process_id) {
-                    kernel.drivers.Timer.arm(getRemainingQuantum(current_task));
-                }
-
+                kernel.drivers.Timer.arm(getRemainingQuantum(current_task));
                 kernel.drivers.Timer.rearmEvent(current_task);
                 return;
             } else {
@@ -1036,10 +1033,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         local.is_idling.store(false, .release);
     }
 
-    if (task.process.id != idle_process_id) {
-        kernel.drivers.Timer.arm(getRemainingQuantum(task));
-    }
-
+    kernel.drivers.Timer.arm(getRemainingQuantum(task));
     kernel.drivers.Timer.rearmEvent(task);
 }
 
