@@ -245,15 +245,15 @@ pub fn kill(self: *Task) void {
 }
 
 fn destroy(self: *Task) void {
+    const process = self.process;
+    defer process.release();
+
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
     if (self.ref_count.load(.acquire) > 0) {
         return;
     }
-
-    const process = self.process;
-    defer process.release();
 
     defer tasks_map.remove(self.id);
 
