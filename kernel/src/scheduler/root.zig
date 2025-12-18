@@ -877,6 +877,24 @@ inline fn chooseTask() void {
                 local.current_task = item.task;
                 break;
             }
+
+            if (local.ready_queue.len > 2) {
+                const current_cpuid = kernel.arch.Cpu.id();
+                const max_slots = kernel.arch.cpus.len;
+
+                var i: usize = 0;
+                while (i < max_slots) : (i += 1) {
+                    const cpu_index = i % max_slots;
+                    if (cpu_index == current_cpuid) continue;
+
+                    if (kernel.arch.cpus[cpu_index]) |cpu| {
+                        if (cpu.scheduler_local.is_idling.load(.acquire)) {
+                            cpu.premptCpu(true);
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         if (local.current_task == null) {
@@ -919,7 +937,10 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
     if (local.current_task) |current_task| {
         if (last_task) |last| {
             if (current_task.id == last.id) {
-                kernel.drivers.Timer.arm(getRemainingQuantum(current_task));
+                if (current_task.process.id != idle_process_id) {
+                    kernel.drivers.Timer.arm(getRemainingQuantum(current_task));
+                }
+
                 kernel.drivers.Timer.rearmEvent(current_task);
                 return;
             } else {
@@ -1033,7 +1054,10 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         local.is_idling.store(false, .release);
     }
 
-    kernel.drivers.Timer.arm(getRemainingQuantum(task));
+    if (task.process.id != idle_process_id) {
+        kernel.drivers.Timer.arm(getRemainingQuantum(task));
+    }
+
     kernel.drivers.Timer.rearmEvent(task);
 }
 
