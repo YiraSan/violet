@@ -509,6 +509,19 @@ pub const armv8 = struct {
             );
         }
 
+        pub inline fn loadCntpCvalEl0() u64 {
+            return asm volatile ("mrs %[output], cntp_cval_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn storeCntpCvalEl0(cntp_cval_el0: u64) void {
+            asm volatile ("msr cntp_cval_el0, %[input]"
+                :
+                : [input] "r" (cntp_cval_el0),
+            );
+        }
+
         pub inline fn loadCntvctEl0() u64 {
             return asm volatile ("mrs %[output], cntvct_el0"
                 : [output] "=r" (-> u64),
@@ -525,6 +538,19 @@ pub const armv8 = struct {
             asm volatile ("msr cntv_tval_el0, %[input]"
                 :
                 : [input] "r" (cntv_tval_el0),
+            );
+        }
+
+        pub inline fn loadCntvCvalEl0() u64 {
+            return asm volatile ("mrs %[output], cntv_cval_el0"
+                : [output] "=r" (-> u64),
+            );
+        }
+
+        pub inline fn storeCntvCvalEl0(cntv_cval_el0: u64) void {
+            asm volatile ("msr cntv_cval_el0, %[input]"
+                :
+                : [input] "r" (cntv_cval_el0),
             );
         }
 

@@ -88,6 +88,22 @@ pub fn initCpu() !void {
 
 pub fn register(task_id: Task.Id) !void {
     try newbie_queue.append(task_id);
+
+    // const current_cpuid = kernel.arch.Cpu.id();
+    // const max_slots = kernel.arch.cpus.len;
+
+    // var i: usize = 0;
+    // while (i < max_slots) : (i += 1) {
+    //     const cpu_index = i % max_slots;
+    //     if (cpu_index == current_cpuid) continue;
+
+    //     if (kernel.arch.cpus[cpu_index]) |cpu| {
+    //         if (cpu.scheduler_local.is_idling.load(.acquire)) {
+    //             cpu.premptCpu(true);
+    //             break;
+    //         }
+    //     }
+    // }
 }
 
 fn future_create(frame: *kernel.arch.GeneralFrame) !void {
@@ -669,6 +685,8 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
 // --- scheduler entrypoints --- //
 
 fn timerCallback() void {
+    kernel.drivers.Timer.cancel();
+
     const local = Local.get();
 
     if (local.current_task) |task| {
@@ -841,7 +859,28 @@ var newbie_queue: NewbieQueue = .{};
 
 var idle_process_id: Process.Id = undefined;
 fn idle_task() callconv(basalt.task.call_conv) noreturn {
-    ark.cpu.halt();
+    while (true) {
+        kernel.arch.maskInterrupts();
+
+        const timer_local = kernel.drivers.Timer.Local.get();
+        var urgency = false;
+
+        if (timer_local.event_queue.peek()) |head| {
+            const now = kernel.drivers.Timer.getUptime();
+            if (head.deadline <= now or (head.deadline - now) < 15_000) {
+                urgency = true;
+            }
+        }
+
+        if (urgency) {
+            kernel.arch.unmaskInterrupts();
+            std.atomic.spinLoopHint();
+            continue;
+        }
+
+        asm volatile ("wfi");
+        kernel.arch.unmaskInterrupts();
+    }
 }
 
 inline fn chooseTask() void {
@@ -937,12 +976,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
     if (local.current_task) |current_task| {
         if (last_task) |last| {
             if (current_task.id == last.id) {
-                if (current_task.process.id != idle_process_id) {
-                    kernel.drivers.Timer.arm(getRemainingQuantum(current_task));
-                }
-
-                kernel.drivers.Timer.rearmEvent(current_task);
-                return;
+                return kernel.drivers.Timer.rearm(current_task, current_task.process.id == idle_process_id);
             } else {
                 last.extendFrame();
                 last.uptime_suspend = kernel.drivers.Timer.getUptime();
@@ -1054,11 +1088,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         local.is_idling.store(false, .release);
     }
 
-    if (task.process.id != idle_process_id) {
-        kernel.drivers.Timer.arm(getRemainingQuantum(task));
-    }
-
-    kernel.drivers.Timer.rearmEvent(task);
+    kernel.drivers.Timer.rearm(task, task.process.id == idle_process_id);
 }
 
 inline fn getElapsed(task: *Task) usize {

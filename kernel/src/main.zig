@@ -50,12 +50,15 @@ pub fn stage1() !void {
     try arch.init();
     try syscall.init();
     try scheduler.init();
+}
+
+pub fn stage2() !void {
     try mem.syscalls.init();
     try drivers.Timer.init();
     try drivers.Timer.initCpu();
 
     // scheduler tests
-    if (builtin.mode == .Debug or true) {
+    {
         const test_process_id = try scheduler.Process.create(.{
             .execution_level = .module,
         });
@@ -80,10 +83,6 @@ pub fn stage1() !void {
         });
         try scheduler.register(task3);
     }
-}
-
-pub fn stage2() !void {
-    try drivers.init();
 
     try arch.bootCpus();
 
@@ -184,7 +183,7 @@ fn task1_main() !void {
     }
 }
 
-const PING_PONG_ITERATIONS: u64 = 100_000;
+const PING_PONG_ITERATIONS: u64 = if (builtin.mode == .Debug) 10 else 100_000;
 
 const task2_log = std.log.scoped(.task2);
 
@@ -256,11 +255,10 @@ fn task3_main() !void {
 // --- zig std features --- //
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
-    std.log.err("panic(0x{?x}): {s}", .{ return_address, message });
-
-    // NOTE little panic handler
     const local_scheduler = scheduler.Local.get();
-    if (local_scheduler.current_task) |_| {
+    if (local_scheduler.current_task) |current_task| {
+        drivers.serial.print("KERNEL PANIC ({}:{}, 0x{?x}): {s}\n", .{ current_task.process.id.index, current_task.id.index, return_address, message });
+
         switch (builtin.cpu.arch) {
             .aarch64 => {
                 const spsel = asm volatile (
@@ -276,10 +274,14 @@ pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, return_address: ?
             },
             else => unreachable,
         }
+    } else {
+        drivers.serial.print("KERNEL PANIC (0x{?x}): {s}\n", .{ return_address, message });
     }
 
     ark.cpu.halt();
 }
+
+var logfn_lock: mem.RwLock = .{};
 
 pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) "" else ":" ++ @tagName(scope);
@@ -289,6 +291,12 @@ pub fn logFn(comptime level: std.log.Level, comptime scope: @Type(.enum_literal)
         .info => "\x1b[36minfo",
         .debug => "\x1b[90mdebug",
     } ++ ": \x1b[0m";
+
+    // TODO figure a way to make rwlock auto-unlock on same cpu
+
+    const saved_flags = logfn_lock.lockExclusive();
+    defer logfn_lock.unlockExclusive(saved_flags);
+
     drivers.serial.print(prefix ++ format ++ "\n", args);
 }
 

@@ -294,8 +294,8 @@ fn cpu_entry() callconv(.{ .aarch64_aapcs = .{} }) noreturn {
     kernel.scheduler.initCpu() catch unreachable;
     kernel.drivers.Timer.initCpu() catch unreachable;
 
-    kernel.drivers.Timer.arm(1 * std.time.ns_per_ms);
     unmaskInterrupts();
+    kernel.drivers.Timer.arm(1 * std.time.ns_per_ms);
     ark.cpu.halt();
 }
 

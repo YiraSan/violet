@@ -12,41 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// --- dependencies --- //
-
-const std = @import("std");
-const build_options = @import("build_options");
-
-// --- imports --- //
-
-const kernel = @import("root");
-
 pub const serial = @import("serial/root.zig");
 
 pub const acpi = @import("acpi.zig");
 pub const Timer = @import("timer.zig");
-
-// const pcie = @import("pcie/root.zig");
-// const virtio = @import("virtio/root.zig");
 
 comptime {
     _ = serial;
     _ = acpi;
 
     _ = Timer;
-
-    // _ = pcie;
-    // _ = virtio;
-}
-
-// --- drivers/root.zig --- //
-
-pub fn init() !void {
-    // try Timer.init();
-
-    // try pcie.init();
-
-    // if (build_options.platform == .aarch64_qemu or build_options.platform == .riscv64_qemu) {
-    //     try virtio.init();
-    // }
 }

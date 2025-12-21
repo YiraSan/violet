@@ -73,11 +73,11 @@ fn timer_single(frame: *kernel.arch.GeneralFrame) !void {
             .tick_count = 0,
         });
 
-        rearmEvent(task);
-
         syscall.success(frame, .{
             .success2 = @bitCast(future_id),
         });
+
+        rearm(task, false);
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
@@ -110,11 +110,11 @@ fn timer_sequential(frame: *kernel.arch.GeneralFrame) !void {
             .tick_count = 0,
         });
 
-        rearmEvent(task);
-
         syscall.success(frame, .{
             .success2 = @bitCast(future_id),
         });
+
+        rearm(task, false);
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
@@ -126,35 +126,48 @@ pub fn initCpu() !void {
     local.event_queue = .init();
 }
 
-pub fn rearmEvent(current_task: *Task) void {
+pub fn rearm(current_task: *Task, is_idling: bool) void {
     const local = Local.get();
+    const now = getUptime();
 
     if (local.event_queue.peek()) |event| {
-        const event_remaining, const overflowed = @subWithOverflow(event.deadline, getUptime());
-        // TODO slow-motion backpressure & quantum coallesing
-        if (overflowed == 1) {
-            arm(0);
-        } else if (event_remaining < scheduler.getRemainingQuantum(current_task)) {
-            arm(event_remaining);
+        var target = event.deadline;
+
+        if (!is_idling) {
+            const quantum_left = scheduler.getRemainingQuantum(current_task);
+            const quantum_deadline = now +| quantum_left;
+
+            if (quantum_deadline < target) {
+                target = quantum_deadline;
+            }
         }
+
+        return arm(target);
     }
+
+    if (!is_idling) {
+        const quantum_left = scheduler.getRemainingQuantum(current_task);
+        return arm(now +| quantum_left);
+    }
+
+    cancel();
 }
 
-pub fn arm(nanoseconds: u64) void {
+pub inline fn arm(deadline_ns: u64) void {
     switch (selected_timer) {
-        .generic_timer => generic_timer.arm(nanoseconds),
+        .generic_timer => generic_timer.arm(deadline_ns),
         else => unreachable,
     }
 }
 
-pub fn cancel() void {
+pub inline fn cancel() void {
     switch (selected_timer) {
         .generic_timer => generic_timer.disable(),
         else => unreachable,
     }
 }
 
-pub fn getUptime() u64 {
+pub inline fn getUptime() u64 {
     return switch (selected_timer) {
         .generic_timer => generic_timer.getUptime(),
         else => unreachable,

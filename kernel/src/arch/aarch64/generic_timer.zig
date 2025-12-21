@@ -69,8 +69,7 @@ pub fn disableCpu() !void {
     gic.disableIRQ(gsiv);
 }
 
-fn callback() callconv(basalt.task.call_conv) void {
-    disable();
+fn callback() void {
     if (Timer.callback) |timer_callback| {
         timer_callback();
     }
@@ -89,19 +88,15 @@ pub inline fn getUptime() u64 {
     return @intCast(ticks_u128 / frequency);
 }
 
-pub inline fn arm(nanoseconds: u64) void {
-    disable();
-
+pub inline fn arm(deadline_ns: u64) void {
     const frequency = ark.armv8.registers.loadCntfrqEl0();
 
-    const total_cycles: u128 = @as(u128, @intCast(nanoseconds)) * @as(u128, @intCast(frequency));
-
-    const interval: u128 = total_cycles / 1_000_000_000;
+    const target_ticks: u128 = (@as(u128, deadline_ns) * frequency) / 1_000_000_000;
 
     if (is_virtual) {
-        ark.armv8.registers.storeCntvTvalEl0(@intCast(interval));
+        ark.armv8.registers.storeCntvCvalEl0(@intCast(target_ticks));
     } else {
-        ark.armv8.registers.storeCntpTvalEl0(@intCast(interval));
+        ark.armv8.registers.storeCntpCvalEl0(@intCast(target_ticks));
     }
 
     enable();
@@ -113,6 +108,8 @@ pub inline fn enable() void {
     } else {
         ark.armv8.registers.storeCntpCtlEl0(0b0001);
     }
+
+    asm volatile ("isb" ::: "memory");
 }
 
 pub inline fn disable() void {
@@ -121,4 +118,6 @@ pub inline fn disable() void {
     } else {
         ark.armv8.registers.storeCntpCtlEl0(0b0000);
     }
+
+    asm volatile ("isb" ::: "memory");
 }
