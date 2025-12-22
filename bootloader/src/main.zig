@@ -30,6 +30,52 @@ pub const virt = @import("virt.zig");
 
 // --- main.zig --- //
 
+const BootConfig = extern struct {
+    memory_map_ptr: u64,
+    memory_map_size: u64,
+    memory_map_descriptor_size: u64,
+
+    configuration_tables_ptr: u64,
+    configuration_tables_len: u64,
+
+    genesis_file_ptr: u64,
+    genesis_file_size: u64,
+};
+
+fn readFile(boot_services: *uefi.tables.BootServices, root: *const uefi.protocol.File, file_name: [*:0]const u16, out: *[]align(8) u8) uefi.Status {
+    var file: *const uefi.protocol.File = undefined;
+    var status = root.open(&file, file_name, uefi.protocol.File.efi_file_mode_read, 0);
+    if (status != .success) {
+        return status;
+    }
+    defer _ = file.close();
+
+    var info_buf: [512]u8 align(8) = undefined;
+    var size: usize = info_buf.len;
+    status = file.getInfo(&uefi.FileInfo.guid, &size, &info_buf);
+    if (status != .success) {
+        return status;
+    }
+
+    const info: *uefi.FileInfo = @ptrCast(&info_buf);
+
+    var buffer: [*]align(8) u8 = undefined;
+    status = boot_services.allocatePool(uefi.tables.MemoryType.loader_data, info.file_size, &buffer);
+    if (status != .success) {
+        return status;
+    }
+
+    var buffer_size: usize = info.file_size;
+    status = file.read(&buffer_size, buffer);
+    if (status != .success) {
+        return status;
+    }
+
+    out.* = buffer[0..info.file_size];
+
+    return uefi.Status.success;
+}
+
 pub fn main() uefi.Status {
     if (uefi.system_table.con_out) |con_out| {
         _ = con_out.reset(true);
@@ -40,6 +86,35 @@ pub fn main() uefi.Status {
     const boot_services: *uefi.tables.BootServices = uefi.system_table.boot_services orelse {
         return uefi.Status.unsupported;
     };
+
+    switch (builtin.cpu.arch) {
+        .aarch64 => {
+            const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
+
+            if (pfr0.fp == .not_implemented) {
+                @panic("FloatingPoint is required but not implemented on this CPU.");
+            }
+
+            if (pfr0.adv_simd == .not_implemented) {
+                @panic("AdvSIMD is required but not implemented on this CPU.");
+            }
+
+            const mmfr1 = ark.armv8.registers.ID_AA64MMFR1_EL1.load();
+            if (mmfr1.vh == .supported) {
+                const currentEL = asm volatile ("mrs %[out], currentEL"
+                    : [out] "=r" (-> u64),
+                );
+
+                if (currentEL == 0b1000) {
+                    const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
+                    if (hcr_el2.e2h == .enabled) {
+                        @panic("VH extension is enabled but not supported on violetOS.");
+                    }
+                }
+            }
+        },
+        else => unreachable,
+    }
 
     virt.init(boot_services);
 
@@ -60,40 +135,25 @@ pub fn main() uefi.Status {
         return status;
     }
 
-    const kernel_file: []align(8) u8 = kfr: {
-        var kernel_elf: *const uefi.protocol.File = undefined;
-        status = root.open(&kernel_elf, std.unicode.utf8ToUtf16LeStringLiteral("kernel.elf"), uefi.protocol.File.efi_file_mode_read, 0);
-        if (status != .success) {
-            return status;
-        }
+    var kernel_file: []align(8) u8 = undefined;
+    status = readFile(boot_services, root, std.unicode.utf8ToUtf16LeStringLiteral("kernel.elf"), &kernel_file);
+    if (status != .success) {
+        return status;
+    }
 
-        var info_buf: [512]u8 align(8) = undefined;
-        var size: usize = info_buf.len;
-        status = kernel_elf.getInfo(&uefi.FileInfo.guid, &size, &info_buf);
-        if (status != .success) {
-            return status;
-        }
-
-        const info: *uefi.FileInfo = @ptrCast(&info_buf);
-
-        var buffer: [*]align(8) u8 = undefined;
-        status = boot_services.allocatePool(uefi.tables.MemoryType.loader_data, info.file_size, &buffer);
-        if (status != .success) {
-            return status;
-        }
-
-        var buffer_size: usize = info.file_size;
-        status = kernel_elf.read(&buffer_size, buffer);
-        if (status != .success) {
-            return status;
-        }
-
-        _ = kernel_elf.close();
-
-        break :kfr buffer[0..info.file_size];
-    };
+    var genesis_file: []align(8) u8 = undefined;
+    status = readFile(boot_services, root, std.unicode.utf8ToUtf16LeStringLiteral("genesis.elf"), &genesis_file);
+    if (status != .success) {
+        return status;
+    }
 
     _ = root.close();
+
+    var boot_config: *BootConfig = undefined;
+    status = boot_services.allocatePool(uefi.tables.MemoryType.loader_data, @sizeOf(BootConfig), @ptrCast(&boot_config));
+    if (status != .success) {
+        return status;
+    }
 
     const elf_header = std.elf.Header.parse(@ptrCast(kernel_file)) catch {
         return uefi.Status.compromised_data;
@@ -103,7 +163,7 @@ pub fn main() uefi.Status {
         return uefi.Status.compromised_data;
     }
 
-    if (elf_header.endian != .little) {
+    if (elf_header.endian != builtin.cpu.arch.endian()) {
         return uefi.Status.compromised_data;
     }
 
@@ -226,42 +286,21 @@ pub fn main() uefi.Status {
         }
     }
 
-    virt.last_high_addr = std.mem.alignForward(usize, virt.last_high_addr + 1, 0x1000);
-
-    switch (builtin.cpu.arch) {
-        .aarch64 => {
-            const pfr0 = ark.armv8.registers.ID_AA64PFR0_EL1.load();
-
-            if (pfr0.fp == .not_implemented) {
-                @panic("FloatingPoint is required but not implemented on this CPU.");
-            }
-
-            if (pfr0.adv_simd == .not_implemented) {
-                @panic("AdvSIMD is required but not implemented on this CPU.");
-            }
-
-            const mmfr1 = ark.armv8.registers.ID_AA64MMFR1_EL1.load();
-            if (mmfr1.vh == .supported) {
-                const currentEL = asm volatile ("mrs %[out], currentEL"
-                    : [out] "=r" (-> u64),
-                );
-
-                if (currentEL == 0b1000) {
-                    const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
-                    if (hcr_el2.e2h == .enabled) {
-                        @panic("VH extension is enabled but not supported on violetOS.");
-                    }
-                }
-            }
-        },
-        else => unreachable,
-    }
-
     status = .aborted;
     while (status != .success) {
         memory_map = mmap.get(boot_services);
         status = boot_services.exitBootServices(uefi.handle, memory_map.map_key);
     }
+
+    boot_config.memory_map_ptr = @intFromPtr(memory_map.map);
+    boot_config.memory_map_size = memory_map.map_size;
+    boot_config.memory_map_descriptor_size = memory_map.descriptor_size;
+
+    boot_config.configuration_tables_ptr = @intFromPtr(uefi.system_table.configuration_table);
+    boot_config.configuration_tables_len = uefi.system_table.number_of_table_entries;
+
+    boot_config.genesis_file_ptr = @intFromPtr(genesis_file.ptr);
+    boot_config.genesis_file_size = genesis_file.len;
 
     switch (builtin.cpu.arch) {
         .aarch64 => {
@@ -269,20 +308,16 @@ pub fn main() uefi.Status {
             reg.fpen = .el0_el1;
             reg.store();
 
-            const sctlr = ark.armv8.registers.SCTLR_EL1{
-                .m = true,
-                .c = true,
-                .i = .no_effect,
-
-                .sa = true,
-                .sa0 = true,
-
-                .a = false,
-                .ee = .little_endian,
-                .e0e = .little_endian,
-
-                .wxn = false,
-            };
+            var sctlr = ark.armv8.registers.SCTLR_EL1.load();
+            sctlr.m = true;
+            sctlr.a = false;
+            sctlr.c = true;
+            sctlr.i = .no_effect;
+            sctlr.sa = true;
+            sctlr.sa0 = true;
+            sctlr.ee = .little_endian;
+            sctlr.e0e = .little_endian;
+            sctlr.wxn = false;
             sctlr.store();
 
             const currentEL = asm volatile ("mrs %[out], currentEL"
@@ -299,7 +334,7 @@ pub fn main() uefi.Status {
                     const hcr_el2 = ark.armv8.registers.HCR_EL2.load();
                     if (hcr_el2.e2h == .enabled) {
                         // TODO support Kernel on EL2.
-                        asm volatile ("b .");
+                        asm volatile ("brk #0");
                     }
                 }
 
@@ -329,12 +364,7 @@ pub fn main() uefi.Status {
                     \\ mov x0, %[hhdm_base]
                     \\ mov x1, %[hhdm_limit]
                     \\
-                    \\ mov x2, %[mmap_phys_ptr]
-                    \\ mov x3, %[mmap_size]
-                    \\ mov x4, %[mmap_desc_size]
-                    \\
-                    \\ mov x5, %[config_tables_phys_ptr]
-                    \\ mov x6, %[config_tables_size]
+                    \\ mov x2, %[boot_config]
                     \\
                     \\ msr ttbr1_el1, %[ttbr1]
                     \\ msr elr_el2, %[kernel_entry]
@@ -353,12 +383,7 @@ pub fn main() uefi.Status {
                     : [hhdm_base] "r" (hhdm_base),
                       [hhdm_limit] "r" (hhdm_limit),
 
-                      [mmap_phys_ptr] "r" (memory_map.map),
-                      [mmap_size] "r" (memory_map.map_size),
-                      [mmap_desc_size] "r" (memory_map.descriptor_size),
-
-                      [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
-                      [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
+                      [boot_config] "r" (boot_config),
 
                       [ttbr1] "r" (virt.table),
                       [kernel_entry] "r" (entry_address),
@@ -375,12 +400,7 @@ pub fn main() uefi.Status {
                     \\ mov x0, %[hhdm_base]
                     \\ mov x1, %[hhdm_limit]
                     \\
-                    \\ mov x2, %[mmap_phys_ptr]
-                    \\ mov x3, %[mmap_size]
-                    \\ mov x4, %[mmap_desc_size]
-                    \\
-                    \\ mov x5, %[config_tables_phys_ptr]
-                    \\ mov x6, %[config_tables_size]
+                    \\ mov x2, %[boot_config]
                     \\
                     \\ msr ttbr1_el1, %[ttbr1]
                     \\ dsb ish
@@ -404,17 +424,10 @@ pub fn main() uefi.Status {
                     : [hhdm_base] "r" (hhdm_base),
                       [hhdm_limit] "r" (hhdm_limit),
 
-                      [mmap_phys_ptr] "r" (memory_map.map),
-                      [mmap_size] "r" (memory_map.map_size),
-                      [mmap_desc_size] "r" (memory_map.descriptor_size),
-
-                      [config_tables_phys_ptr] "r" (uefi.system_table.configuration_table),
-                      [config_tables_size] "r" (uefi.system_table.number_of_table_entries),
+                      [boot_config] "r" (boot_config),
 
                       [kernel_entry] "r" (entry_address),
-
                       [ttbr1] "r" (virt.table),
-
                       [stack_top] "r" (kernel_stack_top),
                     : "memory", "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"
                 );

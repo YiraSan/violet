@@ -103,14 +103,14 @@ futures_userland_payloads_ptr: u64,
 futures_userland_statuses_ptr: u64,
 futures_failfast_index: ?u8,
 
-pub fn create(process_id: Process.Id, options: Options) !Id {
+pub fn create(process_id: Process.Id, options: Options) !*Task {
     const process = Process.acquire(process_id) orelse return Error.InvalidProcess;
     errdefer process.release();
 
     var task: Task = undefined;
     task.process = process;
 
-    task.ref_count = .init(0);
+    task.ref_count = .init(1);
     task.state = .init(.ready);
 
     task.priority = options.priority;
@@ -148,6 +148,12 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
     );
     defer vmm.kernel_space.unmap(kernel_stack_base, false) catch {};
 
+    // prealloc system stack
+    if (task.process.execution_level == .system) {
+        const stack_ptr = @as([*]u8, @ptrFromInt(task.base_stack))[0..STACK_SIZE];
+        @memset(stack_ptr, 0);
+    }
+
     task.exception = true;
     task.suspended = true;
     task.should_extend = true;
@@ -166,7 +172,9 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     // NOTE on x86_64 initializing to zero the SSE context isn't valid. (MXCSR)
 
-    // std.log.warn("umbilical id not given to task !!!!", .{});
+    if (options.facet) |facet| {
+        kernel_stack_pointer.general_frame.setArg(0, @bitCast(facet));
+    }
 
     if (task.process.isPrivileged()) {
         kernel_stack_pointer.general_frame.setArg(1, @intFromPtr(&syscall.kernel_indirection_table));
@@ -226,7 +234,7 @@ pub fn create(process_id: Process.Id, options: Options) !Id {
 
     task.kernel_locals_kernel.task_id = @bitCast(slot_key);
 
-    return slot_key;
+    return task_ptr;
 }
 
 pub fn extendFrame(self: *Task) void {
@@ -319,6 +327,7 @@ pub const Options = struct {
     entry_point: u64,
     priority: basalt.task.Priority = .normal,
     quantum: basalt.task.Quantum = .moderate,
+    facet: ?basalt.sync.Facet = null,
 };
 
 pub const State = enum(u8) {

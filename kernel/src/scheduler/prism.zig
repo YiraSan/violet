@@ -75,6 +75,7 @@ consumer: ?*Task,
 pub fn create(binded_task_id: Task.Id, options: basalt.sync.Prism.Options) !Id {
     if (options.queue_size == 0 or options.queue_size > 32) return Error.InvalidOptions;
     if (options.queue_mode != .backpressure and options.queue_mode != .overwrite) return Error.InvalidOptions;
+    if (options.notify_on_drop != .disabled and options.notify_on_drop != .overwrite and options.notify_on_drop != .sidelist) return Error.InvalidOptions;
     if (!options.arg_formats.isValid()) return Error.InvalidOptions;
 
     const binded_task = Task.acquire(binded_task_id) orelse return Error.InvalidTask;
@@ -150,6 +151,20 @@ fn destroy(self: *Prism) void {
         return;
     }
 
+    if (Process.acquire(self.owner_id)) |process| {
+        defer process.release();
+
+        if (self.next_prism) |next| {
+            next.prev_prism = self.prev_prism;
+        }
+
+        if (self.prev_prism) |prev| {
+            prev.next_prism = self.next_prism;
+        } else {
+            process.prism_head = self.next_prism;
+        }
+    }
+
     if (Task.acquire(self.binded_task_id.load(.acquire))) |binded_task| {
         defer binded_task.release();
 
@@ -166,26 +181,6 @@ fn destroy(self: *Prism) void {
 pub fn kill(self: *Prism) void {
     if (self.state.cmpxchgStrong(.alive, .dying, .acq_rel, .monotonic) == null) {
         defer self.release(); // process reference
-
-        const lock_flags = prisms_map_lock.lockExclusive();
-        defer prisms_map_lock.unlockExclusive(lock_flags);
-
-        if (Process.acquire(self.owner_id)) |process| {
-            defer process.release();
-
-            if (self.next_prism) |next| {
-                next.prev_prism = self.prev_prism;
-            }
-
-            if (self.prev_prism) |prev| {
-                prev.next_prism = self.next_prism;
-            } else {
-                process.prism_head = self.next_prism;
-            }
-        }
-
-        self.next_prism = null;
-        self.prev_prism = null;
     }
 }
 

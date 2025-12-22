@@ -246,7 +246,7 @@ fn sync_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.S
 
 const gic = @import("gic.zig");
 
-pub const IrqCallback = *const fn () void;
+pub const IrqCallback = *const fn () callconv(basalt.task.call_conv) void;
 pub var irq_callbacks: [1022]?IrqCallback = .{null} ** 1022;
 
 fn irq_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.SPSR_EL1) callconv(.{ .aarch64_aapcs = .{} }) noreturn {

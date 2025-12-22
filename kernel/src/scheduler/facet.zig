@@ -48,6 +48,9 @@ sequence: std.atomic.Value(u64),
 prism_id: Prism.Id,
 caller_id: Process.Id,
 
+next_facet: ?*Facet,
+prev_facet: ?*Facet,
+
 pub fn create(syscaller_id: Process.Id, prism_id: Prism.Id, caller_id: Process.Id) !Id {
     const prism = Prism.acquire(prism_id) orelse return Error.InvalidPrism;
     defer prism.release();
@@ -74,6 +77,15 @@ pub fn create(syscaller_id: Process.Id, prism_id: Prism.Id, caller_id: Process.I
     var facet_ptr = facets_map.get(slot_key) orelse unreachable;
     facet_ptr.id = slot_key;
 
+    facet_ptr.next_facet = caller.facet_head;
+    facet_ptr.prev_facet = null;
+
+    if (caller.facet_head) |last_head| {
+        last_head.prev_facet = facet_ptr;
+    }
+
+    caller.facet_head = facet_ptr;
+
     return slot_key;
 }
 
@@ -83,6 +95,20 @@ fn destroy(self: *Facet) void {
 
     if (self.ref_count.load(.acquire) > 0) {
         return;
+    }
+
+    if (Process.acquire(self.caller_id)) |process| {
+        defer process.release();
+
+        if (self.next_facet) |next| {
+            next.prev_facet = self.prev_facet;
+        }
+
+        if (self.prev_facet) |prev| {
+            prev.prev_facet = self.next_facet;
+        } else {
+            process.facet_head = self.next_facet;
+        }
     }
 
     facets_map.remove(self.id);
@@ -100,12 +126,24 @@ pub fn acquire(id: Id) ?*Facet {
     return facet;
 }
 
-pub fn drop(self: *Facet) bool {
+pub fn drop(self: *Facet, notify: bool) !void {
+    var has_dropped = false;
     if (self.dropped.cmpxchgStrong(false, true, .acq_rel, .monotonic) == null) {
         self.release();
-        return true;
+        has_dropped = true;
     }
-    return false;
+
+    const prism = Prism.acquire(self.prism_id) orelse return;
+    defer prism.release();
+
+    if (has_dropped and notify) {
+        switch (prism.options.notify_on_drop) {
+            .disabled => {},
+            .overwrite, .sidelist => {
+                std.log.warn("should notify!", .{});
+            },
+        }
+    }
 }
 
 pub fn release(self: *Facet) void {

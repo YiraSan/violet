@@ -34,9 +34,9 @@ pub fn terminate() noreturn {
     unreachable;
 }
 
+/// While `module` and `system` have the same privilege, `system` lives inside the kernel. Which means that module are considered to only use prism and internal data, never direct access to kernel.
 pub const ExecutionLevel = enum(u8) {
     user = 0x00,
     module = 0xe0,
-    /// Same as `module`. Used by genesis or internal kernel task. Grants certain privilege.
     system = 0xf0,
 };

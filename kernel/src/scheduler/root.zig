@@ -40,7 +40,7 @@ pub const Task = @import("task.zig");
 // --- scheduler/root.zig --- //
 
 pub fn init() !void {
-    idle_process_id = try Process.create(.{
+    idle_process = try Process.create(.{
         .execution_level = .system,
     });
 
@@ -70,13 +70,11 @@ pub fn init() !void {
 pub fn initCpu() !void {
     const local = Local.get();
 
-    const idle_task_id = try Task.create(idle_process_id, .{
-        .entry_point = @intFromPtr(&idle_task),
-    });
-
     local.is_idling = .init(false);
 
-    local.idle_task = Task.acquire(idle_task_id) orelse unreachable;
+    local.idle_task = try Task.create(idle_process.id, .{
+        .entry_point = @intFromPtr(&idle_task),
+    });
     local.idle_task.quantum = @enumFromInt(std.time.ns_per_s);
 
     local.ready_queue = .init();
@@ -86,8 +84,8 @@ pub fn initCpu() !void {
     local.current_space_id = null;
 }
 
-pub fn register(task_id: Task.Id) !void {
-    try newbie_queue.append(task_id);
+pub fn register(task: *Task) !void {
+    try newbie_queue.append(task);
 
     // const current_cpuid = kernel.arch.Cpu.id();
     // const max_slots = kernel.arch.cpus.len;
@@ -539,12 +537,9 @@ fn facet_drop(frame: *kernel.arch.GeneralFrame) !void {
 
         if (task.process.id != facet.caller_id and task.process.id != prism.owner_id) return try syscall.fail(frame, .invalid_facet);
 
-        syscall.success(frame, .{});
+        try facet.drop(task.process.id == facet.caller_id and task.id != prism.binded_task_id.load(.acquire));
 
-        if (facet.drop() and task.process.id == facet.caller_id and task.id != prism.binded_task_id.load(.acquire) // without this check, this could cause a deadlock !
-        and prism.options.notify_on_drop) {
-            std.log.warn("notify drop! TODO", .{});
-        }
+        return syscall.success(frame, .{});
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
@@ -699,7 +694,7 @@ fn timerCallback() void {
     const last_task = local.current_task;
 
     if (local.current_task) |task| {
-        if (task.process.id == idle_process_id) {
+        if (task.process.id == idle_process.id) {
             local.current_task = null;
         }
     }
@@ -750,7 +745,7 @@ fn timerCallback() void {
     storeAndLoad(last_task, false);
 }
 
-fn process_terminate(_: *kernel.arch.GeneralFrame) !void {
+pub fn process_terminate(_: *kernel.arch.GeneralFrame) !void {
     const local = Local.get();
 
     if (local.current_task) |current_task| {
@@ -819,20 +814,20 @@ pub const Local = struct {
 };
 
 const NewbieQueue = struct {
-    queue: heap.Queue(Task.Id) = .init(),
+    queue: heap.Queue(*Task) = .init(),
     lock: mem.RwLock = .{},
     atomic_len: std.atomic.Value(usize) = .init(0),
 
-    pub fn append(self: *@This(), task_id: Task.Id) !void {
+    pub fn append(self: *@This(), task: *Task) !void {
         const lock = self.lock.lockExclusive();
         defer self.lock.unlockExclusive(lock);
 
-        try self.queue.append(task_id);
+        try self.queue.append(task);
 
         _ = self.atomic_len.fetchAdd(1, .monotonic);
     }
 
-    pub fn pop(self: *@This()) ?Task.Id {
+    pub fn pop(self: *@This()) ?*Task {
         if (self.lenHint() == 0) return null;
 
         const lock = self.lock.lockExclusive();
@@ -857,7 +852,7 @@ const NewbieQueue = struct {
 
 var newbie_queue: NewbieQueue = .{};
 
-var idle_process_id: Process.Id = undefined;
+var idle_process: *Process = undefined;
 fn idle_task() callconv(basalt.task.call_conv) noreturn {
     while (true) {
         kernel.arch.maskInterrupts();
@@ -891,24 +886,22 @@ inline fn chooseTask() void {
             const saved_flags = local.ready_queue_lock.lockExclusive();
             defer local.ready_queue_lock.unlockExclusive(saved_flags);
 
-            while (newbie_queue.pop()) |new_task_id| {
-                if (Task.acquire(new_task_id)) |new_task| {
-                    if (new_task.isDying()) {
-                        new_task.release();
-                        continue;
-                    }
-
-                    new_task.host_id = kernel.arch.Cpu.id();
-
-                    local.ready_queue.add(.{
-                        .priority = kernel.drivers.Timer.getUptime() + new_task.penalty(),
-                        .task = new_task,
-                    }) catch @panic("ready-queue oom in chooseTask()");
+            while (newbie_queue.pop()) |new_task| {
+                if (new_task.isDying() or new_task.process.isDying()) {
+                    new_task.release();
+                    continue;
                 }
+
+                new_task.host_id = kernel.arch.Cpu.id();
+
+                local.ready_queue.add(.{
+                    .priority = kernel.drivers.Timer.getUptime() + new_task.penalty(),
+                    .task = new_task,
+                }) catch @panic("ready-queue oom in chooseTask()");
             }
 
             while (local.ready_queue.pop()) |item| {
-                if (item.task.isDying()) {
+                if (item.task.isDying() or item.task.process.isDying()) {
                     item.task.release();
                     continue;
                 }
@@ -976,11 +969,11 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
     if (local.current_task) |current_task| {
         if (last_task) |last| {
             if (current_task.id == last.id) {
-                return kernel.drivers.Timer.rearm(current_task, current_task.process.id == idle_process_id);
+                return kernel.drivers.Timer.rearm(current_task, current_task.process.id == idle_process.id);
             } else {
                 last.extendFrame();
                 last.uptime_suspend = kernel.drivers.Timer.getUptime();
-                if (last.process.id != idle_process_id and !waiting) {
+                if (last.process.id != idle_process.id and !waiting) {
                     local.ready_queue.add(.{
                         .priority = last.uptime_suspend + last.penalty(),
                         .task = last,
@@ -1075,20 +1068,20 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
 
     const should_log = if (last_task) |lt| lt.id != task.id else true;
     if (should_log) {
-        if (task.process.id == idle_process_id) {
+        if (task.process.id == idle_process.id) {
             log.debug("cpu{} entered idle state", .{kernel.arch.Cpu.id()});
         } else {
             log.debug("cpu{} switched to task {}:{}", .{ kernel.arch.Cpu.id(), task.process.id.index, task.id.index });
         }
     }
 
-    if (task.process.id == idle_process_id) {
+    if (task.process.id == idle_process.id) {
         local.is_idling.store(true, .release);
     } else {
         local.is_idling.store(false, .release);
     }
 
-    kernel.drivers.Timer.rearm(task, task.process.id == idle_process_id);
+    kernel.drivers.Timer.rearm(task, task.process.id == idle_process.id);
 }
 
 inline fn getElapsed(task: *Task) usize {

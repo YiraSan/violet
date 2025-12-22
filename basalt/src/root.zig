@@ -16,6 +16,9 @@ pub const sync = @import("sync/root.zig");
 pub const heap = @import("heap/root.zig");
 pub const module = @import("module/root.zig");
 pub const process = @import("process/root.zig");
+pub const proto = @import("proto/root.zig");
 pub const syscall = @import("syscall/root.zig");
 pub const task = @import("task/root.zig");
 pub const time = @import("time/root.zig");
+
+pub var umbilical: sync.Facet = undefined;

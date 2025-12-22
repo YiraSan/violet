@@ -75,6 +75,7 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         .target = target,
         .optimize = options.optimize,
         .pic = options.kernel_module,
+        .link_libc = false,
     });
 
     mod.addImport("basalt", basalt_mod);
@@ -87,11 +88,17 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
     });
 
     exe.entry = .disabled;
+    exe.bundle_compiler_rt = true;
 
     // TODO works only with 0.15+
     // exe.out_filename = b.fmt("{s}.elf", .{options.name});
 
-    exe.setLinkerScript(basalt.path("linker.lds"));
+    if (options.kernel_module) {
+        exe.pie = true;
+        exe.setLinkerScript(basalt.path("trusted_module.lds"));
+    } else {
+        exe.setLinkerScript(basalt.path("userland.lds"));
+    }
 
     return exe;
 }

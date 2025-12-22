@@ -1,6 +1,6 @@
 .{
     .name = .bootloader,
-    .version = "0.1.0-dev.3",
+    .version = "0.1.0-dev.4",
     .fingerprint = 0xaa3fe7b4876cb574, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
     .dependencies = .{

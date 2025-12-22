@@ -39,6 +39,13 @@ pub fn build(b: *std.Build) !void {
     const bootloader_exe = bootloader_dep.artifact("bootloader");
     b.installArtifact(bootloader_exe);
 
+    const genesis_dep = b.dependency("genesis", .{
+        .platform = platform,
+        .optimize = optimize,
+    });
+    const genesis_exe = genesis_dep.artifact("genesis");
+    b.installArtifact(genesis_exe);
+
     // Disk
 
     var bootfs = dimmer.BuildInterface.FileSystemBuilder.init(b);
@@ -53,6 +60,7 @@ pub fn build(b: *std.Build) !void {
         });
 
         bootfs.copyFile(kernel_exe.getEmittedBin(), "/kernel.elf");
+        bootfs.copyFile(genesis_exe.getEmittedBin(), "/genesis.elf");
 
         switch (platform) {
             .rpi4 => {

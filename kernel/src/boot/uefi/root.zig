@@ -34,6 +34,18 @@ const PAGE_SIZE = kernel.mem.PageLevel.l4K.size();
 
 // --- boot/uefi/root.zig --- //
 
+const BootConfig = extern struct {
+    memory_map_ptr: u64,
+    memory_map_size: u64,
+    memory_map_descriptor_size: u64,
+
+    configuration_tables_ptr: u64,
+    configuration_tables_len: u64,
+
+    genesis_file_ptr: u64,
+    genesis_file_size: u64,
+};
+
 var memory_map: MemoryMap = undefined;
 var configuration_tables: []uefi.tables.ConfigurationTable = undefined;
 var xsdt: *drivers.acpi.Xsdt = undefined;
@@ -41,11 +53,7 @@ var xsdt: *drivers.acpi.Xsdt = undefined;
 export fn kernel_entry(
     hhdm_base: u64,
     hhdm_limit: u64,
-    memory_map_ptr: u64,
-    memory_map_size: u64,
-    memory_map_descriptor_size: u64,
-    configuration_tables_ptr: u64,
-    configuration_tables_len: u64,
+    boot_config_ptr: u64,
 ) callconv(switch (builtin.cpu.arch) {
     .aarch64 => .{ .aarch64_aapcs = .{} },
     .riscv64 => .{ .riscv64_lp64 = .{} },
@@ -54,13 +62,15 @@ export fn kernel_entry(
     boot.hhdm_base = hhdm_base;
     boot.hhdm_limit = hhdm_limit;
 
+    const boot_config: *BootConfig = @ptrFromInt(boot.hhdm_base + boot_config_ptr);
+
     memory_map = .{
-        .map = @ptrFromInt(boot.hhdm_base + memory_map_ptr),
-        .map_size = memory_map_size,
-        .descriptor_size = memory_map_descriptor_size,
+        .map = @ptrFromInt(boot.hhdm_base + boot_config.memory_map_ptr),
+        .map_size = boot_config.memory_map_size,
+        .descriptor_size = boot_config.memory_map_descriptor_size,
     };
 
-    configuration_tables = @as([*]uefi.tables.ConfigurationTable, @ptrFromInt(boot.hhdm_base + configuration_tables_ptr))[0..configuration_tables_len];
+    configuration_tables = @as([*]uefi.tables.ConfigurationTable, @ptrFromInt(boot.hhdm_base + boot_config.configuration_tables_ptr))[0..boot_config.configuration_tables_len];
 
     var xsdt_found = false;
     for (configuration_tables) |*entry| {
@@ -75,6 +85,8 @@ export fn kernel_entry(
 
     // TODO temp
     boot.xsdt = xsdt;
+
+    boot.genesis_file = @as([*]align(8) const u8, @ptrFromInt(boot_config.genesis_file_ptr))[0..boot_config.genesis_file_size];
 
     kernel.stage0() catch |err| {
         log.err("kernel stage-0 returned with an error: {}", .{err});

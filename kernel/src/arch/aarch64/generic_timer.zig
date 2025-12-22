@@ -69,7 +69,7 @@ pub fn disableCpu() !void {
     gic.disableIRQ(gsiv);
 }
 
-fn callback() void {
+fn callback() callconv(basalt.task.call_conv) void {
     if (Timer.callback) |timer_callback| {
         timer_callback();
     }

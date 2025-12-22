@@ -12,20 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const std = @import("std");
-const basalt = @import("basalt");
-
-pub fn build(b: *std.Build) void {
-    const platform = b.option(basalt.Platform, "platform", "aarch64_qemu, riscv64_qemu, ...") orelse .aarch64_qemu;
-    const optimize = b.standardOptimizeOption(.{});
-
-    const exe = basalt.addExecutable(b, .{
-        .name = "genesis",
-        .optimize = optimize,
-        .root_source_file = b.path("src/main.zig"),
-        .platform = platform,
-        .kernel_module = true,
-    });
-
-    b.installArtifact(exe);
-}
+pub const Console = @import("console.zig");
+pub const Gwi = @import("gwi.zig");
+pub const Umbilical = @import("umbilical.zig");

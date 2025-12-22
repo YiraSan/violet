@@ -27,6 +27,8 @@ const std = @import("std");
 pub const arch = @import("arch/root.zig");
 pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
+pub const gwi = @import("gwi/root.zig");
+pub const loader = @import("loader/root.zig");
 pub const mem = @import("mem/root.zig");
 pub const scheduler = @import("scheduler/root.zig");
 pub const syscall = @import("syscall/root.zig");
@@ -57,32 +59,35 @@ pub fn stage2() !void {
     try drivers.Timer.init();
     try drivers.Timer.initCpu();
 
-    // scheduler tests
+    // tests
     {
-        const test_process_id = try scheduler.Process.create(.{
+        const test_process = try scheduler.Process.create(.{
             .execution_level = .module,
         });
+        defer test_process.release();
 
-        const task0 = try scheduler.Task.create(test_process_id, .{
+        const task0 = try scheduler.Task.create(test_process.id, .{
             .entry_point = @intFromPtr(&task0_entry),
         });
         try scheduler.register(task0);
 
-        const task1 = try scheduler.Task.create(test_process_id, .{
+        const task1 = try scheduler.Task.create(test_process.id, .{
             .entry_point = @intFromPtr(&task1_entry),
         });
         try scheduler.register(task1);
 
-        const task2 = try scheduler.Task.create(test_process_id, .{
+        const task2 = try scheduler.Task.create(test_process.id, .{
             .entry_point = @intFromPtr(&task2_entry),
         });
         try scheduler.register(task2);
 
-        const task3 = try scheduler.Task.create(test_process_id, .{
+        const task3 = try scheduler.Task.create(test_process.id, .{
             .entry_point = @intFromPtr(&task3_entry),
         });
         try scheduler.register(task3);
     }
+
+    try gwi.init();
 
     try arch.bootCpus();
 
@@ -174,7 +179,7 @@ fn task1_main() !void {
     var sequential_timer = try basalt.time.SequentialTimer.init(._60hz);
     defer sequential_timer.deinit();
 
-    for (0..5) |_| {
+    for (0..25) |_| {
         const delta = try sequential_timer.wait();
 
         task1_log.info("elapsed ticks since last: {}", .{delta});
@@ -319,6 +324,8 @@ comptime {
     _ = arch;
     _ = boot;
     _ = drivers;
+    _ = gwi;
+    _ = loader;
     _ = mem;
     _ = scheduler;
     _ = syscall;

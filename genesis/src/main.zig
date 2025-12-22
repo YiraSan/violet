@@ -12,4 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub fn main() !void {}
+const basalt = @import("basalt");
+
+pub fn main() !void {
+    _ = try basalt.umbilical.invoke(.{ .pair64 = .{
+        .arg0 = 444,
+        .arg1 = 25565,
+    } }, .wait);
+}

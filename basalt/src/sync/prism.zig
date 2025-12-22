@@ -132,10 +132,20 @@ pub const Prism = struct {
         } = .pair64,
         /// Notify the prism consumer that a facet has been dropped.
         ///
-        /// The message can be identified in the queue by a Future.null.
+        /// The notification can be identified in the queue by a Future.null.
         ///
-        /// If the binded task drop the facet, the notification won't be produced.
-        /// This is completely useless, as the task in charge of the prism has dropped the facet, so the destruction is probably already done.
-        notify_on_drop: bool = true,
+        /// It is only produced if the drop is initiated by the facet owner,
+        /// and strictly NOT by the task currently bound to the prism.
+        notify_on_drop: enum(u8) {
+            /// No notification will be sent.
+            disabled = 0,
+            /// On overflow, a drop notification overwrites the queue.
+            overwrite = 1,
+            /// On overflow, a side list is used to store drop notifications.
+            ///
+            /// These notifications wait in the side list until space becomes available
+            /// in the queue.
+            sidelist = 2,
+        } = .sidelist,
     };
 };

@@ -119,13 +119,13 @@ pub const Allocator = struct {
         const actual_align = @max(alignment, mem.PageLevel.l4K.size());
         const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
 
-        var candidate_start = std.mem.alignForward(u64, self.base, actual_align);
+        const start_search = @max(self.base, self.cached_hole_start);
 
+        var candidate_start = std.mem.alignForward(u64, start_search, actual_align);
         var curr_id = self.regions.first();
 
         while (curr_id) |id| {
             const region = self.regions.get(id).?;
-
             if (region.end <= candidate_start) {
                 curr_id = self.regions.next(id);
                 continue;
@@ -137,7 +137,13 @@ pub const Allocator = struct {
                 }
             }
 
+            _, const overflow = @addWithOverflow(region.end, 0);
+            if (overflow == 1) return Error.OutOfVirtualMemory;
+
             candidate_start = std.mem.alignForward(u64, region.end, actual_align);
+
+            if (candidate_start < region.end) return Error.OutOfVirtualMemory;
+            if (candidate_start >= self.limit) return Error.OutOfVirtualMemory;
 
             curr_id = self.regions.next(id);
         }
@@ -150,7 +156,7 @@ pub const Allocator = struct {
 
         const new_region = Region{
             .start = candidate_start,
-            .end = candidate_start + actual_size,
+            .end = end_addr,
             .object = object,
             .offset = offset,
             .flags = flags,
@@ -159,55 +165,62 @@ pub const Allocator = struct {
 
         _ = try self.regions.insert(candidate_start, new_region);
 
-        self.cached_hole_start = candidate_start + actual_size;
+        self.cached_hole_start = end_addr;
 
         return candidate_start;
     }
 
-    // TODO allocAt needs alignement etc...
+    pub fn allocAt(
+        self: *@This(),
+        address: u64,
+        size: u64,
+        object: ?*Object,
+        offset: u64,
+        flags: ?Object.Flags,
+        syscall_protect: bool,
+    ) !void {
+        if (size == 0) return;
 
-    // pub fn allocAt(self: *@This(), address: u64, size: u64, object: ?*Object, offset: u64, flags: ?Object.Flags) !void {
-    //     if (size == 0) return;
+        const lock_flags = self.lock.lockExclusive();
+        defer self.lock.unlockExclusive(lock_flags);
 
-    //     if (!std.mem.isAligned(address, mem.PageLevel.l4K.size())) return Error.InvalidAlignment;
+        if (!std.mem.isAligned(address, mem.PageLevel.l4K.size())) return Error.InvalidAlignment;
 
-    //     const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
+        const actual_size = std.mem.alignForward(u64, size, mem.PageLevel.l4K.size());
+        const end_addr, const overflowed = @addWithOverflow(address, actual_size);
 
-    //     const end_addr, const overflowed = @addWithOverflow(address, actual_size);
-    //     if (overflowed == 1 or end_addr > self.limit or address < self.base) {
-    //         return Error.OutOfRange;
-    //     }
+        if (overflowed == 1 or end_addr > self.limit or address < self.base) {
+            return Error.OutOfRange;
+        }
 
-    //     const lock_flags = self.lock.lockExclusive();
-    //     defer self.lock.unlockExclusive(lock_flags);
+        var curr_id = self.regions.first();
+        while (curr_id) |id| {
+            const region = self.regions.get(id).?;
 
-    //     var curr_id = self.regions.first();
+            if (region.start >= end_addr) break;
 
-    //     while (curr_id) |id| {
-    //         const region = self.regions.get(id).?;
+            if (region.end > address) {
+                return Error.AddressAlreadyInUse;
+            }
 
-    //         if (region.end <= address) {
-    //             curr_id = self.regions.next(id);
-    //             continue;
-    //         }
+            curr_id = self.regions.next(id);
+        }
 
-    //         if (region.start >= end_addr) {
-    //             break;
-    //         }
+        const new_region = Region{
+            .start = address,
+            .end = end_addr,
+            .object = object,
+            .offset = offset,
+            .flags = flags,
+            .syscall_pinned = .init(if (syscall_protect) 1 else 0),
+        };
 
-    //         return Error.AddressAlreadyInUse;
-    //     }
+        _ = try self.regions.insert(address, new_region);
 
-    //     const new_region = Region{
-    //         .start = address,
-    //         .end = end_addr,
-    //         .object = object,
-    //         .offset = offset,
-    //         .flags = flags,
-    //     };
-
-    //     _ = try self.regions.insert(address, new_region);
-    // }
+        if (address == self.cached_hole_start) {
+            self.cached_hole_start = end_addr;
+        }
+    }
 
     pub fn free(self: *@This(), address: u64, is_syscall: bool) Error!struct { object: ?*Object, size: u64 } {
         const lock_flags = self.lock.lockExclusive();
@@ -237,6 +250,105 @@ pub const Allocator = struct {
             .object = region.object,
             .size = region.end - region.start,
         };
+    }
+
+    pub fn splitAndAssign(
+        self: *@This(),
+        address: u64,
+        size: u64,
+        new_object: Object.Id,
+        new_offset: u64,
+        new_flags: ?Object.Flags,
+    ) !void {
+        if (size == 0) return;
+
+        const lock_flags = self.lock.lockExclusive();
+        defer self.lock.unlockExclusive(lock_flags);
+
+        if (!std.mem.isAligned(address, mem.PageLevel.l4K.size()) or
+            !std.mem.isAligned(size, mem.PageLevel.l4K.size()))
+        {
+            return Error.InvalidAlignment;
+        }
+
+        const end_addr = address + size;
+
+        var target_id: ?Region.Tree.Id = null;
+        var curr = self.regions.first();
+
+        while (curr) |id| {
+            const r = self.regions.get(id).?;
+            if (address >= r.start and address < r.end) {
+                target_id = id;
+                break;
+            }
+            if (r.start > address) break;
+            curr = self.regions.next(id);
+        }
+
+        const region_id = target_id orelse return Error.InvalidAddress;
+        const old_region = self.regions.get(region_id).?;
+
+        if (end_addr > old_region.end) {
+            return Error.OutOfRange;
+        }
+
+        const old_start = old_region.start;
+        const old_end = old_region.end;
+        const old_obj = old_region.object;
+        const old_base_offset = old_region.offset;
+        const old_flags = old_region.flags;
+        const old_pinned = old_region.syscall_pinned.load(.acquire);
+
+        _ = self.regions.remove(region_id);
+
+        if (address > old_start) {
+            if (old_obj) |o| {
+                _ = Object.acquire(o.id);
+            }
+
+            const left_region = Region{
+                .start = old_start,
+                .end = address,
+                .object = old_obj,
+                .offset = old_base_offset,
+                .flags = old_flags,
+                .syscall_pinned = .init(old_pinned),
+            };
+            _ = try self.regions.insert(old_start, left_region);
+        }
+
+        {
+            const center_region = Region{
+                .start = address,
+                .end = end_addr,
+                .object = if (Object.acquire(new_object)) |obj| obj else null,
+                .offset = new_offset,
+                .flags = new_flags,
+                .syscall_pinned = .init(old_pinned),
+            };
+            _ = try self.regions.insert(address, center_region);
+        }
+
+        if (end_addr < old_end) {
+            if (old_obj) |o| {
+                _ = Object.acquire(o.id);
+            }
+            const offset_delta = end_addr - old_start;
+            const right_offset = old_base_offset + offset_delta;
+
+            const right_region = Region{
+                .start = end_addr,
+                .end = old_end,
+                .object = old_obj,
+                .offset = right_offset,
+                .flags = old_flags,
+                .syscall_pinned = .init(old_pinned),
+            };
+            _ = try self.regions.insert(end_addr, right_region);
+        }
+
+        if (old_obj) |o| o.release();
     }
 };
 

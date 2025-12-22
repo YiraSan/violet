@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 The violetOS Authors
+// Copyright (c) 2024-2025 The violetOS authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,8 +91,7 @@ fn configureTCR() void {
                 .@"42bits_4tb" => .@"42bits_4tb",
                 .@"44bits_16tb" => .@"44bits_16tb",
                 .@"48bits_256tb" => .@"48bits_256tb",
-                .@"52bits_4pb" => .@"52bits_4pb",
-                .@"56bits_64pb" => .@"56bits_64pb",
+                .@"52bits_4pb", .@"56bits_64pb" => .@"48bits_256tb",
             },
         },
 
@@ -110,10 +109,11 @@ fn configureTCR() void {
     }
 
     asm volatile (
-        \\ dsb sy
+        \\ dsb ish
+        \\ tlbi vmalle1
         \\ dsb ish
         \\ isb
-    );
+        ::: "memory");
 }
 
 // --- impl --- //

@@ -28,6 +28,7 @@ const heap = mem.heap;
 
 const Task = scheduler.Task;
 
+const Facet = scheduler.Facet;
 const Future = scheduler.Future;
 const Prism = scheduler.Prism;
 
@@ -53,15 +54,16 @@ produced_future_head: ?*Future,
 consumed_future_head: ?*Future,
 
 prism_head: ?*Prism,
+facet_head: ?*Facet,
 
-pub fn create(options: Options) !Id {
+pub fn create(options: Options) !*Process {
     var process: Process = undefined;
     process.execution_level = options.execution_level;
 
     if (!process.isPrivileged()) process.virtual_space = try .init(.lower, null, true);
     errdefer if (!process.isPrivileged()) process.virtual_space.deinit();
 
-    process.ref_count = .init(0);
+    process.ref_count = .init(1);
     process.state = .init(.alive);
 
     process.task_count = .init(0);
@@ -70,6 +72,7 @@ pub fn create(options: Options) !Id {
     process.consumed_future_head = null;
 
     process.prism_head = null;
+    process.facet_head = null;
 
     const lock_flags = processes_map_lock.lockExclusive();
     defer processes_map_lock.unlockExclusive(lock_flags);
@@ -77,10 +80,30 @@ pub fn create(options: Options) !Id {
     const slot_key = try processes_map.insert(process);
     const process_ptr = processes_map.get(slot_key) orelse unreachable;
     process_ptr.id = slot_key;
-    return slot_key;
+    return process_ptr;
 }
 
 fn destroy(self: *Process) void {
+    var nfacet: ?*Facet = null;
+    defer while (nfacet) |facet| {
+        nfacet = facet.next_facet;
+
+        facet.next_facet = null;
+        facet.prev_facet = null;
+
+        facet.drop(true) catch {};
+    };
+
+    var nprism: ?*Prism = null;
+    defer while (nprism) |prism| {
+        nprism = prism.next_prism;
+
+        prism.next_prism = null;
+        prism.prev_prism = null;
+
+        prism.release();
+    };
+
     const lock_flags = processes_map_lock.lockExclusive();
     defer processes_map_lock.unlockExclusive(lock_flags);
 
@@ -88,14 +111,10 @@ fn destroy(self: *Process) void {
         return;
     }
 
+    nfacet = self.facet_head;
+    nprism = self.prism_head;
+
     defer processes_map.remove(self.id);
-
-    var nprism = self.prism_head;
-    while (nprism) |prism| {
-        nprism = prism.next_prism;
-
-        prism.release();
-    }
 
     var nproduced_future = self.produced_future_head;
     while (nproduced_future) |future| {

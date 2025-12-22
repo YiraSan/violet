@@ -46,3 +46,5 @@ pub const UnusedMemoryIterator = adapter.UnusedMemoryIterator;
 
 /// TODO temp structure
 pub var xsdt: *kernel.drivers.acpi.Xsdt = undefined;
+
+pub var genesis_file: []align(8) const u8 = undefined;
