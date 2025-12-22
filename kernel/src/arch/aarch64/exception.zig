@@ -179,7 +179,7 @@ fn sync_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.S
         .svc_inst_aarch64 => {
             kernel.syscall.internal_call_system(old_frame);
         },
-        .data_abort_lower_el, .data_abort_same_el => {
+        .data_abort_lower_el, .data_abort_same_el, .inst_abort_lower_el, .inst_abort_same_el => {
             const iss = esr_el1.iss.data_abort;
             const far = ark.armv8.registers.loadFarEl1();
 
@@ -197,7 +197,7 @@ fn sync_handler(old_frame: *arch.GeneralFrame, saved_spsr: ark.armv8.registers.S
                             if (local.current_task) |current_task| {
                                 log.err("segmentation fault from task {}:{} at address 0x{x}", .{ current_task.process.id.index, current_task.id.index, far });
 
-                                scheduler.task_terminate(old_frame) catch {};
+                                scheduler.process_terminate(old_frame) catch {};
                                 exitException(old_frame, saved_spsr);
                             } else {
                                 log.err("segmentation fault from kernel at address 0x{x}", .{far});
@@ -300,7 +300,16 @@ fn nested_sync_handler(esr_el1: ark.armv8.registers.ESR_EL1, far_el1: u64) callc
 
                     const res = vs.resolveFault(far_el1) catch |err| switch (err) {
                         vmm.Space.Error.SegmentationFault => {
-                            log.err("nested segmentation fault from kernel at address 0x{x}", .{far_el1});
+                            if (local.current_task) |current_task| {
+                                log.err("nested segmentation fault from task {}:{} at address 0x{x}", .{ current_task.process.id.index, current_task.id.index, far_el1 });
+
+                                scheduler.process_terminate(undefined) catch {};
+                                if (local.current_task != null) {
+                                    exitException(undefined, undefined);
+                                }
+                            } else {
+                                log.err("nested segmentation fault from kernel at address 0x{x}", .{far_el1});
+                            }
                             ark.cpu.halt();
                         },
                         else => unreachable,
