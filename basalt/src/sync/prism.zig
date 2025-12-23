@@ -132,7 +132,7 @@ pub const Prism = struct {
         } = .pair64,
         /// Notify the prism consumer that a facet has been dropped.
         ///
-        /// The notification can be identified in the queue by a Future.null.
+        /// The notification can be identified in the queue by a Future.null. InvocationArg is UNDEFINED.
         ///
         /// It is only produced if the drop is initiated by the facet owner,
         /// and strictly NOT by the task currently bound to the prism.
@@ -141,11 +141,12 @@ pub const Prism = struct {
             disabled = 0,
             /// On overflow, a drop notification overwrites the queue.
             overwrite = 1,
-            /// On overflow, a side list is used to store drop notifications.
+            /// Use the sidelist only if the queue is full.
+            defer_on_overflow = 2,
+            /// Always use the sidelist even if the queue has space.
             ///
-            /// These notifications wait in the side list until space becomes available
-            /// in the queue.
-            sidelist = 2,
-        } = .sidelist,
+            /// This allows new messages to get into the queue without causing backpressure or overwrite, while causing the drop notification to be delayed until there are unused space on consumed queue.
+            always_defer = 3,
+        } = .defer_on_overflow,
     };
 };

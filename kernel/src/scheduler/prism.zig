@@ -53,7 +53,8 @@ state: std.atomic.Value(State),
 next_prism: ?*Prism,
 prev_prism: ?*Prism,
 
-facet_head: ?*Facet,
+dropped_head: ?*Facet,
+dropped_tail: ?*Facet,
 
 lock: mem.RwLock,
 
@@ -75,7 +76,7 @@ consumer: ?*Task,
 pub fn create(binded_task_id: Task.Id, options: basalt.sync.Prism.Options) !Id {
     if (options.queue_size == 0 or options.queue_size > 32) return Error.InvalidOptions;
     if (options.queue_mode != .backpressure and options.queue_mode != .overwrite) return Error.InvalidOptions;
-    if (options.notify_on_drop != .disabled and options.notify_on_drop != .overwrite and options.notify_on_drop != .sidelist) return Error.InvalidOptions;
+    if (options.notify_on_drop != .disabled and options.notify_on_drop != .overwrite and options.notify_on_drop != .defer_on_overflow and options.notify_on_drop != .always_defer) return Error.InvalidOptions;
     if (!options.arg_formats.isValid()) return Error.InvalidOptions;
 
     const binded_task = Task.acquire(binded_task_id) orelse return Error.InvalidTask;
@@ -93,7 +94,8 @@ pub fn create(binded_task_id: Task.Id, options: basalt.sync.Prism.Options) !Id {
     prism.ref_count = .init(1); // process reference
     prism.state = .init(.alive);
 
-    prism.facet_head = null;
+    prism.dropped_head = null;
+    prism.dropped_tail = null;
 
     prism.lock = .{};
 
@@ -200,6 +202,27 @@ pub fn release(self: *Prism) void {
     if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
         self.destroy();
     }
+}
+
+/// Helper which means you MUST TAKE the lock before calling it.
+pub inline fn forcePush(self: *Prism, invocation: basalt.sync.Prism.Invocation) void {
+    const current_queue = if (self.queue_is_second) self.queue_kernel2 else self.queue_kernel1;
+    const overflowed = self.queue_count == current_queue.len;
+
+    if (overflowed) {
+        const victim = current_queue[self.queue_cursor];
+        if (Future.acquire(@bitCast(victim.future))) |victim_fut| {
+            _ = victim_fut.cancel();
+            victim_fut.release(); // current ref
+            victim_fut.release(); // consumer ref
+        }
+    }
+
+    current_queue[self.queue_cursor] = invocation;
+    self.queue_count = @min(self.queue_count + 1, current_queue.len);
+
+    self.queue_cursor += 1;
+    self.queue_cursor %= current_queue.len;
 }
 
 // ---- //

@@ -51,6 +51,8 @@ caller_id: Process.Id,
 next_facet: ?*Facet,
 prev_facet: ?*Facet,
 
+next_dropped: ?*Facet,
+
 pub fn create(syscaller_id: Process.Id, prism_id: Prism.Id, caller_id: Process.Id) !Id {
     const prism = Prism.acquire(prism_id) orelse return Error.InvalidPrism;
     defer prism.release();
@@ -69,6 +71,8 @@ pub fn create(syscaller_id: Process.Id, prism_id: Prism.Id, caller_id: Process.I
 
     facet.prism_id = prism_id;
     facet.caller_id = caller_id;
+
+    facet.next_dropped = null;
 
     const saved_flags = facets_map_lock.lockExclusive();
     defer facets_map_lock.unlockExclusive(saved_flags);
@@ -129,19 +133,46 @@ pub fn acquire(id: Id) ?*Facet {
 pub fn drop(self: *Facet, notify: bool) !void {
     var has_dropped = false;
     if (self.dropped.cmpxchgStrong(false, true, .acq_rel, .monotonic) == null) {
-        self.release();
         has_dropped = true;
     }
+
+    defer if (has_dropped) self.release();
 
     const prism = Prism.acquire(self.prism_id) orelse return;
     defer prism.release();
 
-    if (has_dropped and notify) {
-        switch (prism.options.notify_on_drop) {
-            .disabled => {},
-            .overwrite, .sidelist => {
-                std.log.warn("should notify!", .{});
-            },
+    if (has_dropped and notify and prism.options.notify_on_drop != .disabled) {
+        const saved_flags = prism.lock.lockExclusive();
+        defer prism.lock.unlockExclusive(saved_flags);
+
+        const current_queue = if (prism.queue_is_second) prism.queue_kernel2 else prism.queue_kernel1;
+        const overflowed = prism.queue_count == current_queue.len;
+
+        const defer_drop = switch (prism.options.notify_on_drop) {
+            .defer_on_overflow => overflowed,
+            .always_defer => true,
+            .overwrite => false,
+            .disabled => unreachable,
+        };
+
+        if (defer_drop) {
+            has_dropped = false;
+
+            self.next_dropped = null;
+
+            if (prism.dropped_tail) |tail| {
+                tail.next_dropped = self;
+            } else {
+                prism.dropped_head = self;
+            }
+
+            prism.dropped_tail = self;
+        } else {
+            prism.forcePush(.{
+                .facet_id = @bitCast(self.id),
+                .future = .null,
+                .arg = .{ .pair64 = .{ .arg0 = 0, .arg1 = 0 } },
+            });
         }
     }
 }

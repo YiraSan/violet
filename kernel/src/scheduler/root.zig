@@ -429,16 +429,40 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
         };
 
         const saved_flags = prism.lock.lockExclusive();
+        var early_drop = false;
+        defer if (!early_drop) prism.lock.unlockExclusive(saved_flags);
+
+        const current_queue = if (prism.queue_is_second) prism.queue_kernel2 else prism.queue_kernel1;
+
+        if (prism.queue_count < current_queue.len) {
+            while (prism.dropped_head) |facet| {
+                if (prism.queue_count == current_queue.len) break;
+                defer facet.release();
+
+                prism.dropped_head = facet.next_dropped;
+                if (prism.dropped_head == null) {
+                    prism.dropped_tail = null;
+                }
+
+                facet.next_dropped = null;
+
+                prism.forcePush(.{
+                    .facet_id = @bitCast(facet.id),
+                    .future = .null,
+                    .arg = .{ .pair64 = .{ .arg0 = 0, .arg1 = 0 } },
+                });
+            }
+        }
 
         if (prism.queue_count == 0) {
             if (suspend_behavior == .wait) {
                 prism.consumer = task;
                 task.waited_prism = prism.id;
 
+                early_drop = true;
                 prism.lock.unlockExclusive(saved_flags);
                 suspendFor(.prism_waiting);
             } else {
-                prism.lock.unlockExclusive(saved_flags);
                 return try syscall.fail(frame, .would_suspend);
             }
         } else {
@@ -452,8 +476,6 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
             prism.queue_cursor = 0;
             prism.queue_count = 0;
             prism.queue_is_second = !prism.queue_is_second;
-
-            prism.lock.unlockExclusive(saved_flags);
         }
     } else {
         return try syscall.fail(frame, .unknown_syscall);
@@ -618,33 +640,18 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
         defer prism.lock.unlockExclusive(saved_flags);
 
         const current_queue = if (prism.queue_is_second) prism.queue_kernel2 else prism.queue_kernel1;
+        const overflowed = prism.queue_count == current_queue.len;
 
-        if (prism.queue_cursor == current_queue.len) {
-            switch (prism.options.queue_mode) {
-                .backpressure => {
-                    if (suspend_behavior == .wait) {
-                        std.log.err("facet_invoke: backpressure unimplemented.", .{});
-                        return try syscall.fail(frame, .internal_failure);
-                    } else {
-                        return try syscall.fail(frame, .would_suspend);
-                    }
-                },
-                .overwrite => {
-                    prism.queue_cursor = 0;
-
-                    const victim = current_queue[0];
-                    if (Future.acquire(@bitCast(victim.future))) |victim_fut| {
-                        _ = victim_fut.cancel();
-                        victim_fut.release(); // current ref
-                        victim_fut.release(); // consumer ref
-                    }
-                },
+        if (overflowed and prism.options.queue_mode == .backpressure) {
+            if (suspend_behavior == .wait) {
+                std.log.err("facet_invoke: backpressure unimplemented.", .{});
+                return try syscall.fail(frame, .internal_failure);
+            } else {
+                return try syscall.fail(frame, .would_suspend);
             }
+        } else {
+            prism.forcePush(invocation);
         }
-
-        current_queue[prism.queue_cursor] = invocation;
-        prism.queue_cursor += 1;
-        prism.queue_count = @min(prism.queue_count + 1, current_queue.len);
 
         syscall.success(frame, .{
             .success2 = @bitCast(future_id),

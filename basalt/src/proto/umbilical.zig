@@ -29,7 +29,7 @@ const Facet = sync.Facet;
 
 pub const prism_options = Prism.Options{
     .arg_formats = .pair64,
-    .notify_on_drop = .sidelist,
+    .notify_on_drop = .defer_on_overflow,
     .queue_mode = .backpressure,
     .queue_size = 1,
 };
