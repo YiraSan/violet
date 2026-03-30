@@ -107,7 +107,7 @@ fn destroy(self: *Process) void {
     const lock_flags = processes_map_lock.lockExclusive();
     defer processes_map_lock.unlockExclusive(lock_flags);
 
-    if (self.ref_count.load(.acquire) > 0) {
+    if (self.ref_count.load(.seq_cst) > 0) {
         return;
     }
 
@@ -144,7 +144,7 @@ fn destroy(self: *Process) void {
 }
 
 fn _kill(self: *Process) void {
-    if (self.state.cmpxchgStrong(.alive, .dying, .acq_rel, .monotonic) == null) {
+    if (self.state.cmpxchgStrong(.alive, .dying, .seq_cst, .monotonic) == null) {
         // TODO release waiting tasks on future and interface !
     }
 }
@@ -161,16 +161,16 @@ pub fn acquire(id: Id) ?*Process {
     defer processes_map_lock.unlockShared(lock_flags);
 
     const process: *Process = processes_map.get(id) orelse return null;
-    if (process.state.load(.acquire) == .dying) return null;
+    if (process.state.load(.seq_cst) == .dying) return null;
 
-    _ = process.ref_count.fetchAdd(1, .acq_rel);
+    _ = process.ref_count.fetchAdd(1, .seq_cst);
 
     return process;
 }
 
 /// Invalidate Process pointer.
 pub fn release(self: *Process) void {
-    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
         self._kill();
         self.destroy();
     }
@@ -192,11 +192,11 @@ pub inline fn isPrivileged(self: *const Process) bool {
 }
 
 pub inline fn taskCount(self: *const Process) usize {
-    return self.task_count.load(.acquire);
+    return self.task_count.load(.seq_cst);
 }
 
 pub inline fn isDying(self: *const Process) bool {
-    return self.state.load(.acquire) == .dying;
+    return self.state.load(.seq_cst) == .dying;
 }
 
 // ---- //

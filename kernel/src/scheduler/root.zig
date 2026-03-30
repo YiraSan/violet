@@ -96,7 +96,7 @@ pub fn register(task: *Task) !void {
     //     if (cpu_index == current_cpuid) continue;
 
     //     if (kernel.arch.cpus[cpu_index]) |cpu| {
-    //         if (cpu.scheduler_local.is_idling.load(.acquire)) {
+    //         if (cpu.scheduler_local.is_idling.load(.seq_cst)) {
     //             cpu.premptCpu(true);
     //             break;
     //         }
@@ -197,7 +197,8 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
         };
 
         const lock_flags = task.futures_lock.lockExclusive();
-        defer task.futures_lock.unlockExclusive(lock_flags);
+        var early_unlock = false;
+        defer if (!early_unlock) task.futures_lock.unlockExclusive(lock_flags);
 
         task.futures_generation +%= 1;
 
@@ -295,7 +296,7 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
                                     future.status = .pending;
                                     task.futures_statuses[i] = .pending;
 
-                                    future.consumer_priority.store(task.priority, .release);
+                                    future.consumer_priority.store(task.priority, .seq_cst);
                                 }
                             },
                         }
@@ -315,7 +316,7 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
                         future.waiter_generation = task.futures_generation;
                         future.waiter_index = @intCast(i);
                         future.waiter = task.id;
-                        future.consumer_priority.store(task.priority, .release);
+                        future.consumer_priority.store(task.priority, .seq_cst);
                     },
                 }
 
@@ -332,7 +333,25 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
 
         if (task.futures_pending > 0) {
             if (suspend_behavior == .wait) {
-                suspendFor(.future_waiting);
+                var suspended_task = local.current_task;
+                const old_state = task.state.swap(.future_waiting, .seq_cst);
+                if (old_state == .dying) {
+                    task.state.store(.dying, .seq_cst);
+                    task.release();
+                    suspended_task = null;
+                }
+
+                early_unlock = true;
+                task.futures_lock.unlockExclusive(lock_flags);
+                
+                local.current_task = null;
+                chooseTask();
+
+                if (local.current_task == null) {
+                    local.current_task = local.idle_task;
+                }
+
+                storeAndLoad(suspended_task, true);
             } else {
                 return try syscall.fail(frame, .would_suspend);
             }
@@ -343,27 +362,6 @@ fn future_await(frame: *kernel.arch.GeneralFrame) !void {
     } else {
         return try syscall.fail(frame, .unknown_syscall);
     }
-}
-
-fn suspendFor(state: Task.State) void {
-    const local = Local.get();
-    if (local.current_task == null) @panic("corrupted suspend call");
-    var suspended_task = local.current_task;
-
-    if (suspended_task.?.state.cmpxchgStrong(.ready, state, .acq_rel, .monotonic) == .dying) {
-        suspended_task.?.release();
-        suspended_task = null;
-    }
-
-    local.current_task = null;
-
-    chooseTask();
-
-    if (local.current_task == null) {
-        local.current_task = local.idle_task;
-    }
-
-    storeAndLoad(suspended_task, true);
 }
 
 fn prism_create(frame: *kernel.arch.GeneralFrame) !void {
@@ -420,7 +418,7 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
         const prism = Prism.acquire(prism_id) orelse return try syscall.fail(frame, .invalid_prism);
         defer prism.release();
 
-        if (prism.binded_task_id.load(.acquire) != task.id) return try syscall.fail(frame, .invalid_prism);
+        if (prism.binded_task_id.load(.seq_cst) != task.id) return try syscall.fail(frame, .invalid_prism);
 
         const suspend_behavior: basalt.syscall.SuspendBehavior = switch (frame.getArg(2)) {
             @intFromEnum(basalt.syscall.SuspendBehavior.no_suspend) => .no_suspend,
@@ -429,8 +427,8 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
         };
 
         const saved_flags = prism.lock.lockExclusive();
-        var early_drop = false;
-        defer if (!early_drop) prism.lock.unlockExclusive(saved_flags);
+        var early_unlock = false;
+        defer if (!early_unlock) prism.lock.unlockExclusive(saved_flags);
 
         const current_queue = if (prism.queue_is_second) prism.queue_kernel2 else prism.queue_kernel1;
 
@@ -456,12 +454,25 @@ fn prism_consume(frame: *kernel.arch.GeneralFrame) !void {
 
         if (prism.queue_count == 0) {
             if (suspend_behavior == .wait) {
-                prism.consumer = task;
-                task.waited_prism = prism.id;
+                var suspended_task = local.current_task;
+                const old_state = task.state.swap(.prism_waiting, .seq_cst);
+                if (old_state == .dying) {
+                    task.state.store(.dying, .seq_cst);
+                    task.release();
+                    suspended_task = null;
+                }
 
-                early_drop = true;
+                early_unlock = true;
                 prism.lock.unlockExclusive(saved_flags);
-                suspendFor(.prism_waiting);
+                
+                local.current_task = null;
+                chooseTask();
+
+                if (local.current_task == null) {
+                    local.current_task = local.idle_task;
+                }
+
+                storeAndLoad(suspended_task, true);
             } else {
                 return try syscall.fail(frame, .would_suspend);
             }
@@ -496,10 +507,10 @@ fn prism_bind(frame: *kernel.arch.GeneralFrame) !void {
         const saved_flags = prism.lock.lockExclusive();
         defer prism.lock.unlockExclusive(saved_flags);
 
-        prism.binded_task_id.store(task.id, .release);
+        prism.binded_task_id.store(task.id, .seq_cst);
 
         if (prism.consumer) |consumer| {
-            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_invalided, .acq_rel, .monotonic) == null) {
+            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_invalided, .seq_cst, .monotonic) == null) {
                 prism.consumer = null;
 
                 var cpu_local = kernel.arch.Cpu.getCpu(consumer.host_id).?;
@@ -559,7 +570,7 @@ fn facet_drop(frame: *kernel.arch.GeneralFrame) !void {
 
         if (task.process.id != facet.caller_id and task.process.id != prism.owner_id) return try syscall.fail(frame, .invalid_facet);
 
-        try facet.drop(task.process.id == facet.caller_id and task.id != prism.binded_task_id.load(.acquire));
+        try facet.drop(task.process.id == facet.caller_id and task.id != prism.binded_task_id.load(.seq_cst));
 
         return syscall.success(frame, .{});
     } else {
@@ -600,20 +611,20 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
                 arg.one64_time32_one32.time_ms = @intCast((kernel.drivers.Timer.getUptime() / 1000) % std.math.maxInt(u32));
             },
             .one64_sequence64 => {
-                arg.one64_sequence64.sequence64 = facet.sequence.fetchAdd(1, .acq_rel);
+                arg.one64_sequence64.sequence64 = facet.sequence.fetchAdd(1, .seq_cst);
             },
             .one64_one32_sequence32 => {
-                arg.one64_one32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+                arg.one64_one32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .seq_cst) % std.math.maxInt(u32));
             },
             .one64_time32_sequence32 => {
                 arg.one64_time32_sequence32.time_ms = @intCast((kernel.drivers.Timer.getUptime() / 1000) % std.math.maxInt(u32));
-                arg.one64_time32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+                arg.one64_time32_sequence32.sequence32 = @intCast(facet.sequence.fetchAdd(1, .seq_cst) % std.math.maxInt(u32));
             },
             .one64_one32_one16_cpuid => {
                 arg.one64_one32_one16_cpuid.cpuid = kernel.arch.Cpu.id();
             },
             .one64_sequence32_one16_cpuid => {
-                arg.one64_sequence32_one16_cpuid.sequence32 = @intCast(facet.sequence.fetchAdd(1, .acq_rel) % std.math.maxInt(u32));
+                arg.one64_sequence32_one16_cpuid.sequence32 = @intCast(facet.sequence.fetchAdd(1, .seq_cst) % std.math.maxInt(u32));
                 arg.one64_sequence32_one16_cpuid.cpuid = kernel.arch.Cpu.id();
             },
             .one64_time32_one16_cpuid => {
@@ -658,7 +669,7 @@ fn facet_invoke(frame: *kernel.arch.GeneralFrame) !void {
         });
 
         if (prism.consumer) |consumer| {
-            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_queued, .acq_rel, .monotonic) == null) {
+            if (consumer.state.cmpxchgStrong(.prism_waiting, .prism_waiting_queued, .seq_cst, .monotonic) == null) {
                 prism.consumer = null;
 
                 consumer.updateAffinity();
@@ -733,7 +744,7 @@ fn timerCallback() void {
 
                     _ = future.resolve(delta);
 
-                    const physical_tick = @max(timer_event.virtual_tick, future.consumer_priority.load(.acquire).minResolution());
+                    const physical_tick = @max(timer_event.virtual_tick, future.consumer_priority.load(.seq_cst).minResolution());
 
                     timer_event.deadline += physical_tick;
 
@@ -927,7 +938,7 @@ inline fn chooseTask() void {
                     if (cpu_index == current_cpuid) continue;
 
                     if (kernel.arch.cpus[cpu_index]) |cpu| {
-                        if (cpu.scheduler_local.is_idling.load(.acquire)) {
+                        if (cpu.scheduler_local.is_idling.load(.seq_cst)) {
                             cpu.premptCpu(true);
                             break;
                         }
@@ -1006,7 +1017,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         }
     }
 
-    const value = task.state.load(.acquire);
+    const value = task.state.load(.seq_cst);
     const frame = if (task.is_extended) &task.stack_pointer.extended.general_frame else task.stack_pointer.general;
 
     switch (value) {
@@ -1069,7 +1080,7 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
         else => @panic("corrupted task state at reloading"),
     }
 
-    if (task.state.cmpxchgStrong(value, .ready, .acq_rel, .monotonic) == .dying) {
+    if (task.state.cmpxchgStrong(value, .ready, .seq_cst, .monotonic) == .dying) {
         return task_terminate(undefined) catch {};
     }
 
@@ -1083,9 +1094,9 @@ pub inline fn storeAndLoad(last_task: ?*Task, waiting: bool) void {
     }
 
     if (task.process.id == idle_process.id) {
-        local.is_idling.store(true, .release);
+        local.is_idling.store(true, .seq_cst);
     } else {
-        local.is_idling.store(false, .release);
+        local.is_idling.store(false, .seq_cst);
     }
 
     kernel.drivers.Timer.rearm(task, task.process.id == idle_process.id);

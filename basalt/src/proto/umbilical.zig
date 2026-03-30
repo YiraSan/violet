@@ -22,8 +22,9 @@ const basalt = @import("basalt");
 
 const sync = basalt.sync;
 
-const Prism = sync.Prism;
 const Facet = sync.Facet;
+const Future = sync.Future;
+const Prism = sync.Prism;
 
 // --- proto/umbilical.zig --- //
 
@@ -34,8 +35,50 @@ pub const prism_options = Prism.Options{
     .queue_size = 1,
 };
 
-pub const InvocationArg = packed struct(u64) {};
+pub const InvocationArg = extern struct {
+    command: enum(u16) { // 2 bytes
+        get_env = 0,
+        _,
+    },
+
+    payload: extern union { // 14 bytes
+        get_env: extern struct {
+            device: Device,
+            version: Version,
+            _reserved0: [8]u8 = .{0} ** 8,
+        },
+
+        // ...
+    },
+
+    comptime {
+        if (@sizeOf(InvocationArg) != @sizeOf(Prism.InvocationArg)) @compileError("umbilical.InvocationArg has incorrect size.");
+    }
+};
 
 const Umbilical = @This();
 
 facet: Facet,
+
+pub const Device = enum(u16) {
+    console = 0xb707,
+    _,
+};
+
+pub const Version = extern struct {
+    major: u16,
+    minor: u16,
+};
+
+pub fn getEnv(self: *const Umbilical, device: Device, version: Version) !Future {
+    return self.facet.invoke(
+        @bitCast(InvocationArg{
+            .command = .get_env,
+            .payload = .{ .get_env = .{
+                .device = device,
+                .version = version,
+            } },
+        }),
+        .default,
+    );
+}

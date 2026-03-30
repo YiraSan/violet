@@ -15,8 +15,5 @@
 const basalt = @import("basalt");
 
 pub fn main() !void {
-    _ = try basalt.umbilical.invoke(.{ .pair64 = .{
-        .arg0 = 444,
-        .arg1 = 25565,
-    } }, .wait);
+    _ = try basalt.umbilical.getEnv(.console, .{ .major = 0, .minor = 1 });
 }

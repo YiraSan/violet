@@ -76,6 +76,15 @@ pub fn build(b: *std.Build) !void {
     const basalt_mod = basalt_dep.module("basalt");
     kernel_mod.addImport("basalt", basalt_mod);
 
+    const limine_zig = b.dependency("limine_zig", .{
+        .api_revision = 4,
+        .allow_deprecated = false,
+        .no_pointers = false,
+    });
+
+    const limine_module = limine_zig.module("limine");
+    kernel_mod.addImport("limine", limine_module); 
+
     const kernel_exe = b.addExecutable(.{
         .name = "kernel",
         .root_module = kernel_mod,

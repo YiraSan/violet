@@ -85,7 +85,7 @@ pub const Cpu = struct {
     timer_local: kernel.drivers.Timer.Local,
 
     pub fn premptCpu(self: *@This(), force: bool) void {
-        if (self.scheduler_local.is_idling.load(.acquire) or force) {
+        if (self.scheduler_local.is_idling.load(.seq_cst) or force) {
             // IPI 1 is timerCallback (which is scheduler preemption)
             sendIPI(@intCast(self.cpuid), 1);
         }

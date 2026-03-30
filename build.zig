@@ -31,20 +31,14 @@ pub fn build(b: *std.Build) !void {
     const kernel_exe = kernel_dep.artifact("kernel");
     b.installArtifact(kernel_exe);
 
-    const bootloader_dep = b.dependency("bootloader", .{
-        .platform = platform,
-        .use_uefi = use_uefi,
-        .optimize = optimize,
-    });
-    const bootloader_exe = bootloader_dep.artifact("bootloader");
-    b.installArtifact(bootloader_exe);
-
     const genesis_dep = b.dependency("genesis", .{
         .platform = platform,
         .optimize = optimize,
     });
     const genesis_exe = genesis_dep.artifact("genesis");
     b.installArtifact(genesis_exe);
+
+    const limine = b.dependency("limine", .{});
 
     // Disk
 
@@ -53,11 +47,19 @@ pub fn build(b: *std.Build) !void {
         bootfs.mkdir("/EFI");
         bootfs.mkdir("/EFI/BOOT");
 
-        bootfs.copyFile(bootloader_exe.getEmittedBin(), switch (platform.arch()) {
+        bootfs.copyFile(switch (platform.arch()) {
+            .aarch64 => limine.path("BOOTAA64.EFI"),
+            .riscv64 => limine.path("BOOTRISCV64.EFI"),
+            .x86_64 => limine.path("BOOTX64.EFI"),
+            else => unreachable,
+        }, switch (platform.arch()) {
             .aarch64 => "/EFI/BOOT/BOOTAA64.EFI",
             .riscv64 => "/EFI/BOOT/BOOTRISCV64.EFI",
+            .x86_64 => "/EFI/BOOT/BOOTX64.EFI",
             else => unreachable,
         });
+
+        bootfs.copyFile(b.path("limine.conf"), "/limine.conf");
 
         bootfs.copyFile(kernel_exe.getEmittedBin(), "/kernel.elf");
         bootfs.copyFile(genesis_exe.getEmittedBin(), "/genesis.elf");
@@ -127,11 +129,11 @@ pub fn build(b: *std.Build) !void {
             // zig fmt: off
             "qemu-system-aarch64",
 
-            "-accel", "kvm",
-            "-accel", "hvf",
-            "-accel", "tcg",
+            // "-accel", "kvm",
+            // "-accel", "hvf",
+            // "-accel", "tcg",
 
-            "-cpu", "host",
+            "-cpu", "cortex-a72",
 
             "-machine", "virt,secure=off,virtualization=off",
 
@@ -142,7 +144,9 @@ pub fn build(b: *std.Build) !void {
             "-device", "virtio-blk-pci,drive=disk0,disable-legacy=on",
             "-drive", "file=zig-out/disk.img,if=none,id=disk0,format=raw",
 
-            "-device", "virtio-gpu-pci",
+            // "-device", "virtio-gpu-pci",
+
+            "-device", "ramfb",
 
             "-serial", "stdio",
             "-boot", "d",

@@ -41,7 +41,7 @@ pub const RwLock = struct {
     pub fn lockShared(self: *@This()) u64 {
         const flags = kernel.arch.maskAndSave();
 
-        while (true) {
+        for (0..1_000_000) |_| {
             const current = self.state.load(.monotonic);
 
             if (current == WRITER_LOCKED) {
@@ -52,22 +52,25 @@ pub const RwLock = struct {
             if (self.state.cmpxchgWeak(
                 current,
                 current + 1,
-                .acq_rel,
+                .seq_cst,
                 .monotonic,
             ) == null) {
                 return flags;
             }
         }
+
+        // std.log.err("deadlock on lockShared with return address: 0x{x}", .{@returnAddress()});
+        @panic("deadlock on lockShared");
     }
 
     pub fn unlockShared(self: *@This(), saved_flags: u64) void {
-        _ = self.state.fetchSub(1, .release);
+        _ = self.state.fetchSub(1, .seq_cst);
         kernel.arch.restoreSaved(saved_flags);
     }
 
     pub fn tryLockExclusive(self: *@This()) ?u64 {
         const flags = kernel.arch.maskAndSave();
-        if (self.state.cmpxchgStrong(0, WRITER_LOCKED, .acq_rel, .monotonic) == null) {
+        if (self.state.cmpxchgStrong(0, WRITER_LOCKED, .seq_cst, .monotonic) == null) {
             return flags;
         }
         kernel.arch.restoreSaved(flags);
@@ -77,20 +80,23 @@ pub const RwLock = struct {
     pub fn lockExclusive(self: *@This()) u64 {
         const flags = kernel.arch.maskAndSave();
 
-        while (true) {
+        for (0..1_000_000) |_| {
             if (self.state.load(.monotonic) != 0) {
                 std.atomic.spinLoopHint();
                 continue;
             }
 
-            if (self.state.cmpxchgWeak(0, WRITER_LOCKED, .acq_rel, .monotonic) == null) {
+            if (self.state.cmpxchgWeak(0, WRITER_LOCKED, .seq_cst, .monotonic) == null) {
                 return flags;
             }
         }
+
+        // std.log.err("deadlock on lockExclusive with return address: 0x{x}", .{@returnAddress()});
+        @panic("deadlock on lockExclusive");
     }
 
     pub fn unlockExclusive(self: *@This(), saved_flags: u64) void {
-        self.state.store(0, .release);
+        self.state.store(0, .seq_cst);
         kernel.arch.restoreSaved(saved_flags);
     }
 };

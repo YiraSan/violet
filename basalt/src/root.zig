@@ -21,4 +21,4 @@ pub const syscall = @import("syscall/root.zig");
 pub const task = @import("task/root.zig");
 pub const time = @import("time/root.zig");
 
-pub var umbilical: sync.Facet = undefined;
+pub var umbilical: proto.Umbilical = undefined;

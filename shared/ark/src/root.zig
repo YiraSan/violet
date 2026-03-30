@@ -146,10 +146,11 @@ pub const armv8 = struct {
         /// L1-L2 Block and L3 Page.
         pub const BlockPageDescriptor = packed struct(u62) {
             attr_index: enum(u3) { // bit 2-4
-                device = 0,
-                non_cacheable = 1,
-                writethrough = 2,
-                writeback = 3,
+                writeback = 0,
+                boot_framebuffer = 1,
+                device = 2,
+                non_cacheable = 3,
+                writethrough = 4,
             },
 
             /// Used only if the access is from Secure state.

@@ -97,7 +97,7 @@ fn destroy(self: *Facet) void {
     const saved_flags = facets_map_lock.lockExclusive();
     defer facets_map_lock.unlockExclusive(saved_flags);
 
-    if (self.ref_count.load(.acquire) > 0) {
+    if (self.ref_count.load(.seq_cst) > 0) {
         return;
     }
 
@@ -123,16 +123,16 @@ pub fn acquire(id: Id) ?*Facet {
     defer facets_map_lock.unlockShared(saved_flags);
 
     const facet: *Facet = facets_map.get(id) orelse return null;
-    if (facet.dropped.load(.acquire)) return null;
+    if (facet.dropped.load(.seq_cst)) return null;
 
-    _ = facet.ref_count.fetchAdd(1, .acq_rel);
+    _ = facet.ref_count.fetchAdd(1, .seq_cst);
 
     return facet;
 }
 
 pub fn drop(self: *Facet, notify: bool) !void {
     var has_dropped = false;
-    if (self.dropped.cmpxchgStrong(false, true, .acq_rel, .monotonic) == null) {
+    if (self.dropped.cmpxchgStrong(false, true, .seq_cst, .monotonic) == null) {
         has_dropped = true;
     }
 
@@ -178,7 +178,7 @@ pub fn drop(self: *Facet, notify: bool) !void {
 }
 
 pub fn release(self: *Facet) void {
-    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
         self.destroy();
     }
 }

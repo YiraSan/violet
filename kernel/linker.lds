@@ -2,26 +2,35 @@ ENTRY(kernel_entry)
 
 PHDRS
 {
-    text    PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ;
-    rodata  PT_LOAD    FLAGS((1 << 2)) ;
-    data    PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ;
+    limine_requests PT_LOAD;
+    text            PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ;
+    rodata          PT_LOAD    FLAGS((1 << 2)) ;
+    data            PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ;
 }
 
 SECTIONS
 {
-    . = 0xffff800000000000;
+    . = 0xffffffff80000000;
+
+    .limine_requests : {
+        KEEP(*(.limine_requests_start))
+        KEEP(*(.limine_requests))
+        KEEP(*(.limine_requests_end))
+    } :limine_requests
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .text : {
         *(.text .text.*)
     } :text
 
-    . = ALIGN(4K);
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .rodata : {
         *(.rodata .rodata.*)
     } :rodata
 
-    . = ALIGN(4K);
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .data : {
         *(.data .data.*)

@@ -12,26 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// --- dependencies --- //
-
-const std = @import("std");
-
-// --- imports --- //
-
-const basalt = @import("basalt");
-
-const sync = basalt.sync;
-
-const Facet = sync.Facet;
-const Prism = sync.Prism;
-
-// --- proto/console.zig --- //
-
-pub const prism_options = Prism.Options{
-    .arg_formats = .pair64,
-    .notify_on_drop = .defer_on_overflow,
-    .queue_mode = .backpressure,
-    .queue_size = 2,
-};
-
-facet: Facet,
+pub fn main() !void {}

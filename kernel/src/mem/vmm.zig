@@ -230,7 +230,7 @@ pub const Allocator = struct {
 
         const region_ptr = self.regions.get(region_id).?;
 
-        if (is_syscall) if (region_ptr.syscall_pinned.load(.acquire) > 0) return Error.InvalidAddress;
+        if (is_syscall) if (region_ptr.syscall_pinned.load(.seq_cst) > 0) return Error.InvalidAddress;
 
         if (region_ptr.start != address) {
             return Error.InvalidAddress;
@@ -298,7 +298,7 @@ pub const Allocator = struct {
         const old_obj = old_region.object;
         const old_base_offset = old_region.offset;
         const old_flags = old_region.flags;
-        const old_pinned = old_region.syscall_pinned.load(.acquire);
+        const old_pinned = old_region.syscall_pinned.load(.seq_cst);
 
         _ = self.regions.remove(region_id);
 
@@ -600,7 +600,7 @@ pub const Object = struct {
         const lock_flags = objects_map_lock.lockExclusive();
         defer objects_map_lock.unlockExclusive(lock_flags);
 
-        if (self.ref_count.load(.acquire) > 0) {
+        if (self.ref_count.load(.seq_cst) > 0) {
             return;
         }
 
@@ -623,13 +623,13 @@ pub const Object = struct {
 
         const object: *Object = objects_map.get(id) orelse return null;
 
-        _ = object.ref_count.fetchAdd(1, .acq_rel);
+        _ = object.ref_count.fetchAdd(1, .seq_cst);
 
         return object;
     }
 
     pub fn release(self: *Object) void {
-        if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+        if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
             self.destroy();
         }
     }

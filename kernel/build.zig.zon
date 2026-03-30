@@ -1,12 +1,16 @@
 .{
     .name = .kernel,
-    .version = "0.1.0-dev.6",
+    .version = "0.1.0-dev.7",
     .fingerprint = 0x5dd29aabfd4067c8, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
     .dependencies = .{
         .basalt = .{ .path = "../basalt/" },
         .ark = .{ .path = "../shared/ark/" },
         .whba = .{ .path = "../shared/whba" },
+        .limine_zig = .{
+            .url = "git+https://github.com/YiraSan/limine-zig#f64eb63c71e1bdcd51c778cd2aec4011edb7d412",
+            .hash = "limine_zig-0.0.0-1TjwQGF7AAA36rrmFpmDPyid3VqtcrPjDNENrvy75PDj",
+        },
     },
     .paths = .{
         "build.zig",

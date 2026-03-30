@@ -1,0 +1,14 @@
+.{
+    .name = .pcie,
+    .version = "0.0.0",
+    .fingerprint = 0x890d4fc0ffae2506, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.1",
+    .dependencies = .{
+        .basalt = .{ .path = "../../basalt/" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

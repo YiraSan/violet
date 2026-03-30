@@ -104,7 +104,7 @@ pub fn pin(task: *kernel.scheduler.Task, virt_address: u64, T: type, count: usiz
         if (region.end - virt_address < @sizeOf(T) * count) return false;
         if (!object.flags.writable and writable) return false;
 
-        _ = region.syscall_pinned.fetchAdd(1, .acq_rel);
+        _ = region.syscall_pinned.fetchAdd(1, .seq_cst);
 
         return true;
     }
@@ -120,5 +120,5 @@ pub fn unpin(task: *kernel.scheduler.Task, virt_address: u64) void {
     const region_id = vs.allocator.regions.find(virt_address) orelse return;
     const region = vs.allocator.regions.get(region_id).?;
 
-    _ = region.syscall_pinned.fetchSub(1, .acq_rel);
+    _ = region.syscall_pinned.fetchSub(1, .seq_cst);
 }

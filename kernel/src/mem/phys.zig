@@ -60,6 +60,8 @@ fn refillPrimary(local: *Local) Whba.Error!void {
     const lock_flags = lock.lockExclusive();
     defer lock.unlockExclusive(lock_flags);
 
+    boot.hint();
+
     try whba.allocNonContiguous(&local.primary_4k_cache);
     local.primary_4k_cache_pos = 0;
 }

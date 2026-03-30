@@ -211,7 +211,7 @@ fn task2_main() !void {
     const facet = try basalt.sync.Facet.create(prism, basalt.process.id());
     defer facet.drop();
 
-    task2_facet.store(facet, .release);
+    task2_facet.store(facet, .seq_cst);
 
     while (try prism.consume(.wait)) |invocation| {
         const val = invocation.arg.pair64.arg0 + 1;
@@ -233,10 +233,10 @@ fn task3_entry(_: basalt.sync.Facet, _: *const basalt.module.KernelIndirectionTa
 fn task3_main() !void {
     task3_log.info("here to benchmark for {} iterations !", .{PING_PONG_ITERATIONS});
 
-    while (task2_facet.load(.acquire).isNull()) {
+    while (task2_facet.load(.seq_cst).isNull()) {
         std.atomic.spinLoopHint();
     }
-    var out_facet: basalt.sync.Facet = task2_facet.load(.acquire);
+    var out_facet: basalt.sync.Facet = task2_facet.load(.seq_cst);
 
     const start_time = drivers.Timer.getUptime();
 

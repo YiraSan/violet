@@ -79,6 +79,10 @@ pub const Prism = struct {
         one64_one32_one16_cpuid: extern struct { arg0: u64, arg1: u32, arg2: u16, cpuid: u16 },
         one64_sequence32_one16_cpuid: extern struct { arg0: u64, sequence32: u32, arg2: u16, cpuid: u16 },
         one64_time32_one16_cpuid: extern struct { arg0: u64, time_ms: u32, arg1: u16, cpuid: u16 },
+
+        comptime {
+            if (@sizeOf(InvocationArg) != 16) @compileError("InvocationArg has incorrect size.");
+        }
     };
 
     pub const Invocation = extern struct {

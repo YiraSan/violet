@@ -21,6 +21,12 @@ violetOS decouples software architecture from execution strategy. Logically, it 
 
 Physically, however, the runtime adapts to the context. While untrusted processes remain strictly isolated, trusted modules share the kernel's address space. This hybrid approach preserves the architectural cleanliness of a microkernel while reclaiming the raw performance of a monolith—enabling direct function calls and zero-copy mechanisms—precisely where they are needed.
 
+## Realtime by design, not by motive
+
+"Realtime by design, not by motive" is the defining philosophy of violetOS. Traditional systems like Linux (`PREEMPT_RT`) attempt to coerce a chaotic, lock-heavy monolith into respecting deadlines—essentially trying to force a sumo wrestler to run a marathon by simply buying him running shoes. It is a constant struggle against the system's own nature, where "real-time" is a patched-on feature fighting against unpredictable corner cases, lock contention, and complex memory management that can spike latency at any moment.
+
+violetOS flips this paradigm. It does not chase real-time performance as an added objective; it achieves it as an emergent property of a mathematically sound architecture. By enforcing an Async-First, Data-Oriented design, violetOS systematically eliminates the random variables from the latency equation. When you rigorously strip away everything that is blocking, unpredictable, or slow, you don't need to force the system to be fast. "Real-Time" isn't a mode you turn on—it is simply the only thing left.
+
 ## Requirements
 
 This project uses and is tested with [Zig](https://github.com/ziglang/zig) `0.14.1`. We recommend using [zvm](https://github.com/tristanisham/zvm) to install and manage Zig versions.

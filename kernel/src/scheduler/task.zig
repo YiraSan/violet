@@ -230,7 +230,7 @@ pub fn create(process_id: Process.Id, options: Options) !*Task {
     const task_ptr = tasks_map.get(slot_key) orelse unreachable;
     task_ptr.id = slot_key;
 
-    _ = task_ptr.process.task_count.fetchAdd(1, .acq_rel);
+    _ = task_ptr.process.task_count.fetchAdd(1, .seq_cst);
 
     task.kernel_locals_kernel.task_id = @bitCast(slot_key);
 
@@ -249,7 +249,7 @@ pub fn extendFrame(self: *Task) void {
 }
 
 pub fn kill(self: *Task) void {
-    self.state.store(.dying, .release);
+    self.state.store(.dying, .seq_cst);
 }
 
 fn destroy(self: *Task) void {
@@ -259,7 +259,7 @@ fn destroy(self: *Task) void {
     const lock_flags = tasks_map_lock.lockExclusive();
     defer tasks_map_lock.unlockExclusive(lock_flags);
 
-    if (self.ref_count.load(.acquire) > 0) {
+    if (self.ref_count.load(.seq_cst) > 0) {
         return;
     }
 
@@ -276,22 +276,22 @@ pub fn acquire(id: Id) ?*Task {
     defer tasks_map_lock.unlockShared(lock_flags);
 
     const task: *Task = tasks_map.get(id) orelse return null;
-    if (task.state.load(.acquire) == .dying) return null;
+    if (task.state.load(.seq_cst) == .dying) return null;
 
-    _ = task.ref_count.fetchAdd(1, .acq_rel);
+    _ = task.ref_count.fetchAdd(1, .seq_cst);
 
     return task;
 }
 
 /// Invalidate Process pointer.
 pub fn release(self: *Task) void {
-    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
         self.destroy();
     }
 }
 
 pub inline fn isDying(self: *const Task) bool {
-    return self.state.load(.acquire) == .dying;
+    return self.state.load(.seq_cst) == .dying;
 }
 
 pub inline fn penalty(self: *const Task) u64 {

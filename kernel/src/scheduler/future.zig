@@ -128,7 +128,7 @@ fn destroy(self: *Future) void {
     const lock_flags = futures_map_lock.lockExclusive();
     defer futures_map_lock.unlockExclusive(lock_flags);
 
-    if (self.ref_count.load(.acquire) > 0) {
+    if (self.ref_count.load(.seq_cst) > 0) {
         return;
     }
 
@@ -141,13 +141,13 @@ pub fn acquire(id: Id) ?*Future {
 
     const future: *Future = futures_map.get(id) orelse return null;
 
-    _ = future.ref_count.fetchAdd(1, .acq_rel);
+    _ = future.ref_count.fetchAdd(1, .seq_cst);
 
     return future;
 }
 
 pub fn release(self: *Future) void {
-    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
         self.destroy();
     }
 }
@@ -182,7 +182,8 @@ pub fn resolve(self: *Future, payload: u64) bool {
             defer waiter.release();
 
             const lock_flags = waiter.futures_lock.lockExclusive();
-            defer waiter.futures_lock.unlockExclusive(lock_flags);
+            var early_unlock = false;
+            defer if (!early_unlock) waiter.futures_lock.unlockExclusive(lock_flags);
 
             if (self.waiter_generation == waiter.futures_generation) {
                 switch (self.type) {
@@ -222,7 +223,10 @@ pub fn resolve(self: *Future, payload: u64) bool {
                     wakeup_needed = true; // insolvent
                 }
 
-                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
+                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .seq_cst, .monotonic) == null) {
+                    early_unlock = true;
+                    waiter.futures_lock.unlockExclusive(lock_flags);
+
                     waiter.updateAffinity();
 
                     var cpu_local = kernel.arch.Cpu.getCpu(waiter.host_id).?;
@@ -266,7 +270,8 @@ pub fn cancel(self: *Future) bool {
             defer waiter.release();
 
             const lock_flags = waiter.futures_lock.lockExclusive();
-            defer waiter.futures_lock.unlockExclusive(lock_flags);
+            var early_unlock = false;
+            defer if (!early_unlock) waiter.futures_lock.unlockExclusive(lock_flags);
 
             if (self.waiter_generation == waiter.futures_generation) {
                 waiter.futures_statuses[self.waiter_index] = .canceled;
@@ -286,7 +291,10 @@ pub fn cancel(self: *Future) bool {
                     wakeup_needed = true; // insolvent
                 }
 
-                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .acq_rel, .monotonic) == null) {
+                if (wakeup_needed) if (waiter.state.cmpxchgStrong(.future_waiting, .future_waiting_queued, .seq_cst, .monotonic) == null) {
+                    early_unlock = true;
+                    waiter.futures_lock.unlockExclusive(lock_flags);
+                    
                     var cpu_local = kernel.arch.Cpu.getCpu(waiter.host_id).?;
                     var cpu_sched = &cpu_local.scheduler_local;
 

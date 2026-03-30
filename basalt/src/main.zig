@@ -38,7 +38,7 @@ const entry_point = if (basalt.module.is_module) struct {
 };
 
 fn setup_routine(umbilical: basalt.sync.Facet) void {
-    basalt.umbilical = umbilical;
+    basalt.umbilical = .{ .facet = umbilical };
 }
 
 fn main_entry() noreturn {

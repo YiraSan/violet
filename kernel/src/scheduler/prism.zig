@@ -149,7 +149,7 @@ fn destroy(self: *Prism) void {
     const lock_flags = prisms_map_lock.lockExclusive();
     defer prisms_map_lock.unlockExclusive(lock_flags);
 
-    if (self.ref_count.load(.acquire) > 0) {
+    if (self.ref_count.load(.seq_cst) > 0) {
         return;
     }
 
@@ -167,7 +167,7 @@ fn destroy(self: *Prism) void {
         }
     }
 
-    if (Task.acquire(self.binded_task_id.load(.acquire))) |binded_task| {
+    if (Task.acquire(self.binded_task_id.load(.seq_cst))) |binded_task| {
         defer binded_task.release();
 
         binded_task.process.virtualSpace().unmap(self.queue_user1, false) catch {};
@@ -181,7 +181,7 @@ fn destroy(self: *Prism) void {
 }
 
 pub fn kill(self: *Prism) void {
-    if (self.state.cmpxchgStrong(.alive, .dying, .acq_rel, .monotonic) == null) {
+    if (self.state.cmpxchgStrong(.alive, .dying, .seq_cst, .monotonic) == null) {
         defer self.release(); // process reference
     }
 }
@@ -191,15 +191,15 @@ pub fn acquire(id: Id) ?*Prism {
     defer prisms_map_lock.unlockShared(lock_flags);
 
     const prism: *Prism = prisms_map.get(id) orelse return null;
-    if (prism.state.load(.acquire) == .dying) return null;
+    if (prism.state.load(.seq_cst) == .dying) return null;
 
-    _ = prism.ref_count.fetchAdd(1, .acq_rel);
+    _ = prism.ref_count.fetchAdd(1, .seq_cst);
 
     return prism;
 }
 
 pub fn release(self: *Prism) void {
-    if (self.ref_count.fetchSub(1, .acq_rel) == 1) {
+    if (self.ref_count.fetchSub(1, .seq_cst) == 1) {
         self.destroy();
     }
 }

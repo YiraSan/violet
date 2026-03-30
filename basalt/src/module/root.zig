@@ -34,6 +34,28 @@ pub const PtrResult = extern struct {
 
 pub const KernelIndirectionTable = extern struct {
     call_system: *const fn (code: syscall.Code, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64, arg6: u64, arg7: u64) callconv(basalt.task.call_conv) extern struct { syscall_result: syscall.Result, success2: u64 },
+
+    /// Requests the transition of the current task from Symmetric Multiprocessing (SMP) to Asymmetric Multiprocessing (AMP) execution.
+    ///
+    /// If granted, the kernel selects a physical core, evicts all other workloads from it,
+    /// and disables scheduler preemption (Tickless) and maskable interrupts.
+    /// The current task becomes the sole owner of the core's L1/L2 cache and cycles.
+    ///
+    /// The system must have enough remaining cores to maintain system stability.
+    ///
+    /// @return `true` if a core was successfully annexed and the task migrated.
+    isolate_current_task: *const fn () callconv(basalt.task.call_conv) bool,
+
+    /// Voluntarily relinquishes exclusive control of the physical core.
+    ///
+    /// This command reintegrates the core into the global SMP load-balancing pool.
+    ///
+    /// Standard preemptive scheduling, timer ticks, and hardware interrupts are
+    /// re-enabled immediately.
+    ///
+    /// This must be called when the high-frequency workload is complete to restore
+    /// system parallelism.
+    exit_isolation: *const fn () callconv(basalt.task.call_conv) void,
 };
 
 pub var kernel_indirection_table: *const KernelIndirectionTable = if (build_options.module_mode) undefined else unreachable;
