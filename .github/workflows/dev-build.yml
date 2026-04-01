@@ -7,41 +7,58 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    
-    - uses: mlugg/setup-zig@v2
-      with:
-        version: 0.14.1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
 
-    - run: |
-        sudo apt-get update
-        mkdir -p .zig-cache
+      - name: Setup Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: aarch64-unknown-none
+          components: rust-src
 
-    - name: Aarch64-QEMU (Build)
-      run: |
-        zig build -Dplatform=aarch64_qemu -Doptimize=Debug
-        mv ./zig-out/disk.img ./violet-aarch64_qemu.img
+      - name: Setup Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            basalt
+            forge
+            kernel
 
-    - name: Raspberry Pi 4 (Build)
-      run: |
-        zig build -Dplatform=rpi4 -Doptimize=Debug
-        mv ./zig-out/disk.img ./violet-rpi4.img
+      - name: Build QEMU (aarch64)
+        run: |
+          cargo x build --platform aarch64-qemu --release
 
-    - uses: "marvinpinto/action-automatic-releases@latest"
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "dev"
-        prerelease: true
-        title: "Development Build"
-        files: |
-          violet-aarch64_qemu.img
-          violet-rpi4.img
-          LICENSE
-          NOTICE
-          README.md
+      - name: Build Raspberry Pi 4
+        run: |
+          cargo x build --platform rpi4  --release
+
+      - name: Move dev tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f dev
+          git push -f origin dev
+
+      - name: Update Development Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "dev"
+          name: "Development Build"
+          prerelease: true
+          make_latest: true 
+          files: |
+            bin/violet_aarch64-qemu.img
+            bin/violet_rpi4.img
+            LICENSE
+            README.md
+            NOTICE.md

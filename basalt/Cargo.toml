@@ -1,0 +1,9 @@
+[package]
+name = "basalt"
+version = "0.1.0-dev.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
