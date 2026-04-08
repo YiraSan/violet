@@ -41,16 +41,15 @@ cargo x run --platform {PLATFORM}
 
 ## Platform matrix
 
-> [!NOTE]
-> **Regarding x86_64:**
-> While the codebase is architected with x86_64 portability in mind, active implementation is currently deferred. The legacy complexity of the x86 architecture creates unnecessary friction for rapid prototyping and obscures architectural clarity. We prioritize cleaner ISAs (AArch64, RISC-V) to validate our core concepts first.
-
 | Platform | Identifier | State |
 | -------- | ---------- | ----- |
 | QEMU (aarch64)              | `aarch64-qemu` | ✅<sup>1</sup> |
 | QEMU (riscv64)              | `riscv64-qemu` | 🗓️<sup>3</sup> |
+| PC (x86_64)                 | `x86-64pc`     | 🗓️<sup>3</sup> |
 | Raspberry Pi 4<sup>4</sup>  | `rpi4`         | 🔨<sup>2</sup> |
-| Rockchip RK3588<sup>5</sup>  | `rk3588`         | 🗓️<sup>3</sup> |
+| Raspberry Pi 3<sup>5</sup>  | `rpi3`         | 🗓️<sup>3</sup> |
+| Rockchip RK3588<sup>6</sup> | `rk3588`       | 🗓️<sup>3</sup> |
+| VisionFive 2<sup>7</sup>    | `vf2`          | 🗓️<sup>3</sup> |
 
 <sup>1</sup> ✅ means "Supported".
 
@@ -60,7 +59,11 @@ cargo x run --platform {PLATFORM}
 
 <sup>4</sup> Raspberry Pi 4B, 400 and 4 CM.
 
-<sup>5</sup> Includes all Rockchip RK3588/RK3588S based single-board computers (e.g., Orange Pi 5 series, Radxa ROCK 5 series).
+<sup>5</sup> Raspberry Pi 3B, 3B+, 3A+ and 3 CM.
+
+<sup>6</sup> Includes all Rockchip RK3588/RK3588S based single-board computers (e.g., Orange Pi 5 series, Radxa ROCK 5 series).
+
+<sup>7</sup> StarFive VisionFive 2 board (JH7110 SoC).
 
 ## License
 
