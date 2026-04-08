@@ -34,13 +34,21 @@ jobs:
             forge
             kernel
 
-      - name: Build QEMU (aarch64)
+      - name: aarch64-qemu build
         run: |
           cargo x build --platform aarch64-qemu --release
 
-      - name: Build Raspberry Pi 4
+      - name: x86-64pc build
+        run: |
+          cargo x build --platform x86-64pc --release
+
+      - name: rpi4 build
         run: |
           cargo x build --platform rpi4  --release
+
+      - name: rpi3 build
+        run: |
+          cargo x build --platform rpi3  --release
 
       - name: Move dev tag
         run: |
@@ -58,7 +66,10 @@ jobs:
           make_latest: true 
           files: |
             bin/violet_aarch64-qemu.img
+            bin/violet_rpi3.img
             bin/violet_rpi4.img
+            bin/violet_x86-64pc.img
             LICENSE
-            README.md
             NOTICE.md
+            README.md
+            SUPPORT.md
