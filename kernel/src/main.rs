@@ -19,46 +19,44 @@
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-use limine::{BaseRevision, RequestsEndMarker, RequestsStartMarker};
+mod arch;
+mod boot;
+mod mem;
+mod serial;
 
-use core::arch::asm;
+mod log;
 
-#[used]
-#[unsafe(link_section = ".requests_start_marker")]
-static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
-
-#[used]
-#[unsafe(link_section = ".requests_end_marker")]
-static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static BASE_REVISION: BaseRevision = BaseRevision::with_revision(6);
-
-#[unsafe(no_mangle)]
-pub extern "C" fn kernel_entry() -> ! {
-    assert!(BASE_REVISION.is_supported());
-
-    hcf();
-}
+use owo_colors::OwoColorize;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    hcf();
+    arch::halt();
 }
 
 #[cfg(test)]
 fn test_runner(_tests: &[&dyn Fn()]) {}
 
-fn hcf() -> ! {
-    loop {
-        unsafe {
-            #[cfg(target_arch = "x86_64")]
-            asm!("hlt");
-            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-            asm!("wfi");
-            #[cfg(target_arch = "loongarch64")]
-            asm!("idle 0");
-        }
+fn stage1() {
+    mem::phys::init().unwrap();
+    arch::init().unwrap();
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        use crate::serial::SerialPort;
+        use crate::serial::IoBus;
+        use crate::serial::ns16550a::Ns16550a;
+
+        use crate::serial::SERIAL_IMPL;
+
+        let bus = IoBus::Pio { base_port: 0x3F8 };
+        let uart = Ns16550a::new(bus);
+        uart.init();
+        *SERIAL_IMPL.lock() = SerialPort::Ns16550a(uart);
     }
+}
+
+fn stage2() {
+    clear_console!();
+    println!();
+    info!("current version is {}", env!("CARGO_PKG_VERSION").bold());
 }
