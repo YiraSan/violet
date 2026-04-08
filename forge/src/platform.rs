@@ -115,6 +115,10 @@ impl Platform {
         self == Self::Rpi4
     }
 
+    pub fn needs_rpi3_uefi(self) -> bool {
+        self == Self::Rpi3
+    }
+
     pub fn qemu_default_cpu(self) -> Option<&'static str> {
         match self {
             Self::Aarch64Qemu => Some("cortex-a76"),

@@ -50,6 +50,10 @@ pub fn build(platform: Platform, release: bool) -> Result<PathBuf> {
         install_rpi4_uefi(&root)?;
     }
 
+    if platform.needs_rpi3_uefi() {
+        install_rpi3_uefi(&root)?;
+    }
+
     log::info("installing kernel...");
     let violet_dir = root.create_dir("violet/")?;
     disk::copy_to_fat(&violet_dir, "kernel.elf", &kernel_elf)?;
@@ -127,5 +131,19 @@ fn install_rpi4_uefi<IO: std::io::Read + std::io::Write + std::io::Seek>(
     let _ = root.remove("Readme.md");
 
     log::success("rpi4 uefi firmware installed");
+    Ok(())
+}
+
+fn install_rpi3_uefi<IO: std::io::Read + std::io::Write + std::io::Seek>(
+    root: &fatfs::Dir<'_, IO>,
+) -> Result<()> {
+    let fw_dir = deps::fetch_rpi3_uefi()?;
+
+    log::info("installing rpi3 uefi firmware...");
+    disk::copy_dir_to_fat(&fw_dir, root)?;
+
+    let _ = root.remove("Readme.md");
+
+    log::success("rpi3 uefi firmware installed");
     Ok(())
 }

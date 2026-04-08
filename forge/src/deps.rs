@@ -29,6 +29,10 @@ const RPI4_UEFI_URL: &str =
     "https://github.com/pftf/RPi4/releases/download/v1.51/RPi4_UEFI_Firmware_v1.51.zip";
 const RPI4_UEFI_DIR: &str = ".violet/rpi4_uefi/";
 
+const RPI3_UEFI_URL: &str =
+    "https://github.com/pftf/RPi3/releases/download/v1.51/RPi3_UEFI_Firmware_v1.51.zip";
+const RPI3_UEFI_DIR: &str = ".violet/rpi3_uefi/";
+
 const EDK2_DIR: &str = ".violet/edk2/";
 const EDK2_PADDING: u64 = 64 * 1024 * 1024;
 
@@ -79,6 +83,22 @@ pub fn fetch_rpi4_uefi() -> Result<PathBuf> {
     fs::create_dir_all(&dir)?;
     download_and_extract(RPI4_UEFI_URL, RPI4_UEFI_DIR)?;
     log::success("rpi4 uefi firmware downloaded");
+
+    Ok(dir)
+}
+
+pub fn fetch_rpi3_uefi() -> Result<PathBuf> {
+    let dir = PathBuf::from(RPI3_UEFI_DIR);
+
+    if dir.exists() {
+        log::info("rpi3 uefi firmware already cached");
+        return Ok(dir);
+    }
+
+    log::info("downloading rpi3 uefi firmware...");
+    fs::create_dir_all(&dir)?;
+    download_and_extract(RPI3_UEFI_URL, RPI3_UEFI_DIR)?;
+    log::success("rpi3 uefi firmware downloaded");
 
     Ok(dir)
 }
