@@ -9,7 +9,7 @@
 > [!IMPORTANT]
 > As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time. Until we reach 1.0.0, version increments will follow development [milestones](https://github.com/YiraSan/violet/milestones).
 
-**violetOS** is a work-in-progress operating system built in Rust, centered on a fully asynchronous and non-blocking architecture. It aims to establish a highly predictable software stack where performance and isolation are balanced through an anykernel design.
+**violet** (pronounced /vjɔlɛt/) is a work-in-progress operating system built in Rust, centered on a fully asynchronous and non-blocking architecture. It aims to establish a highly predictable software stack where performance and isolation are balanced through an anykernel design.
 
 By decoupling logical structure from execution strategy, the system enforces microkernel-style modularity while allowing trusted services to operate in shared kernel space. This enables zero-copy data paths protected by Rust’s safety guarantees rather than relying solely on expensive hardware context switching.
 
@@ -29,41 +29,14 @@ Thanks to `forge` (violet' build system), building and running an operating syst
 cargo x build --platform {PLATFORM}
 ```
 
-Default platform is `aarch64-qemu` (see [Platform matrix](#platform_matrix) for more details).
+Default platform is `aarch64-qemu` (see [Support](SUPPORT.md) for more details).
 
-### Running with QEMU
+### Running it on QEMU
 
-It is as simple as building violetOS:
-
+Simply type:
 ```bash
 cargo x run --platform {PLATFORM}
 ```
-
-## Platform matrix
-
-| Platform | Identifier | State |
-| -------- | ---------- | ----- |
-| QEMU (aarch64)              | `aarch64-qemu` | ✅<sup>1</sup> |
-| QEMU (riscv64)              | `riscv64-qemu` | 🗓️<sup>3</sup> |
-| PC (x86_64)                 | `x86-64pc`     | 🗓️<sup>3</sup> |
-| Raspberry Pi 4<sup>4</sup>  | `rpi4`         | 🔨<sup>2</sup> |
-| Raspberry Pi 3<sup>5</sup>  | `rpi3`         | 🗓️<sup>3</sup> |
-| Rockchip RK3588<sup>6</sup> | `rk3588`       | 🗓️<sup>3</sup> |
-| VisionFive 2<sup>7</sup>    | `vf2`          | 🗓️<sup>3</sup> |
-
-<sup>1</sup> ✅ means "Supported".
-
-<sup>2</sup> 🔨 means "Partially supported / Unstable (WIP)".
-
-<sup>3</sup> 🗓️ means "Planned".
-
-<sup>4</sup> Raspberry Pi 4B, 400 and 4 CM.
-
-<sup>5</sup> Raspberry Pi 3B, 3B+, 3A+ and 3 CM.
-
-<sup>6</sup> Includes all Rockchip RK3588/RK3588S based single-board computers (e.g., Orange Pi 5 series, Radxa ROCK 5 series).
-
-<sup>7</sup> StarFive VisionFive 2 board (JH7110 SoC).
 
 ## License
 
