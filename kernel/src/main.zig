@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2026 The violetOS authors
+// Copyright (c) 2024-2026 YiraSan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-fn main() {
-    println!("cargo:rerun-if-changed=kernel/linker.lds");
-    println!("cargo:rustc-link-arg=-Tkernel/linker.lds");
+const boot = @import("boot/root.zig");
+
+comptime {
+    _ = boot;
 }

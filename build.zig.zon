@@ -1,0 +1,37 @@
+.{
+    .name = .violet,
+    .version = "0.0.0",
+    .fingerprint = 0x95f1a5952ce46951, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0-dev.1786+75044cb04",
+    .dependencies = .{
+        .basalt = .{ .path = "./basalt/" },
+        .kernel = .{ .path = "./kernel/" },
+        .rpi4_uefi = .{
+            .url = "https://github.com/pftf/RPi4/releases/download/v1.52/RPi4_UEFI_Firmware_v1.52.zip",
+            .hash = "N-V-__8AAM3cbAB5OOIE8oANB4sch2oD96OdWxvgCx6HXe0n",
+        },
+        .rpi3_uefi = .{
+            .url = "https://github.com/pftf/RPi3/releases/download/v1.52/RPi3_UEFI_Firmware_v1.52.zip",
+            .hash = "N-V-__8AAE95YAA7Ho23EOjHQeXMsRPNSvuuSJ502cGal6-t",
+        },
+        .limine_binary = .{
+            .url = "https://github.com/Limine-Bootloader/Limine/releases/download/v12.5.2/limine-binary.tar.xz",
+            .hash = "N-V-__8AAFM6UwAsycckDnIBoRTHEVp6B-fogfU1dZetY6qd",
+        },
+        .fatfs = .{
+            .url = "git+https://github.com/abbrev/fatfs#ab992fcf2926b8a1ee3f0a8f9cefb6584174100d",
+            .hash = "N-V-__8AANDpQwATzvr-YnwgeXZCO7LB8Qm9efjVTG_Zlv7H",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "NOTICE.md",
+        "README.md",
+        "SUPPORT.md",
+        "basalt",
+        "build",
+        "kernel",
+    },
+}

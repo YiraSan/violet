@@ -2,9 +2,9 @@ ENTRY(kernel_entry)
 
 PHDRS
 {
-    text            PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ;
-    rodata          PT_LOAD    FLAGS((1 << 2)) ;
-    data            PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ;
+    text      PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ;
+    rodata    PT_LOAD    FLAGS((1 << 2)) ;
+    data      PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ;
 }
 
 SECTIONS

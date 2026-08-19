@@ -20,55 +20,64 @@ jobs:
           fetch-depth: 0
           clean: true
 
-      - name: Setup Rust Nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
         with:
-          targets: aarch64-unknown-none
-          components: rust-src
+          version: 0.17.0-dev.1786+75044cb04
 
-      - name: Setup Rust Cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            basalt
-            forge
-            kernel
+      - name: Generic Build (aarch64)
+        run: zig build -Darch=aarch64
 
-      - name: aarch64-qemu build
+      - name: Generic Build (riscv64)
+        run: zig build -Darch=riscv64
+
+      - name: Generic Build (x86_64)
+        run: zig build -Darch=x86_64
+
+      - name: Raspberry Pi4 Build
+        run: zig build -Dboard=raspberry_pi4
+
+      - name: Raspberry Pi3 Build
+        run: zig build -Dboard=raspberry_pi3
+
+      - name: Generate Changelog
         run: |
-          cargo x build --platform aarch64-qemu --release
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          if git rev-parse refs/tags/dev >/dev/null 2>&1; then
+            echo "Here are the latest changes since the previous build:" >> $GITHUB_ENV
+            echo "" >> $GITHUB_ENV
+            git log refs/tags/dev..HEAD --format="- %s (\`%h\`)" >> $GITHUB_ENV
+          else
+            echo "First development release (or previous tag not found)." >> $GITHUB_ENV
+            echo "" >> $GITHUB_ENV
+            git log -10 --format="- %s (\`%h\`)" >> $GITHUB_ENV
+          fi
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: x86-64pc build
-        run: |
-          cargo x build --platform x86-64pc --release
-
-      - name: rpi4 build
-        run: |
-          cargo x build --platform rpi4  --release
-
-      - name: rpi3 build
-        run: |
-          cargo x build --platform rpi3  --release
-
-      - name: Move dev tag
+      - name: Clean and Recreate dev tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f dev
-          git push -f origin dev
+
+          git push --delete origin dev || true
+          git tag -d dev || true
+
+          git tag dev
+          git push origin dev
 
       - name: Update Development Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: "dev"
           name: "Development Build"
+          body: ${{ env.CHANGELOG }}
           prerelease: true
-          make_latest: true 
           files: |
-            bin/violet_aarch64-qemu.img
-            bin/violet_rpi3.img
-            bin/violet_rpi4.img
-            bin/violet_x86-64pc.img
+            zig-out/violet-aarch64.img
+            zig-out/violet-riscv64.img
+            zig-out/violet-x86_64.img
+            zig-out/violet-raspberry_pi4.img
+            zig-out/violet-raspberry_pi3.img
             LICENSE
             NOTICE.md
             README.md

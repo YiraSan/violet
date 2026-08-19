@@ -1,8 +1,11 @@
+**/.zig-cache
+**/zig-pkg
+**/zig-out
+
 /.vscode
 /.violet
+/bin
+
 *.DS_Store
 *.log
 *.old
-**/Cargo.lock
-**/target
-/bin

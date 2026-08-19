@@ -1,41 +1,45 @@
 # violetOS
 
-![Rust Nightly](https://img.shields.io/badge/Rust-nightly-orange?logo=rust)
+![Zig Version](https://img.shields.io/badge/Zig-0.17.0-orange.svg?logo=zig)
 ![GitHub License](https://img.shields.io/github/license/YiraSan/violet)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/YiraSan/violet/dev-build.yml)
 
-**Making humble hardware scream.**
-
 > [!IMPORTANT]
-> As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time. Until we reach 1.0.0, version increments will follow development [milestones](https://github.com/YiraSan/violet/milestones).
+> As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time.
 
-**violet** (pronounced /vjɔlɛt/) is a work-in-progress operating system built in Rust, centered on a fully asynchronous and non-blocking architecture. It aims to establish a highly predictable software stack where performance and isolation are balanced through an anykernel design.
-
-By decoupling logical structure from execution strategy, the system enforces microkernel-style modularity while allowing trusted services to operate in shared kernel space. This enables zero-copy data paths protected by Rust’s safety guarantees rather than relying solely on expensive hardware context switching.
-
-The project is in an early development phase, focused on maturing these architectural foundations into a scalable, general-purpose system for modern hardware.
+**violet** (pronounced /vjɔlɛt/) is a work-in-progress operating system centered around a fully asynchronous and non-blocking architecture. The project is in an early development phase, focused on maturing these architectural foundations into a scalable, general-purpose system for modern hardware.
 
 ## Requirements
 
-This project uses and is tested with [Rust](https://rust-lang.org) nightly.
+This project uses [Zig](https://ziglang.org). We recommend using [zvm](https://github.com/tristanisham/zvm) to install and manage Zig versions seamlessly.
 
-To run a virtual instance of violet on your computer, you will also need [QEMU](https://www.qemu.org).
+> [!NOTE]
+> The required Zig version is `0.17.0-dev.1786+75044cb04`.
+
+To run a virtual instance of violet on your host machine, you will also need [QEMU](https://www.qemu.org) `11.1.0`.
 
 ## Build it yourself
 
-Thanks to `forge` (violet' build system), building and running an operating system has never been so easy.
+Thanks to violet's build system, compiling an operating system has never been easier.
 
 ```bash
-cargo x build --platform {PLATFORM}
+zig build -Dboard=<BOARD>
 ```
 
-Default platform is `aarch64-qemu` (see [Support](SUPPORT.md) for more details).
+See [Support](SUPPORT.md) for a complete list of supported boards. Not specifying any board will create a generic image for a given architecture (default to the host machine) :
+
+```bash
+zig build -Darch=<ARCH>
+```
+
+Supported architectures are `aarch64`, `riscv64` and `x86_64`.
 
 ### Running it on QEMU
 
-Simply type:
+To instantly build and boot the OS in a virtual machine, simply type:
+
 ```bash
-cargo x run --platform {PLATFORM}
+zig build run -Darch=<ARCH>
 ```
 
 ## License

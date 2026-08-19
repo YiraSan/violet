@@ -1,0 +1,18 @@
+.{
+    .name = .kernel,
+    .version = "0.0.0",
+    .fingerprint = 0x5dd29aaba54d3297, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0-dev.1786+75044cb04",
+    .dependencies = .{
+        .basalt = .{ .path = "../basalt/" },
+        .limine = .{
+            .url = "git+https://github.com/YiraSan/limine-zig/#b4beef55f9ec78ba26c476c0064151abd68dc3d7",
+            .hash = "limine-0.0.0-9W5WJoeOAACY1SMZnljxTCJ0-k_5EiYAeygME-HaHLr7",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

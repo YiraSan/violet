@@ -1,2 +1,0 @@
-[alias]
-x = "run --quiet --package forge --"
