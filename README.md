@@ -26,7 +26,7 @@ Thanks to violet's build system, compiling an operating system has never been ea
 zig build -Dboard=<BOARD>
 ```
 
-See [Support](SUPPORT.md) for a complete list of supported boards. Not specifying any board will create a generic image for a given architecture (default to the host machine) :
+See [SUPPORT.md](SUPPORT.md) for a complete list of supported boards. Not specifying any board will create a generic image for a given architecture (default to the host machine) :
 
 ```bash
 zig build -Darch=<ARCH>
