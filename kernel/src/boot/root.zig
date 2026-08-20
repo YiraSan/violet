@@ -10,10 +10,21 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.$
+// limitations under the License.
+
+// --- dependencies --- //
 
 const builtin = @import("builtin");
 const limine = @import("limine");
+
+// --- imports --- //
+
+const kernel = @import("root");
+
+const arch = kernel.arch;
+const cpu = arch.cpu;
+
+// --- boot/main.zig --- //
 
 export var start_marker: limine.RequestsStartMarker linksection(".limine_requests_start") = .{};
 export var end_marker: limine.RequestsEndMarker linksection(".limine_requests_end") = .{};
@@ -25,7 +36,7 @@ export var framebuffer_request: limine.FramebufferRequest linksection(".limine_r
 
 export fn kernel_entry() noreturn {
     if (!base_revision.isSupported()) {
-        while (true) {}
+        cpu.halt();
     }
 
     if (builtin.mode == .Debug) {
@@ -38,5 +49,5 @@ export fn kernel_entry() noreturn {
         }
     }
 
-    while (true) {}
+    cpu.halt();
 }
