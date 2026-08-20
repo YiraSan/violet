@@ -14,7 +14,7 @@
 This project uses [Zig](https://ziglang.org). We recommend using [zvm](https://github.com/tristanisham/zvm) to install and manage Zig versions seamlessly.
 
 > [!NOTE]
-> The required Zig version is `0.17.0-dev.1786+75044cb04`.
+> The required Zig version is `0.16.0`.
 
 To run a virtual instance of violet on your host machine, you will also need [QEMU](https://www.qemu.org) `11.1.0`.
 

@@ -36,15 +36,10 @@ pub const GenericTier = enum {
 };
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
     const is_module = b.option(bool, "is_module", "is_module") orelse false;
 
     const basalt_mod = b.addModule("basalt", .{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
     });
 
     const build_options = b.addOptions();

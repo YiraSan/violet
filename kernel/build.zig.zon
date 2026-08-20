@@ -2,7 +2,7 @@
     .name = .kernel,
     .version = "0.0.0",
     .fingerprint = 0x5dd29aaba54d3297, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.17.0-dev.1786+75044cb04",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .basalt = .{ .path = "../basalt/" },
         .limine = .{

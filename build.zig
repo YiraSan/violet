@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     make_img.addDirectoryArg(img_root.getDirectory());
 
     const violet_img = b.addInstallFile(
-        make_img.addOutputFileArg2("violet.img", .{}),
+        make_img.addOutputFileArg("violet.img"),
         if (board) |bo|
             b.fmt("violet-{s}.img", .{@tagName(bo)})
         else
@@ -109,7 +109,7 @@ fn setupFirmware(b: *std.Build, img_root: *std.Build.Step.WriteFile, board: ?Boa
 fn makeImageExe(b: *std.Build) *std.Build.Step.Compile {
     const make_img = b.createModule(.{
         .target = b.graph.host,
-        .optimize = .safe,
+        .optimize = .ReleaseSafe,
         .link_libc = true,
     });
 
@@ -146,38 +146,44 @@ fn makeImageExe(b: *std.Build) *std.Build.Step.Compile {
     });
 }
 
-fn edk2File(b: *std.Build, arch: Arch) std.Build.LazyPath {
+fn downloadAndDecompress(b: *std.Build, url: []const u8, out_name: []const u8) std.Build.LazyPath {
     const download_cmd = b.addSystemCommand(&.{ "curl", "-L", "-o" });
+    const bz2_path = download_cmd.addOutputFileArg(b.fmt("{s}.bz2", .{out_name}));
+    download_cmd.addArg(url);
 
-    const fd_path = download_cmd.addOutputFileArg2(b.fmt("edk2-{s}-raw.fd", .{@tagName(arch)}), .{});
+    const decompress_cmd = b.addSystemCommand(&.{ "bunzip2", "-c" });
+    decompress_cmd.addFileArg(bz2_path);
+    return decompress_cmd.captureStdOut(.{});
+}
 
-    download_cmd.addArg(switch (arch) {
-        .aarch64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEAARCH64_QEMU_EFI.fd",
-        .riscv64 => "https://retrage.github.io/edk2-nightly/bin/RELEASERISCV64_VIRT.fd",
-        .x86_64 => "https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd",
+const qemu_pc_bios_base = "https://gitlab.com/qemu-project/qemu/-/raw/master/pc-bios/";
+
+fn edk2File(b: *std.Build, arch: Arch) std.Build.LazyPath {
+    const remote_name = switch (arch) {
+        .aarch64 => "edk2-aarch64-code.fd",
+        .riscv64 => "edk2-riscv-code.fd",
+        .x86_64 => "edk2-x86_64-code.fd",
         else => unreachable,
-    });
+    };
+    return downloadAndDecompress(
+        b,
+        b.fmt("{s}{s}.bz2", .{ qemu_pc_bios_base, remote_name }),
+        b.fmt("edk2-{s}-code.fd", .{@tagName(arch)}),
+    );
+}
 
-    const pad_exe = b.addExecutable(.{
-        .name = "pad_exe",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("build/pad.zig"),
-            .target = b.graph.host,
-            .optimize = .safe,
-        }),
-    });
-
-    const pad_cmd = b.addRunArtifact(pad_exe);
-    pad_cmd.addFileArg2(fd_path, .{});
-    const padded_path = pad_cmd.addOutputFileArg2(b.fmt("edk2-{s}.fd", .{@tagName(arch)}), .{});
-
-    switch (arch) {
-        .aarch64 => pad_cmd.addArg(b.fmt("{d}", .{64 * 1024 * 1024})), // 64 MiB
-        .riscv64 => pad_cmd.addArg(b.fmt("{d}", .{32 * 1024 * 1024})), // 32 MiB
-        else => return fd_path,
-    }
-
-    return padded_path;
+fn edk2VarsFile(b: *std.Build, arch: Arch) std.Build.LazyPath {
+    const remote_name = switch (arch) {
+        .aarch64 => "edk2-arm-vars.fd",
+        .riscv64 => "edk2-riscv-vars.fd",
+        .x86_64 => "edk2-i386-vars.fd",
+        else => unreachable,
+    };
+    return downloadAndDecompress(
+        b,
+        b.fmt("{s}{s}.bz2", .{ qemu_pc_bios_base, remote_name }),
+        b.fmt("edk2-{s}-vars.fd", .{@tagName(arch)}),
+    );
 }
 
 fn runCmd(b: *std.Build, arch: Arch, violet_img: std.Build.LazyPath) *std.Build.Step.Run {
@@ -190,52 +196,53 @@ fn runCmd(b: *std.Build, arch: Arch, violet_img: std.Build.LazyPath) *std.Build.
 
     const run_cmd = b.addSystemCommand(&.{qemu_exe});
 
+    run_cmd.addArg("-blockdev");
+    run_cmd.addPrefixedFileArg(
+        "node-name=pflash0,driver=file,read-only=on,filename=",
+        edk2File(b, arch),
+    );
+
+    run_cmd.addArg("-blockdev");
+    run_cmd.addPrefixedFileArg(
+        "node-name=pflash1,driver=file,filename=",
+        edk2VarsFile(b, arch),
+    );
+
     // Machine Config
     {
         switch (arch) {
-            .aarch64 => run_cmd.addArgs(&.{ "-machine", "virt,secure=off,virtualization=off", "-cpu", "cortex-a72" }),
-            .riscv64 => run_cmd.addArgs(&.{ "-machine", "virt", "-cpu", "max" }),
-            .x86_64 => run_cmd.addArgs(&.{ "-machine", "q35", "-cpu", "max" }),
+            .aarch64 => run_cmd.addArgs(&.{
+                "-machine", "virt,secure=off,virtualization=off,pflash0=pflash0,pflash1=pflash1",
+                "-cpu",     "cortex-a72",
+            }),
+            .riscv64 => run_cmd.addArgs(&.{
+                "-machine", "virt,pflash0=pflash0,pflash1=pflash1",
+                "-cpu",     "rv64",
+            }),
+            .x86_64 => run_cmd.addArgs(&.{
+                "-machine", "q35,pflash0=pflash0,pflash1=pflash1",
+                "-cpu",     "max",
+            }),
             else => unreachable,
         }
 
         run_cmd.addArgs(&.{ "-m", "2G", "-smp", "4" });
-        run_cmd.addArgs(&.{ "-device", "ramfb", "-serial", "stdio" });
+        run_cmd.addArgs(&.{ "-serial", "stdio" });
         run_cmd.addArgs(&.{ "-no-reboot", "-no-shutdown" });
-    }
-
-    // EDK2
-    switch (arch) {
-        .aarch64, .riscv64 => {
-            run_cmd.addArg("-drive");
-            run_cmd.addFileArg2(edk2File(b, arch), .{ .prefix = "if=pflash,format=raw,readonly=on,file=" });
-        },
-        .x86_64 => {
-            run_cmd.addArg("-bios");
-            run_cmd.addFileArg2(edk2File(b, arch), .{});
-        },
-        else => unreachable,
+        run_cmd.addArgs(&.{ "-device", if (arch == .x86_64) "virtio-gpu" else "ramfb" });
     }
 
     // violet.img
     {
-        run_cmd.addArgs(&.{ "-device", "virtio-blk-pci,drive=disk0,disable-legacy=on", "-drive" });
-        run_cmd.addFileArg2(violet_img, .{
-            .prefix = "if=none,id=disk0,format=raw,file=",
-        });
+        run_cmd.addArgs(&.{ "-device", "virtio-blk-pci,drive=disk0,disable-legacy=on,bootindex=0", "-drive" });
+        run_cmd.addPrefixedFileArg("if=none,id=disk0,format=raw,file=", violet_img);
     }
 
     const debug_mode = b.option(bool, "debug", "QEMU debug mode") orelse false;
-
-    if (debug_mode) {
-        run_cmd.addArgs(&.{ "-s", "-S" });
-    }
+    if (debug_mode) run_cmd.addArgs(&.{ "-s", "-S" });
 
     const int_mode = b.option(bool, "int", "Verbose interrupts into debug.log") orelse false;
-
-    if (int_mode) {
-        run_cmd.addArgs(&.{ "-d", "int", "-D", "debug.log" });
-    }
+    if (int_mode) run_cmd.addArgs(&.{ "-d", "int", "-D", "debug.log" });
 
     return run_cmd;
 }
@@ -280,7 +287,6 @@ pub const SoC = enum {
             .fuse_adrp_add,
             .perfmon,
             .use_postra_scheduler,
-            .use_wzr_to_vec_move,
             .v8a,
         }),
     };

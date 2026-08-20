@@ -28,7 +28,7 @@ export fn kernel_entry() noreturn {
         while (true) {}
     }
 
-    if (builtin.mode == .debug) {
+    if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {
             const framebuffer = fb_response.getFramebuffers()[0];
             for (0..100) |i| {
