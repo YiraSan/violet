@@ -1,0 +1,79 @@
+name: Nightly Build
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Fix Zig missing tmp cache directory
+        run: mkdir -p .zig-cache/tmp ~/.cache/zig/tmp
+
+      - name: Generic Build (aarch64)
+        run: zig build -Darch=aarch64 -Doptimize=ReleaseFast
+
+      - name: Generic Build (riscv64)
+        run: zig build -Darch=riscv64 -Doptimize=ReleaseFast
+
+      - name: Generic Build (x86_64)
+        run: zig build -Darch=x86_64 -Doptimize=ReleaseFast
+
+      - name: Raspberry Pi4 Build
+        run: zig build -Dboard=raspberry_pi4 -Doptimize=ReleaseFast
+
+      - name: Raspberry Pi3 Build
+        run: zig build -Dboard=raspberry_pi3 -Doptimize=ReleaseFast
+
+      - name: Build Changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fromTag: "nightly"
+          toTag: "HEAD"
+          mode: "COMMIT"
+
+      - name: Clean Nightly Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git push --delete origin nightly || true
+          git tag -d nightly || true
+          
+          git tag nightly
+          git push origin nightly
+
+      - name: Nightly Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "nightly"
+          name: "Nightly Build"
+          body: ${{ steps.changelog.outputs.changelog }}
+          prerelease: true
+          files: |
+            zig-out/*.img
+            LICENSE
+            NOTICE.md
+            README.md
+            SUPPORT.md
