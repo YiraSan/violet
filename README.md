@@ -1,8 +1,8 @@
 # violetOS
 
-![Zig Version](https://img.shields.io/badge/Zig-0.17.0-orange.svg?logo=zig)
+![Zig Version](https://img.shields.io/badge/Zig-0.16.0-orange.svg?logo=zig)
 ![GitHub License](https://img.shields.io/github/license/YiraSan/violet)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/YiraSan/violet/dev-build.yml)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/YiraSan/violet/nightly-build.yml)
 
 > [!IMPORTANT]
 > As defined by [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html), versions in the 0.x.y range are inherently unstable and may introduce breaking changes at any time.
