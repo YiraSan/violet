@@ -13,3 +13,6 @@
 // limitations under the License.
 
 pub const cpu = @import("cpu.zig");
+pub const interrupts = @import("interrupts.zig");
+pub const paging = @import("paging.zig");
+pub const syscall = @import("syscall.zig");

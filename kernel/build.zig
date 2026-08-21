@@ -14,13 +14,9 @@
 
 const std = @import("std");
 
-pub const Drivers = enum {
-    // ...
-};
-
 pub fn build(b: *std.Build) !void {
     const query = b.standardTargetOptionsQueryOnly(.{});
-    const arch = query.cpu_arch.?;
+    const arch = query.cpu_arch orelse .aarch64;
     const target = b.resolveTargetQuery(.{
         .cpu_arch = arch,
         .os_tag = .freestanding,
@@ -47,10 +43,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse "";
-    _ = drivers;
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", try getVersion(b));
+    build_options.addOption([]const u8, "drivers", drivers);
     kernel_mod.addImport("build_options", build_options.createModule());
 
     const limine_dep = b.dependency("limine", .{ .revision = 6 });

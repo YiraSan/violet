@@ -20,25 +20,22 @@ const std = @import("std");
 
 const kernel = @import("root");
 
-// --- arch/x86_64/cpu.zig --- //
+// --- arch/x86_64/interrupts.zig --- //
 
-pub inline fn halt() noreturn {
-    while (true) {
-        asm volatile ("hlt");
+pub const InterruptState = enum(u1) { disabled = 0, enabled = 1 };
+
+pub inline fn set(new: InterruptState) InterruptState {
+    const flags = asm volatile (
+        \\ pushfq
+        \\ pop %[ret]
+        : [ret] "=r" (-> u64),
+    );
+    const was_enabled: InterruptState = if ((flags & (1 << 9)) != 0) .enabled else .disabled;
+
+    switch (new) {
+        .disabled => asm volatile ("cli" ::: "memory"),
+        .enabled => asm volatile ("sti" ::: "memory"),
     }
-}
 
-pub inline fn pause() void {
-    asm volatile ("pause");
-}
-
-pub inline fn id() u64 {
-    var ebx: u32 = undefined;
-
-    asm volatile ("cpuid"
-        : [_] "={ebx}" (ebx),
-        : [leaf] "{eax}" (@as(u32, 1)),
-        : .{ .eax = true, .ecx = true, .edx = true });
-
-    return ebx >> 24;
+    return was_enabled;
 }

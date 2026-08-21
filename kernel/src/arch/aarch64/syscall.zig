@@ -20,25 +20,4 @@ const std = @import("std");
 
 const kernel = @import("root");
 
-// --- arch/x86_64/cpu.zig --- //
-
-pub inline fn halt() noreturn {
-    while (true) {
-        asm volatile ("hlt");
-    }
-}
-
-pub inline fn pause() void {
-    asm volatile ("pause");
-}
-
-pub inline fn id() u64 {
-    var ebx: u32 = undefined;
-
-    asm volatile ("cpuid"
-        : [_] "={ebx}" (ebx),
-        : [leaf] "{eax}" (@as(u32, 1)),
-        : .{ .eax = true, .ecx = true, .edx = true });
-
-    return ebx >> 24;
-}
+// --- arch/aarch64/syscall.zig --- //

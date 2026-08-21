@@ -24,6 +24,9 @@ const kernel = @import("root");
 const arch = kernel.arch;
 const cpu = arch.cpu;
 
+const mem = kernel.mem;
+const phys = mem.phys;
+
 // --- boot/main.zig --- //
 
 export var start_marker: limine.RequestsStartMarker linksection(".limine_requests_start") = .{};
@@ -32,12 +35,29 @@ export var end_marker: limine.RequestsEndMarker linksection(".limine_requests_en
 export var base_revision: limine.BaseRevision linksection(".limine_requests") = .init(6);
 export var hhdm_request: limine.HhdmRequest linksection(".limine_requests") = .{};
 export var memmap_request: limine.MemoryMapRequest linksection(".limine_requests") = .{};
+
+const paging_4lvl: limine.PagingMode = switch (builtin.cpu.arch) {
+    .aarch64, .x86_64 => .@"4lvl",
+    .riscv64 => .sv48,
+    else => unreachable,
+};
+
+export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = paging_4lvl, .max_mode = paging_4lvl, .min_mode = paging_4lvl }; // .default => 4lvl
+
 export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
 
 export fn kernel_entry() noreturn {
     if (!base_revision.isSupported()) {
         cpu.halt();
     }
+
+    mem.hhdm_offset = hhdm_request.response.?.offset;
+    const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
+
+    phys.init(memmap_entries);
+
+    const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
+    if (pagingmode_response.mode != paging_4lvl) unreachable;
 
     if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {

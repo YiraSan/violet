@@ -12,6 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// --- dependencies --- //
+
+const std = @import("std");
+
+// --- imports --- //
+
+const kernel = @import("root");
+
+// --- arch/aarch64/cpu.zig --- //
+
 pub inline fn halt() noreturn {
     while (true) {
         asm volatile ("wfi");
@@ -28,24 +38,4 @@ pub inline fn id() u64 {
     );
 
     return mpidr & 0xff;
-}
-
-pub const InterruptState = enum(u1) {
-    disabled = 0,
-    enabled = 1,
-};
-
-pub inline fn setInterrupts(new: InterruptState) InterruptState {
-    const old_daif = asm volatile ("mrs %[ret], daif"
-        : [ret] "=r" (-> u64),
-    );
-    const was_enabled: InterruptState = if ((old_daif & (1 << 7)) == 0) .enabled else .disabled;
-
-    switch (new) {
-        .disabled => asm volatile ("msr daifset, #0b0011" ::: "memory"),
-        .enabled => asm volatile ("msr daifclr, #0b0011" ::: "memory"),
-    }
-    asm volatile ("isb" ::: "memory");
-
-    return was_enabled;
 }
