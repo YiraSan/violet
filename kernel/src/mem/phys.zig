@@ -25,6 +25,8 @@ const mem = kernel.mem;
 
 // --- mem/phys.zig --- //
 
+pub const Error = error{OutOfMemory};
+
 const PAGE_SIZE = 4096;
 const PAGES_PER_ZONE = 512;
 const ZONE_SIZE = PAGES_PER_ZONE * PAGE_SIZE;
@@ -45,15 +47,20 @@ var links: []ZoneLinks = undefined;
 var density_buckets: [PAGES_PER_ZONE + 1]u32 = undefined;
 var bucket_occupation: BucketBitSet = undefined;
 
-var total_free_pages: usize = undefined;
+var total_pages: usize = undefined;
+var available_pages: usize = undefined;
 
 var global_lock: kernel.mem.utils.RwLock align(8) = undefined;
+
+pub fn totalPages() usize {
+    return total_pages;
+}
 
 pub fn availablePages() usize {
     const int_state = global_lock.acquire(.read, 0);
     defer global_lock.release(.read, int_state);
 
-    return total_free_pages;
+    return available_pages;
 }
 
 pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
@@ -115,7 +122,7 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
     @memset(&density_buckets, NULL_INDEX);
     bucket_occupation = .empty;
 
-    total_free_pages = 0;
+    available_pages = 0;
     global_lock = .{};
 
     for (memmap_entries) |entry| {
@@ -130,7 +137,7 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
 
             bitmaps[zone_idx].set(bit_idx);
             free_counts[zone_idx] += 1;
-            total_free_pages += 1;
+            available_pages += 1;
         }
     }
 
@@ -149,6 +156,8 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
         density_buckets[count] = idx;
         bucket_occupation.set(count);
     }
+
+    total_pages = available_pages;
 
     validate();
 }
@@ -201,13 +210,13 @@ pub fn allocNonContiguous(buffer: []u64) usize {
     const int_state = global_lock.acquire(.write, 0);
     defer global_lock.release(.write, int_state);
 
-    const to_fill = @min(buffer.len, total_free_pages);
+    const to_fill = @min(buffer.len, available_pages);
     if (to_fill == 0) {
         return 0;
     }
 
-    std.debug.assert(to_fill <= total_free_pages);
-    total_free_pages -= to_fill;
+    std.debug.assert(to_fill <= available_pages);
+    available_pages -= to_fill;
     var filled: usize = 0;
 
     while (filled < to_fill) {
@@ -240,11 +249,11 @@ pub fn allocNonContiguous(buffer: []u64) usize {
     return filled;
 }
 
-pub fn allocPage() ?u64 {
+pub fn allocPage() !u64 {
     var page: [1]u64 = undefined;
     const count = allocNonContiguous(&page);
     if (count == 1) return page[0];
-    return null;
+    return Error.OutOfMemory;
 }
 
 fn findContiguousBits(bitmap: *const ZoneBitSet, count: usize) ?usize {
@@ -288,13 +297,13 @@ inline fn claimBits(zone_idx: u32, start_bit: usize, count: usize) void {
 ///
 /// This allocator is primarily intended for consumers that require physical
 /// contiguity, such as DMA-capable device drivers.
-pub fn allocContiguous(pages: usize) ?u64 {
-    if (pages == 0) return null;
+pub fn allocContiguous(pages: usize) Error!u64 {
+    if (pages == 0) return 0;
 
     const int_state = global_lock.acquire(.write, 0);
     defer global_lock.release(.write, int_state);
 
-    if (total_free_pages < pages) return null;
+    if (available_pages < pages) return Error.OutOfMemory;
 
     if (pages <= PAGES_PER_ZONE) {
         var search_mask = bucket_occupation;
@@ -331,7 +340,7 @@ pub fn allocContiguous(pages: usize) ?u64 {
 
                     free_counts[current_zone] -= @intCast(pages);
                     insertZone(current_zone, free_counts[current_zone]);
-                    total_free_pages -= pages;
+                    available_pages -= pages;
 
                     return (@as(u64, current_zone) * ZONE_SIZE) + (@as(u64, start_bit_idx) * PAGE_SIZE);
                 }
@@ -352,7 +361,7 @@ pub fn allocContiguous(pages: usize) ?u64 {
 
                     free_counts[z] -= @intCast(pages);
                     insertZone(z, free_counts[z]);
-                    total_free_pages -= pages;
+                    available_pages -= pages;
 
                     return @as(u64, z) * ZONE_SIZE;
                 }
@@ -360,7 +369,7 @@ pub fn allocContiguous(pages: usize) ?u64 {
             unreachable;
         }
 
-        return null;
+        return Error.OutOfMemory;
     }
 
     const required_zones: u32 = @intCast((pages - 1) / PAGES_PER_ZONE + 1);
@@ -412,12 +421,12 @@ pub fn allocContiguous(pages: usize) ?u64 {
         }
 
         std.debug.assert(pages_left == 0);
-        total_free_pages -= pages;
+        available_pages -= pages;
 
         return @as(u64, best_start) * ZONE_SIZE;
     }
 
-    return null;
+    return Error.OutOfMemory;
 }
 
 inline fn releaseBits(zone_idx: u32, start_bit: usize, count: usize) void {
@@ -443,11 +452,11 @@ pub fn freeContiguous(phys_addr: u64, pages: usize) void {
 
     std.debug.assert(phys_addr % PAGE_SIZE == 0);
 
-    const total_pages = @as(u64, free_counts.len) * PAGES_PER_ZONE;
+    const max_pages = @as(u64, free_counts.len) * PAGES_PER_ZONE;
     const start_page = phys_addr / PAGE_SIZE;
 
-    std.debug.assert(start_page < total_pages);
-    std.debug.assert(pages <= total_pages - start_page);
+    std.debug.assert(start_page < max_pages);
+    std.debug.assert(pages <= max_pages - start_page);
 
     const int_state = global_lock.acquire(.write, 0);
     defer global_lock.release(.write, int_state);
@@ -474,7 +483,7 @@ pub fn freeContiguous(phys_addr: u64, pages: usize) void {
         start_bit = 0;
     }
 
-    total_free_pages += pages;
+    available_pages += pages;
 }
 
 pub fn freeNonContiguous(buffer: []u64) void {
@@ -488,13 +497,13 @@ pub fn freeNonContiguous(buffer: []u64) void {
     var current_zone: u32 = NULL_INDEX;
     var current_count: u16 = 0;
 
-    const total_pages = @as(u64, free_counts.len) * PAGES_PER_ZONE;
+    const max_pages = @as(u64, free_counts.len) * PAGES_PER_ZONE;
 
     for (buffer) |phys_addr| {
         std.debug.assert(phys_addr % PAGE_SIZE == 0);
 
         const page_idx = phys_addr / PAGE_SIZE;
-        std.debug.assert(page_idx < total_pages);
+        std.debug.assert(page_idx < max_pages);
 
         const zone_idx: u32 = @intCast(phys_addr / ZONE_SIZE);
         const page_bit_idx: usize = @intCast((phys_addr % ZONE_SIZE) / PAGE_SIZE);
@@ -520,7 +529,7 @@ pub fn freeNonContiguous(buffer: []u64) void {
         insertZone(current_zone, current_count);
     }
 
-    total_free_pages += buffer.len;
+    available_pages += buffer.len;
 }
 
 fn validate() void {
@@ -540,5 +549,5 @@ fn validate() void {
         std.debug.assert(in_bucket);
     }
 
-    std.debug.assert(total == total_free_pages);
+    std.debug.assert(total == available_pages);
 }
