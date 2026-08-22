@@ -49,6 +49,13 @@ var total_free_pages: usize = undefined;
 
 var global_lock: kernel.mem.utils.RwLock align(8) = undefined;
 
+pub fn availablePages() usize {
+    const int_state = global_lock.acquire(.read, 0);
+    defer global_lock.release(.read, int_state);
+
+    return total_free_pages;
+}
+
 pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
     var max_phys_addr: u64 = 0;
     for (memmap_entries) |entry| {
