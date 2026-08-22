@@ -110,7 +110,15 @@ pub const RwLock = struct {
                     return prev_int;
                 }
 
-                cpu.pause();
+                if (spins < _polite_spins) {
+                    cpu.pause();
+                } else {
+                    var i: u8 = 0;
+                    const backoff_limit = @as(u8, 1) << @min(spins - _polite_spins, 6);
+                    while (i < backoff_limit) : (i += 1) {
+                        cpu.pause();
+                    }
+                }
             } else {
                 if (current.writer_active or current.readers > 0) {
                     @branchHint(.unlikely);
