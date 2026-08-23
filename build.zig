@@ -213,7 +213,7 @@ fn runCmd(b: *std.Build, arch: Arch, violet_img: std.Build.LazyPath) *std.Build.
         switch (arch) {
             .aarch64 => run_cmd.addArgs(&.{
                 "-machine", "virt,secure=off,virtualization=off,pflash0=pflash0,pflash1=pflash1",
-                "-cpu",     "cortex-a72",
+                "-cpu",     "cortex-a57",
             }),
             .riscv64 => run_cmd.addArgs(&.{
                 "-machine", "virt,pflash0=pflash0,pflash1=pflash1",
@@ -243,6 +243,17 @@ fn runCmd(b: *std.Build, arch: Arch, violet_img: std.Build.LazyPath) *std.Build.
 
     const int_mode = b.option(bool, "int", "Verbose interrupts into debug.log") orelse false;
     if (int_mode) run_cmd.addArgs(&.{ "-d", "int", "-D", "debug.log" });
+
+    const accel_mode = b.option(bool, "accel", "QEMU acceleration") orelse false;
+    if (accel_mode) {
+        const accel_tag = switch (b.graph.host.result.os.tag) {
+            .linux => "kvm",
+            .macos => "hvf",
+            else => "tcg",
+        };
+
+        run_cmd.addArgs(&.{ "-accel", accel_tag });
+    }
 
     return run_cmd;
 }
