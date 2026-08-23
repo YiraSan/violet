@@ -40,6 +40,8 @@ pub fn build(b: *std.Build) !void {
         },
         .red_zone = false,
         .omit_frame_pointer = false,
+        .stack_check = false,
+        .stack_protector = false,
     });
 
     const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse "";
