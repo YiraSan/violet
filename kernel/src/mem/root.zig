@@ -15,4 +15,14 @@
 pub const phys = @import("phys.zig");
 pub const utils = @import("utils.zig");
 
+pub const PAGE_SIZE = 4096;
+
 pub var hhdm_offset: u64 = undefined;
+
+pub inline fn toHhdm(comptime T: type, pa: u64) *T {
+    return @alignCast(@as(*T, @ptrFromInt(hhdm_offset + pa)));
+}
+
+pub inline fn fromHhdm(comptime T: type, ptr: *T) u64 {
+    return @intFromPtr(ptr) - hhdm_offset;
+}

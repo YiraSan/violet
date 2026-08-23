@@ -17,7 +17,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// --- imports --- //
+// --- exports --- //
 
 pub const arch = switch (builtin.cpu.arch) {
     .aarch64 => @import("arch/aarch64/root.zig"),

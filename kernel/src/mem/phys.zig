@@ -23,11 +23,12 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 
+const PAGE_SIZE = mem.PAGE_SIZE;
+
 // --- mem/phys.zig --- //
 
 pub const Error = error{OutOfMemory};
 
-const PAGE_SIZE = 4096;
 const PAGES_PER_ZONE = 512;
 const ZONE_SIZE = PAGES_PER_ZONE * PAGE_SIZE;
 

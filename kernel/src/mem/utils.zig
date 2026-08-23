@@ -21,11 +21,15 @@ const std = @import("std");
 const kernel = @import("root");
 
 const arch = kernel.arch;
-
 const cpu = arch.cpu;
 
 const interrupts = arch.interrupts;
 const InterruptState = interrupts.InterruptState;
+
+const mem = kernel.mem;
+const phys = mem.phys;
+
+const PAGE_SIZE = mem.PAGE_SIZE;
 
 // --- mem/utils.zig --- //
 
@@ -227,3 +231,119 @@ pub const RwLock = struct {
         }
     }
 };
+
+pub fn List(comptime Item: type) type {
+    const NODE_PAGECOUNT = 128;
+    const NODE_SIZE = PAGE_SIZE * NODE_PAGECOUNT;
+
+    if (@sizeOf(Item) == 0) @compileError("Item cannot be zero-sized");
+    if (@sizeOf(Item) > PAGE_SIZE) @compileError("Item cannot exceed 4 KiB");
+
+    return struct {
+        const NodePtr = std.atomic.Value(?*Node);
+        const EntryPtr = std.atomic.Value(?[*]Item);
+
+        const ENTRIES_PER_NODE = NODE_SIZE / @sizeOf(EntryPtr) - 1;
+        const ITEMS_PER_ENTRY = PAGE_SIZE / @sizeOf(Item);
+
+        const Node = struct {
+            next_node: NodePtr,
+            entries: [ENTRIES_PER_NODE]EntryPtr,
+
+            pub fn create() !*Node {
+                const node_pa = try phys.allocContiguous(NODE_PAGECOUNT);
+                const node = mem.toHhdm(Node, node_pa);
+                node.next_node = .init(null);
+
+                @memset(&node.entries, .init(null));
+
+                return node;
+            }
+
+            pub fn destroy(self: *Node) void {
+                var next_node: ?*Node = self;
+                while (next_node) |node| {
+                    next_node = node.next_node.load(.monotonic);
+
+                    for (&node.entries) |*entry_ptr| {
+                        if (entry_ptr.load(.monotonic)) |entry| {
+                            phys.freeContiguous(mem.fromHhdm(Item, @ptrCast(entry)), 1);
+                        }
+                    }
+
+                    const node_pa = mem.fromHhdm(Node, node);
+                    phys.freeContiguous(node_pa, NODE_PAGECOUNT);
+                }
+            }
+        };
+
+        first_node: NodePtr = .init(null),
+
+        pub fn init(self: *@This()) void {
+            self.* = .{};
+        }
+
+        pub fn deinit(self: *@This()) void {
+            if (self.first_node.load(.monotonic)) |first_node| {
+                first_node.destroy();
+            }
+        }
+
+        pub fn get(self: *@This(), index: usize) !*Item {
+            const entry_global_index = index / ITEMS_PER_ENTRY;
+            const item_index = index % ITEMS_PER_ENTRY;
+            const node_index = entry_global_index / ENTRIES_PER_NODE;
+            const entry_index = entry_global_index % ENTRIES_PER_NODE;
+
+            var node_ptr: *NodePtr = &self.first_node;
+            var node: *Node = undefined;
+            var current_node_index: usize = 0;
+            while (true) {
+                if (node_ptr.load(.acquire)) |n| {
+                    node = n;
+                    node_ptr = &n.next_node;
+                } else {
+                    const new_node = try Node.create();
+
+                    if (node_ptr.cmpxchgStrong(null, new_node, .acq_rel, .monotonic) == null) {
+                        node = new_node;
+                        node_ptr = &new_node.next_node;
+                    } else {
+                        new_node.destroy();
+                        continue;
+                    }
+                }
+
+                if (current_node_index == node_index) break;
+                current_node_index += 1;
+            }
+
+            const entry_ptr = &node.entries[entry_index];
+            const entry = blk: {
+                while (true) {
+                    if (entry_ptr.load(.acquire)) |e| {
+                        break :blk e;
+                    } else {
+                        const new_entry_pa = try phys.allocPage();
+                        const new_entry: [*]Item = @ptrCast(mem.toHhdm(Item, new_entry_pa));
+
+                        if (entry_ptr.cmpxchgStrong(null, new_entry, .acq_rel, .monotonic) == null) {
+                            break :blk new_entry;
+                        } else {
+                            phys.freeContiguous(new_entry_pa, 1);
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            return &entry[item_index];
+        }
+
+        comptime {
+            if (@sizeOf(EntryPtr) != 8) @compileError("List.EntryPtr should be 8 .");
+            if (@sizeOf(NodePtr) != 8) @compileError("List.NodePtr should be 8 B");
+            if (@sizeOf(Node) != NODE_SIZE) @compileError("List.Node should be 512 KiB");
+        }
+    };
+}
