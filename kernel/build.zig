@@ -13,6 +13,7 @@
 // limitations under the License.
 
 const std = @import("std");
+const zon = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) !void {
     const query = b.standardTargetOptionsQueryOnly(.{});
@@ -42,12 +43,13 @@ pub fn build(b: *std.Build) !void {
         .omit_frame_pointer = false,
         .stack_check = false,
         .stack_protector = false,
+        .link_libc = false,
     });
 
     const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse "";
 
     const build_options = b.addOptions();
-    build_options.addOption([]const u8, "version", try getVersion(b));
+    build_options.addOption([]const u8, "version", zon.version);
     build_options.addOption([]const u8, "drivers", drivers);
     kernel_mod.addImport("build_options", build_options.createModule());
 
@@ -73,13 +75,6 @@ pub fn build(b: *std.Build) !void {
     kernel_exe.setLinkerScript(b.path("linker.lds"));
 
     b.installArtifact(kernel_exe);
-}
-
-fn getVersion(b: *std.Build) ![]const u8 {
-    var tree = try std.zig.Ast.parse(b.allocator, @embedFile("build.zig.zon"), .zon);
-    defer tree.deinit(b.allocator);
-    const version_str = tree.tokenSlice(tree.nodes.items(.main_token)[2]);
-    return b.allocator.dupe(u8, version_str[1 .. version_str.len - 1]);
 }
 
 fn getFeaturesAdd(arch: std.Target.Cpu.Arch) std.Target.Cpu.Feature.Set {
