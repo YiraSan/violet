@@ -28,13 +28,12 @@ violetOS is designed for modern architectures. The baseline requirements are:
 > 🗓️ Planned 
 
 | Generic / Board | Identifier | Current State | Target Tier |
-| :--- | :--- | :---: | :---: | :--- |
-| **QEMU (ARM64)** | `aarch64-virt` | 🗓️ Planned | Tier 1 |
-| **QEMU (x86_64)** | `x86_64-virt` | 🗓️ Planned | Tier 1 |
-| **QEMU (RISC-V)** | `riscv64-virt` | 🗓️ Planned | Tier 1 |
+| :--- | :--- | :---: | :---: |
+| **QEMU (ARM64)** | `aarch64` | 🗓️ Planned | Tier 1 |
+| **QEMU (x86_64)** | `x86_64` | 🗓️ Planned | Tier 1 |
+| **QEMU (RISC-V)** | `riscv64` | 🗓️ Planned | Tier 1 |
 | **Raspberry Pi 4**<sup>1</sup> | `raspberry_pi4` | 🗓️ Planned | Tier 2 |
-| **Raspberry Pi 3**<sup>2</sup> | `raspberry_pi3` | 🗓️ Planned | Tier 3 |
-| **VisionFive 2**<sup>3</sup> | `vision_five2` | 🗓️ Planned | Tier 3 |
+| **VisionFive 2**<sup>2</sup> | `vision_five2` | 🗓️ Planned | Tier 3 |
 | **Radxa Rock 5B** | `radxa_rock5b` | 🗓️ Planned | Tier 2 |
 | **Orange Pi5 Plus** | `orange_pi5_plus` | 🗓️ Planned | Tier 2 |
 
@@ -44,5 +43,4 @@ violetOS is designed for modern architectures. The baseline requirements are:
 > The final decision to include, maintain, or drop a platform remains at the sole discretion of the project maintainers.
 
 <sup>1</sup> Includes Raspberry Pi 4B, 400 and Compute Module 4.
-<sup>2</sup> Includes Raspberry Pi 3A+, 3B, 3B+ and Compute Module 3.  
-<sup>3</sup> StarFive VisionFive 2 board (JH7110 SoC).
+<sup>2</sup> StarFive VisionFive 2 board (JH7110 SoC).

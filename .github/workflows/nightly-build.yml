@@ -40,9 +40,6 @@ jobs:
       - name: Raspberry Pi4 Build
         run: zig build -Dboard=raspberry_pi4 -Doptimize=ReleaseFast
 
-      - name: Raspberry Pi3 Build
-        run: zig build -Dboard=raspberry_pi3 -Doptimize=ReleaseFast
-
       - name: Build Changelog
         id: changelog
         uses: mikepenz/release-changelog-builder-action@v6

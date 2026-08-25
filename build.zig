@@ -94,10 +94,6 @@ fn createImgRoot(b: *std.Build, arch: Arch) *std.Build.Step.WriteFile {
 
 fn setupFirmware(b: *std.Build, img_root: *std.Build.Step.WriteFile, board: ?Board) void {
     if (board) |bo| switch (bo) {
-        .raspberry_pi3 => {
-            const rpi3_uefi = b.dependency("rpi3_uefi", .{});
-            _ = img_root.addCopyDirectory(rpi3_uefi.path("."), ".", .{ .exclude_extensions = &.{"md"} });
-        },
         .raspberry_pi4 => {
             const rpi4_uefi = b.dependency("rpi4_uefi", .{});
             _ = img_root.addCopyDirectory(rpi4_uefi.path("."), ".", .{ .exclude_extensions = &.{"md"} });
@@ -260,7 +256,6 @@ fn runCmd(b: *std.Build, arch: Arch, violet_img: std.Build.LazyPath) *std.Build.
 
 pub const SoC = enum {
     // aarch64
-    bcm2837,
     bcm2711,
     rk3588,
 
@@ -269,7 +264,7 @@ pub const SoC = enum {
 
     pub fn getArch(self: SoC) Arch {
         return switch (self) {
-            .bcm2837, .bcm2711, .rk3588 => .aarch64,
+            .bcm2711, .rk3588 => .aarch64,
             .jh7110 => .riscv64,
         };
     }
@@ -282,25 +277,11 @@ pub const SoC = enum {
 
     pub fn getCpuModel(self: SoC) *const std.Target.Cpu.Model {
         return switch (self) {
-            .bcm2837 => &bcm2837_cpu_model,
             .bcm2711 => &bcm2711_cpu_model,
             .jh7110 => &std.Target.riscv.cpu.sifive_u74,
             else => unreachable,
         };
     }
-
-    const bcm2837_cpu_model: std.Target.Cpu.Model = .{
-        .name = "cortex_a53",
-        .llvm_name = "cortex-a53",
-        .features = std.Target.aarch64.featureSet(&[_]std.Target.aarch64.Feature{
-            .balance_fp_ops,
-            .crc,
-            .fuse_adrp_add,
-            .perfmon,
-            .use_postra_scheduler,
-            .v8a,
-        }),
-    };
 
     const bcm2711_cpu_model: std.Target.Cpu.Model = .{
         .name = "cortex_a72",
@@ -320,7 +301,6 @@ pub const SoC = enum {
 
 pub const Board = enum {
     // aarch64
-    raspberry_pi3,
     raspberry_pi4,
     radxa_rock5b,
     orange_pi5_plus,
@@ -330,7 +310,6 @@ pub const Board = enum {
 
     pub fn getSoC(self: Board) SoC {
         return switch (self) {
-            .raspberry_pi3 => .bcm2837,
             .raspberry_pi4 => .bcm2711,
             .radxa_rock5b, .orange_pi5_plus => .rk3588,
             .vision_five2 => .jh7110,
