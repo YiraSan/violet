@@ -152,7 +152,7 @@ fn downloadAndDecompress(b: *std.Build, url: []const u8, out_name: []const u8) s
     return decompress_cmd.captureStdOut(.{});
 }
 
-const qemu_pc_bios_base = "https://gitlab.com/qemu-project/qemu/-/raw/master/pc-bios/";
+const qemu_pc_bios_base = "https://gitlab.com/qemu-project/qemu/-/raw/v11.1.0/pc-bios/";
 
 fn edk2File(b: *std.Build, arch: Arch) std.Build.LazyPath {
     const remote_name = switch (arch) {
@@ -161,6 +161,7 @@ fn edk2File(b: *std.Build, arch: Arch) std.Build.LazyPath {
         .x86_64 => "edk2-x86_64-code.fd",
         else => unreachable,
     };
+
     return downloadAndDecompress(
         b,
         b.fmt("{s}{s}.bz2", .{ qemu_pc_bios_base, remote_name }),
@@ -175,6 +176,7 @@ fn edk2VarsFile(b: *std.Build, arch: Arch) std.Build.LazyPath {
         .x86_64 => "edk2-i386-vars.fd",
         else => unreachable,
     };
+
     return downloadAndDecompress(
         b,
         b.fmt("{s}{s}.bz2", .{ qemu_pc_bios_base, remote_name }),
