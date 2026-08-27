@@ -50,15 +50,16 @@ pub fn build(b: *std.Build) !void {
         .link_libc = false,
     });
 
-    const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse switch (arch) {
-        .x86_64 => "uart_ns16550a",
-        .aarch64 => "uart_pl011",
-        else => "",
-    };
+    const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse "";
+
+    const page_size = b.option(usize, "page_size", "4, 16, 64") orelse 4;
+    const page_levels = b.option(usize, "page_levels", "3, 4, 5") orelse 4;
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", zon.version);
     build_options.addOption([]const u8, "drivers", drivers);
+    build_options.addOption(usize, "page_size", page_size);
+    build_options.addOption(usize, "page_levels", page_levels);
     kernel_mod.addImport("build_options", build_options.createModule());
 
     const limine_dep = b.dependency("limine", .{ .revision = 6 });

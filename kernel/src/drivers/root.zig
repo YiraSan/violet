@@ -25,14 +25,16 @@ pub const acpi = @import("acpi.zig");
 // --- drivers/root.zig --- //
 
 pub const Stage = enum {
-    /// Physical memory allocator and HHDM are available.
+    /// The HHDM is available.
     ///
     /// For MMIO mapping DO NOT use .stage0 via HHDM, only .stage2 via proper virtual memory mapping can do it.
     stage0,
-    /// The cpu topology has been discovered and per-cpu struct are initialized.
+    /// Physical memory allocator is available.
     stage1,
-    /// The virtual memory is fully available.
+    /// The cpu topology has been discovered and per-cpu struct are initialized.
     stage2,
+    /// The virtual memory is fully available.
+    stage3,
 };
 
 pub const Driver = enum {

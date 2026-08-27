@@ -40,10 +40,20 @@ pub fn build(b: *std.Build) void {
 
     const img_root = createImgRoot(b, arch);
     {
+        const page_size = b.option(usize, "page_size", "4, 16, 64") orelse 4;
+        const page_levels = b.option(usize, "page_levels", "3, 4, 5") orelse 4;
+        const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse if (board) |bo| bo.getSoC().getDrivers() else switch (arch) {
+            .x86_64 => "uart_ns16550a",
+            .aarch64 => "uart_pl011",
+            else => "",
+        };
+
         const kernel_dep = b.dependency("kernel", .{
             .target = target,
             .optimize = optimize,
-            .drivers = if (board) |bo| bo.getSoC().getDrivers() else null,
+            .drivers = drivers,
+            .page_size = page_size,
+            .page_levels = page_levels,
         });
         const kernel_exe = kernel_dep.artifact("kernel");
 

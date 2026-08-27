@@ -40,15 +40,29 @@ export var end_marker: limine.RequestsEndMarker linksection(".limine_requests_en
 export var base_revision: limine.BaseRevision linksection(".limine_requests") = .init(6);
 export var hhdm_request: limine.HhdmRequest linksection(".limine_requests") = .{};
 export var memmap_request: limine.MemoryMapRequest linksection(".limine_requests") = .{};
+export var rsdp_request: limine.RsdpRequest linksection(".limine_requests") = .{};
 
-const paging_4lvl: limine.PagingMode = switch (builtin.cpu.arch) {
-    .aarch64, .x86_64 => .@"4lvl",
-    .riscv64 => .sv48,
-    else => unreachable,
+const requested_mode: limine.PagingMode = switch (builtin.cpu.arch) {
+    .aarch64 => switch (build_options.page_levels) {
+        3, 4 => .@"4lvl",
+        5 => .@"5lvl",
+        else => @panic("this level is unsupported on aarch64"),
+    },
+    .riscv64 => switch (build_options.page_levels) {
+        3 => .sv39,
+        4 => .sv48,
+        5 => .sv57,
+        else => @panic("this level is unsupported on riscv64"),
+    },
+    .x86_64 => switch (build_options.page_levels) {
+        4 => .@"4lvl",
+        5 => .@"5lvl",
+        else => @panic("this level is unsupported on x86_64"),
+    },
+    else => @panic("arch unsupported"),
 };
 
-export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = paging_4lvl, .max_mode = paging_4lvl, .min_mode = paging_4lvl }; // .default => 4lvl
-export var rsdp_request: limine.RsdpRequest linksection(".limine_requests") = .{};
+export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = requested_mode, .max_mode = requested_mode, .min_mode = requested_mode };
 
 export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
 
@@ -57,13 +71,10 @@ export fn kernel_entry() noreturn {
         cpu.halt();
     }
 
-    mem.hhdm_offset = hhdm_request.response.?.offset;
-    const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
-
-    phys.init(memmap_entries);
-
     const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
-    if (pagingmode_response.mode != paging_4lvl) unreachable;
+    if (pagingmode_response.mode != requested_mode) unreachable;
+
+    mem.hhdm_offset = hhdm_request.response.?.offset;
 
     const rsdp: *acpi.Rsdp = @ptrCast(@alignCast(rsdp_request.response.?.address));
     if (!rsdp.isValid()) unreachable;
@@ -74,6 +85,11 @@ export fn kernel_entry() noreturn {
     kernel.serial.init();
 
     drivers.runStage(xsdt, .stage0);
+
+    const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
+    phys.init(memmap_entries);
+
+    drivers.runStage(xsdt, .stage1);
 
     if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {
