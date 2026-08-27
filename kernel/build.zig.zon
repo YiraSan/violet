@@ -1,6 +1,6 @@
 .{
     .name = .kernel,
-    .version = "0.0.0",
+    .version = "0.1.0-dev.1",
     .fingerprint = 0x5dd29aaba54d3297, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
