@@ -29,6 +29,10 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    if (optimize == .ReleaseFast) {
+        @panic("ReleaseFast is forbidden");
+    }
+
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,

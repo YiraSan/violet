@@ -34,6 +34,10 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    if (optimize == .ReleaseFast) {
+        @panic("ReleaseFast is forbidden");
+    }
+
     const img_root = createImgRoot(b, arch);
     {
         const kernel_dep = b.dependency("kernel", .{
