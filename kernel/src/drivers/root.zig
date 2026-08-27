@@ -27,13 +27,13 @@ pub const acpi = @import("acpi.zig");
 pub const Stage = enum {
     /// The HHDM is available.
     ///
-    /// For MMIO mapping DO NOT use .stage0 via HHDM, only .stage2 via proper virtual memory mapping can do it.
+    /// For MMIO mapping DO NOT use .stage0 via HHDM, only .stage3 via proper virtual memory mapping can do it.
     stage0,
     /// Physical memory allocator is available.
     stage1,
-    /// The cpu topology has been discovered and per-cpu struct are initialized.
-    stage2,
     /// The virtual memory is fully available.
+    stage2,
+    /// The cpu topology has been discovered and per-cpu struct are initialized.
     stage3,
 };
 
