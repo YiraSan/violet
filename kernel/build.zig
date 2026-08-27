@@ -46,7 +46,11 @@ pub fn build(b: *std.Build) !void {
         .link_libc = false,
     });
 
-    const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse "";
+    const drivers = b.option([]const u8, "drivers", "optional kernel drivers") orelse switch (arch) {
+        .x86_64 => "uart_ns16550a",
+        .aarch64 => "uart_pl011",
+        else => "",
+    };
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", zon.version);
