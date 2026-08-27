@@ -33,8 +33,8 @@ pub inline fn set(new: InterruptState) InterruptState {
     const was_enabled: InterruptState = if ((flags & (1 << 9)) != 0) .enabled else .disabled;
 
     switch (new) {
-        .disabled => asm volatile ("cli" ::: "memory"),
-        .enabled => asm volatile ("sti" ::: "memory"),
+        .disabled => asm volatile ("cli" ::: .{ .memory = true }),
+        .enabled => asm volatile ("sti" ::: .{ .memory = true }),
     }
 
     return was_enabled;

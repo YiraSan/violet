@@ -14,8 +14,10 @@
 
 // --- dependencies --- //
 
+const std = @import("std");
 const builtin = @import("builtin");
 const limine = @import("limine");
+const build_options = @import("build_options");
 
 // --- imports --- //
 
@@ -26,6 +28,9 @@ const cpu = arch.cpu;
 
 const mem = kernel.mem;
 const phys = mem.phys;
+
+const drivers = kernel.drivers;
+const acpi = drivers.acpi;
 
 // --- boot/main.zig --- //
 
@@ -43,6 +48,7 @@ const paging_4lvl: limine.PagingMode = switch (builtin.cpu.arch) {
 };
 
 export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = paging_4lvl, .max_mode = paging_4lvl, .min_mode = paging_4lvl }; // .default => 4lvl
+export var rsdp_request: limine.RsdpRequest linksection(".limine_requests") = .{};
 
 export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
 
@@ -59,6 +65,16 @@ export fn kernel_entry() noreturn {
     const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
     if (pagingmode_response.mode != paging_4lvl) unreachable;
 
+    const rsdp: *acpi.Rsdp = @ptrCast(@alignCast(rsdp_request.response.?.address));
+    if (!rsdp.isValid()) unreachable;
+
+    const xsdt = mem.toHhdm(acpi.Xsdt, rsdp.xsdt_address);
+    if (!xsdt.isValid()) unreachable;
+
+    kernel.serial.init();
+
+    drivers.runStage(xsdt, .stage0);
+
     if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {
             const framebuffer = fb_response.getFramebuffers()[0];
@@ -68,6 +84,9 @@ export fn kernel_entry() noreturn {
             }
         }
     }
+
+    kernel.serial.clear(null);
+    std.log.info("version {s}", .{build_options.version});
 
     cpu.halt();
 }
