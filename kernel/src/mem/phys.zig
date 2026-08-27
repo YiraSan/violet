@@ -23,12 +23,11 @@ const kernel = @import("root");
 
 const mem = kernel.mem;
 
-const PAGE_SIZE = mem.PAGE_SIZE;
-
 // --- mem/phys.zig --- //
 
 pub const Error = error{OutOfMemory};
 
+const PAGE_SIZE = mem.PAGE_SIZE;
 const PAGES_PER_ZONE = 512;
 const ZONE_SIZE = PAGES_PER_ZONE * PAGE_SIZE;
 
@@ -92,18 +91,35 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
     for (memmap_entries) |entry| {
         if (entry.type != .usable) continue;
 
-        if (entry.length >= total_metadata_bytes) {
+        const initial_end = entry.base + entry.length;
+
+        const aligned_base = std.mem.alignForward(u64, entry.base, PAGE_SIZE);
+        if (aligned_base >= initial_end) {
+            entry.length = 0;
+            continue;
+        }
+
+        const aligned_end = std.mem.alignBackward(u64, initial_end, PAGE_SIZE);
+        if (aligned_base >= aligned_end) {
+            entry.length = 0;
+            continue;
+        }
+
+        entry.base = aligned_base;
+        entry.length -= aligned_end - aligned_base;
+
+        if (!found_space and entry.length >= total_metadata_bytes) {
             metadata_phys_base = entry.base;
 
             entry.base += total_metadata_bytes;
             entry.length -= total_metadata_bytes;
+
             found_space = true;
-            break;
         }
     }
 
     if (!found_space) {
-        @panic("PMM: Not enough contiguous usable memory for metadata arrays!");
+        @panic("pmm: not enough contiguous usable memory for metadata arrays!");
     }
 
     const metadata_virt_base = mem.hhdm_offset + metadata_phys_base;
