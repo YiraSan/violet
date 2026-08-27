@@ -17,7 +17,7 @@ const basalt = @import("basalt");
 
 const Arch = std.Target.Cpu.Arch;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const board = b.option(Board, "board", "The target board");
     const arch = if (board) |bo| bo.getSoC().getArch() else b.option(Arch, "arch", "The target arch") orelse b.graph.host.result.cpu.arch;
     const tier = b.option(basalt.GenericTier, "tier", "The target tier") orelse .v1;
@@ -40,13 +40,20 @@ pub fn build(b: *std.Build) void {
 
     const img_root = createImgRoot(b, arch);
     {
-        const page_size = b.option(usize, "page_size", "4, 16, 64") orelse 4;
-        const page_levels = b.option(usize, "page_levels", "3, 4, 5") orelse 4;
-        const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse if (board) |bo| bo.getSoC().getDrivers() else switch (arch) {
-            .x86_64 => "uart_ns16550a",
-            .aarch64 => "uart_pl011",
-            else => "",
-        };
+        const page_size = b.option(u64, "page_size", "4, 16, 64") orelse
+            if (board) |bo| bo.getSoC().getPageSize() else 4;
+
+        const page_levels = b.option(u8, "page_levels", "3, 4, 5") orelse
+            if (board) |bo| bo.getSoC().getPageLevels() else 4;
+
+        const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse
+            if (board) |bo|
+                try concat(b, bo.getSoC().getDrivers(), bo.getDrivers())
+            else switch (arch) {
+                .x86_64 => "uart_ns16550a",
+                .aarch64 => "uart_pl011",
+                else => "",
+            };
 
         const kernel_dep = b.dependency("kernel", .{
             .target = target,
@@ -285,7 +292,26 @@ pub const SoC = enum {
         };
     }
 
+    pub fn getPageSize(self: SoC) u64 {
+        return switch (self) {
+            .bcm2711, .rk3588 => 16,
+            .jh7110 => 4,
+        };
+    }
+
+    pub fn getPageLevels(self: SoC) u8 {
+        return switch (self) {
+            .bcm2711, .rk3588, .jh7110 => 3,
+        };
+    }
+
     pub fn getDrivers(self: SoC) []const u8 {
+        return switch (self) {
+            else => "",
+        };
+    }
+
+    pub fn getModules(self: SoC) []const u8 {
         return switch (self) {
             else => "",
         };
@@ -332,6 +358,12 @@ pub const Board = enum {
         };
     }
 
+    pub fn getDrivers(self: Board) []const u8 {
+        return switch (self) {
+            else => "",
+        };
+    }
+
     pub fn getModules(self: Board) []const u8 {
         return switch (self) {
             else => "",
@@ -342,3 +374,17 @@ pub const Board = enum {
 pub const Module = enum {
     virtio,
 };
+
+fn concat(b: *std.Build, str1: []const u8, str2: []const u8) ![]const u8 {
+    var str1_it = std.mem.splitScalar(u8, str1, ',');
+    var str2_it = std.mem.splitScalar(u8, str2, ',');
+
+    var buf_set: std.BufSet = .init(b.allocator);
+    defer buf_set.deinit();
+
+    while (str1_it.next()) |opt| try buf_set.insert(opt);
+    while (str2_it.next()) |opt| try buf_set.insert(opt);
+
+    var it = buf_set.iterator();
+    return std.mem.join(b.allocator, ",", it.items[0..it.len]);
+}

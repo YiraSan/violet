@@ -52,14 +52,14 @@ pub fn build(b: *std.Build) !void {
 
     const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse "";
 
-    const page_size = b.option(usize, "page_size", "4, 16, 64") orelse 4;
-    const page_levels = b.option(usize, "page_levels", "3, 4, 5") orelse 4;
+    const page_size = b.option(u64, "page_size", "4, 16, 64") orelse 4;
+    const page_levels = b.option(u8, "page_levels", "3, 4, 5") orelse 4;
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", zon.version);
     build_options.addOption([]const u8, "drivers", drivers);
-    build_options.addOption(usize, "page_size", page_size);
-    build_options.addOption(usize, "page_levels", page_levels);
+    build_options.addOption(u64, "page_size", page_size);
+    build_options.addOption(u8, "page_levels", page_levels);
     kernel_mod.addImport("build_options", build_options.createModule());
 
     const limine_dep = b.dependency("limine", .{ .revision = 6 });
