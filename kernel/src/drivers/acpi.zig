@@ -1,0 +1,327 @@
+// Copyright (c) 2024-2026 YiraSan
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// --- dependencies --- //
+
+const std = @import("std");
+
+// --- imports --- //
+
+const kernel = @import("root");
+
+const mem = kernel.mem;
+
+// --- drivers/acpi.zig --- //
+
+pub const Rsdp = extern struct {
+    pub const SIGNATURE = "RSD PTR ";
+
+    // ACPI 1.0
+    signature: [8]u8,
+    checksum: u8,
+    oem_id: [6]u8,
+    revision: u8,
+    rsdt_address: u32,
+
+    // ACPI 2.0+
+    length: u32,
+    xsdt_address: u64 align(4),
+    extended_checksum: u8,
+    reserved: [3]u8,
+
+    pub fn isValid(self: *const Rsdp) bool {
+        const bytes = std.mem.asBytes(self);
+
+        if (!std.mem.eql(u8, &self.signature, SIGNATURE)) return false;
+
+        if (self.revision < 2) return false;
+
+        var basic_sum: u8 = 0;
+        for (bytes[0..20]) |b| basic_sum +%= b;
+        if (basic_sum != 0) return false;
+
+        var extended_sum: u8 = 0;
+        for (bytes) |b| extended_sum +%= b;
+
+        return extended_sum == 0;
+    }
+
+    comptime {
+        if (@sizeOf(Rsdp) != 36) @compileError("Rsdp should have a size of 36");
+
+        if (@offsetOf(Rsdp, "signature") != 0) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "checksum") != 8) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "oem_id") != 9) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "revision") != 15) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "rsdt_address") != 16) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "length") != 20) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "xsdt_address") != 24) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "extended_checksum") != 32) @compileError("Incorrect offset");
+        if (@offsetOf(Rsdp, "reserved") != 33) @compileError("Incorrect offset");
+    }
+};
+
+pub const SdtHeader = extern struct {
+    signature: [4]u8,
+    length: u32,
+    revision: u8,
+    checksum: u8,
+    oem_id: [6]u8,
+    oem_table_id: u64 align(4),
+    oem_revision: u32,
+    creator_id: u32,
+    creator_revision: u32,
+
+    pub fn isValid(self: *const SdtHeader) bool {
+        const table_bytes = @as([*]const u8, @ptrCast(self))[0..self.length];
+
+        var sum: u8 = 0;
+        for (table_bytes) |b| {
+            sum +%= b;
+        }
+
+        return sum == 0;
+    }
+
+    comptime {
+        if (@sizeOf(SdtHeader) != 36) @compileError("SdtHeader should have a size of 36");
+        if (@offsetOf(SdtHeader, "creator_revision") != 32) @compileError("Incorrect offset");
+    }
+};
+
+pub const Xsdt = extern struct {
+    pub const SIGNATURE = "XSDT";
+
+    header: SdtHeader,
+
+    pub fn isValid(self: *const Xsdt) bool {
+        if (!std.mem.eql(u8, &self.header.signature, SIGNATURE)) return false;
+
+        return self.header.isValid();
+    }
+
+    pub fn entryCount(self: *const Xsdt) usize {
+        if (self.header.length < @sizeOf(SdtHeader)) return 0;
+        return (self.header.length - @sizeOf(SdtHeader)) / @sizeOf(u64);
+    }
+
+    pub fn entries(self: *const Xsdt) []align(4) const u64 {
+        const count = self.entryCount();
+
+        const entries_addr = @intFromPtr(self) + @sizeOf(SdtHeader);
+        const entries_ptr = @as([*]align(4) const u64, @ptrFromInt(entries_addr));
+
+        return entries_ptr[0..count];
+    }
+
+    pub fn find(self: *const Xsdt, comptime Table: type) ?*const Table {
+        for (self.entries()) |entry_pa| {
+            const table = mem.toHhdm(Table, entry_pa);
+            const header: *SdtHeader = &table.header;
+
+            if (!std.mem.eql(u8, &header.signature, Table.SIGNATURE)) continue;
+            if (!header.isValid()) continue;
+
+            return table;
+        }
+
+        return null;
+    }
+};
+
+pub const Gas = extern struct {
+    address_space_id: AddressSpaceId,
+    register_bit_width: u8,
+    register_bit_offset: u8,
+    access_size: AccessSize,
+
+    address: u64 align(4),
+
+    pub const AddressSpaceId = enum(u8) {
+        system_memory = 0,
+        system_io = 1,
+        pci_config_space = 2,
+        embedded_controller = 3,
+        smbus = 4,
+        system_cmos = 5,
+        pci_bar_target = 6,
+        ipmi = 7,
+        general_purpose_io = 8,
+        generic_serial_bus = 9,
+        platform_comms_channel = 10,
+        platform_runtime_mechanism = 11,
+        functional_fixed_hardware = 0x7F,
+        _, // 0x0C-0x7E reserved, 0x80-0xFF OEM defined
+    };
+
+    pub const AccessSize = enum(u8) {
+        undefined_size = 0,
+        byte = 1,
+        word = 2,
+        dword = 3,
+        qword = 4,
+        _, // reserved
+    };
+
+    comptime {
+        if (@sizeOf(Gas) != 12) @compileError("Gas should have a size of 12");
+    }
+};
+
+pub const Madt = extern struct {
+    pub const SIGNATURE = "APIC";
+
+    header: SdtHeader,
+};
+
+pub const Fadt = extern struct {
+    pub const SIGNATURE = "FACP";
+
+    header: SdtHeader,
+};
+
+pub const Spcr = extern struct {
+    pub const SIGNATURE = "SPCR";
+
+    header: SdtHeader,
+
+    interface_type: InterfaceType,
+    _reserved0: [3]u8,
+
+    base_address: Gas align(4),
+
+    interrupt_type: InterruptType,
+    irq: u8,
+
+    global_system_interrupt: u32 align(2),
+
+    configured_baud_rate: ConfiguredBaudRate,
+    parity: Parity,
+    stop_bits: StopBits,
+    flow_control: FlowControl,
+    terminal_type: TerminalType,
+    language: u8, // always 0
+
+    pci_device_id: u16,
+    pci_vendor_id: u16,
+    pci_bus_number: u8,
+    pci_device_number: u8,
+    pci_function_number: u8,
+
+    pci_flags: PciFlags align(1),
+
+    pci_segment: u8,
+
+    uart_clock_frequency: u32,
+    precise_baud_rate: u32,
+
+    namespace_string_length: u16,
+    namespace_string_offset: u16,
+
+    pub const InterfaceType = enum(u8) {
+        full_16550 = 0,
+        full_16450 = 1,
+        ns16550_subset = 2,
+        arm_pl011 = 3,
+        arm_sbsa_generic_uart_2 = 14,
+        arm_sbsa_generic_uart = 15,
+        ns16550_dec_dc374 = 16,
+        ns16550a_generic = 18,
+        nsconsult_ci109 = 19,
+        _, // unspecified
+    };
+
+    pub const InterruptType = packed struct(u8) {
+        pcat_8259: bool = false,
+        io_apic: bool = false,
+        io_sapic: bool = false,
+        armh_gic: bool = false,
+        riscv_plic_aplic: bool = false,
+        _reserved: u3 = 0,
+    };
+
+    pub const ConfiguredBaudRate = enum(u8) {
+        as_is = 0,
+        rate_9600 = 3,
+        rate_19200 = 4,
+        rate_57600 = 6,
+        rate_115200 = 7,
+        _, // reserved
+    };
+
+    pub const Parity = enum(u8) {
+        none = 0,
+        _, // reserved
+    };
+
+    pub const StopBits = enum(u8) {
+        one = 1,
+        _, // reserved
+    };
+
+    pub const FlowControl = packed struct(u8) {
+        dcd_required: bool = false,
+        rts_cts: bool = false,
+        xon_xoff: bool = false,
+        _reserved: u5 = 0,
+    };
+
+    pub const TerminalType = enum(u8) {
+        vt100 = 0,
+        vt100_plus = 1,
+        vt_utf8 = 2,
+        ansi = 3,
+        _, // reserved
+    };
+
+    pub const PciFlags = packed struct(u32) {
+        no_suppress_pnp_and_power_mgmt: bool = false,
+        _reserved: u31 = 0,
+    };
+
+    pub fn isPciDevice(self: *const Spcr) bool {
+        return self.pci_device_id != 0xFFFF and self.pci_vendor_id != 0xFFFF;
+    }
+
+    pub fn uartClockFrequency(self: *const Spcr) ?u32 {
+        const field_end = @offsetOf(Spcr, "uart_clock_frequency") + @sizeOf(u32);
+        if (field_end > self.header.length) return null;
+        return if (self.uart_clock_frequency == 0) null else self.uart_clock_frequency;
+    }
+
+    pub fn preciseBaudRate(self: *const Spcr) ?u32 {
+        const field_end = @offsetOf(Spcr, "precise_baud_rate") + @sizeOf(u32);
+        if (field_end > self.header.length) return null;
+        return if (self.precise_baud_rate == 0) null else self.precise_baud_rate;
+    }
+
+    pub fn namespaceString(self: *const Spcr) ?[]const u8 {
+        const field_end = @offsetOf(Spcr, "namespace_string_offset") + @sizeOf(u16);
+        if (field_end > self.header.length) return null;
+        if (self.namespace_string_offset == 0) return null;
+
+        const end = @as(u32, self.namespace_string_offset) + self.namespace_string_length;
+        if (end > self.header.length) return null;
+
+        const base: [*]const u8 = @ptrCast(self);
+        return base[self.namespace_string_offset..][0..self.namespace_string_length];
+    }
+
+    comptime {
+        if (@sizeOf(Spcr) != 88) @compileError("Spcr should have a size of 88 (revision 4 fixed part)");
+        if (@offsetOf(Spcr, "global_system_interrupt") != 54) @compileError("Spcr.global_system_interrupt offset mismatch");
+        if (@offsetOf(Spcr, "pci_flags") != 71) @compileError("Spcr.pci_flags offset mismatch");
+        if (@offsetOf(Spcr, "namespace_string_offset") != 86) @compileError("Spcr.namespace_string_offset offset mismatch");
+    }
+};

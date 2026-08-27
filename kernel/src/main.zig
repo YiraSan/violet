@@ -27,6 +27,7 @@ pub const arch = switch (builtin.cpu.arch) {
 };
 
 pub const boot = @import("boot/root.zig");
+pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
 
 // --- main.zig --- //
@@ -61,5 +62,6 @@ pub const std_options: std.Options = .{
 comptime {
     _ = arch;
     _ = boot;
+    _ = drivers;
     _ = mem;
 }
