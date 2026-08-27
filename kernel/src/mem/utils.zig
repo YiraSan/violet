@@ -233,11 +233,11 @@ pub const RwLock = struct {
 };
 
 pub fn List(comptime Item: type) type {
-    const NODE_PAGECOUNT = 128;
-    const NODE_SIZE = PAGE_SIZE * NODE_PAGECOUNT;
+    const NODE_SIZE = 64 * 1024; // 64 KiB
+    const NODE_PAGECOUNT = NODE_SIZE / PAGE_SIZE; // 16 pages at 4 KiB ; 4 pages at 16 KiB ; 1 pages at 64 KiB
 
     if (@sizeOf(Item) == 0) @compileError("Item cannot be zero-sized");
-    if (@sizeOf(Item) > PAGE_SIZE) @compileError("Item cannot exceed 4 KiB");
+    if (@sizeOf(Item) > 4 * 1024) @compileError("Item cannot exceed 4 KiB");
 
     return struct {
         const NodePtr = std.atomic.Value(?*Node);
@@ -343,7 +343,7 @@ pub fn List(comptime Item: type) type {
         comptime {
             if (@sizeOf(EntryPtr) != 8) @compileError("List.EntryPtr should be 8 .");
             if (@sizeOf(NodePtr) != 8) @compileError("List.NodePtr should be 8 B");
-            if (@sizeOf(Node) != NODE_SIZE) @compileError("List.Node should be 512 KiB");
+            if (@sizeOf(Node) != NODE_SIZE) @compileError("List.Node should be 64 KiB");
         }
     };
 }

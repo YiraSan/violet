@@ -106,7 +106,7 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
         }
 
         entry.base = aligned_base;
-        entry.length -= aligned_end - aligned_base;
+        entry.length = aligned_end - aligned_base;
 
         if (!found_space and entry.length >= total_metadata_bytes) {
             metadata_phys_base = entry.base;
