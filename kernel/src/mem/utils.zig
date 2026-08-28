@@ -327,6 +327,8 @@ pub fn List(comptime Item: type) type {
                         const new_entry_pa = try phys.allocPage();
                         const new_entry: [*]Item = @ptrCast(mem.toHhdm(Item, new_entry_pa));
 
+                        @memset(mem.toHhdm([PAGE_SIZE]u8, new_entry_pa), 0);
+
                         if (entry_ptr.cmpxchgStrong(null, new_entry, .acq_rel, .monotonic) == null) {
                             break :blk new_entry;
                         } else {
@@ -360,6 +362,102 @@ pub fn List(comptime Item: type) type {
             if (@sizeOf(EntryPtr) != 8) @compileError("List.EntryPtr should be 8 .");
             if (@sizeOf(NodePtr) != 8) @compileError("List.NodePtr should be 8 B");
             if (@sizeOf(Node) != NODE_SIZE) @compileError("List.Node should be 64 KiB");
+        }
+    };
+}
+
+pub fn SlotMap(comptime Item: type) type {
+    return struct {
+        const Self = @This();
+
+        const Slot = struct {
+            generation: std.atomic.Value(u32),
+            next_free: std.atomic.Value(u32),
+            item: Item,
+        };
+
+        const SlotList = List(Slot);
+
+        pub const Handle = packed struct(u64) {
+            generation: u32,
+            index: u32,
+        };
+
+        const FreeHead = packed struct(u64) {
+            index: u32,
+            tag: u32,
+        };
+
+        const SENTINEL: u32 = std.math.maxInt(u32);
+
+        slots: SlotList = .{},
+        len: std.atomic.Value(u32) = .init(0),
+        free_head: std.atomic.Value(u64) = .init(@bitCast(FreeHead{ .index = SENTINEL, .tag = 0 })),
+
+        pub fn init(self: *Self) void {
+            self.* = .{};
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.slots.deinit();
+        }
+
+        pub fn insert(self: *Self, value: Item) !Handle {
+            var head: FreeHead = @bitCast(self.free_head.load(.acquire));
+
+            while (head.index != SENTINEL) {
+                const slot = self.slots.tryGet(head.index) orelse unreachable;
+                const new_head: FreeHead = .{ .index = slot.next_free.load(.monotonic), .tag = head.tag +% 1 };
+
+                if (self.free_head.cmpxchgWeak(@bitCast(head), @bitCast(new_head), .acq_rel, .acquire)) |actual| {
+                    head = @bitCast(actual);
+                    continue;
+                }
+
+                const freed_gen = slot.generation.load(.monotonic);
+                std.debug.assert(freed_gen % 2 == 0);
+                const used_gen = freed_gen +% 1;
+
+                slot.item = value;
+                slot.generation.store(used_gen, .release);
+                return .{ .generation = used_gen, .index = head.index };
+            }
+
+            const index = self.len.fetchAdd(1, .monotonic);
+            const slot = try self.slots.get(index);
+            slot.item = value;
+            slot.generation = .init(1);
+            return .{ .generation = 1, .index = index };
+        }
+
+        pub fn get(self: *Self, handle: Handle) ?*Item {
+            if (handle.generation % 2 == 0) return null;
+
+            const slot = self.slots.tryGet(handle.index) orelse return null;
+            if (slot.generation.load(.acquire) != handle.generation) return null;
+
+            return &slot.item;
+        }
+
+        pub fn remove(self: *Self, handle: Handle) bool {
+            const slot = self.slots.tryGet(handle.index) orelse return false;
+
+            const freed_gen = handle.generation +% 1;
+            if (slot.generation.cmpxchgStrong(handle.generation, freed_gen, .release, .monotonic) != null) {
+                return false;
+            }
+
+            var head: FreeHead = @bitCast(self.free_head.load(.acquire));
+            while (true) {
+                slot.next_free.store(head.index, .monotonic);
+                const new_head: FreeHead = .{ .index = handle.index, .tag = head.tag +% 1 };
+
+                if (self.free_head.cmpxchgWeak(@bitCast(head), @bitCast(new_head), .release, .acquire)) |actual| {
+                    head = @bitCast(actual);
+                    continue;
+                }
+                return true;
+            }
         }
     };
 }
