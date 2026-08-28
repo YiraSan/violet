@@ -130,9 +130,7 @@ fn write(context: *anyopaque, data: []const u8) void {
 }
 
 fn writeByte(b: Bus, byte: u8) void {
-    while (b.readReg(5) & 0x20 == 0) {
-        std.atomic.spinLoopHint();
-    }
+    while (b.readReg(5) & 0x20 == 0) kernel.arch.cpu.pause();
 
     b.writeReg(0, byte);
 }
