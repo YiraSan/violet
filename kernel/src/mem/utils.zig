@@ -279,10 +279,6 @@ pub fn List(comptime Item: type) type {
 
         first_node: NodePtr = .init(null),
 
-        pub fn init(self: *@This()) void {
-            self.* = .{};
-        }
-
         pub fn deinit(self: *@This()) void {
             if (self.first_node.load(.monotonic)) |first_node| {
                 first_node.destroy();
@@ -367,8 +363,29 @@ pub fn List(comptime Item: type) type {
 }
 
 pub fn SlotMap(comptime Item: type) type {
+    const is_arc = @hasDecl(Item, "__arc");
+
     return struct {
         const Self = @This();
+
+        pub const ArcRef = if (is_arc) struct {
+            map: *Self,
+            item: *Item,
+            index: u32,
+            released: bool = false,
+
+            pub fn release(self: *ArcRef) void {
+                if (!self.released) {
+                    self.released = true;
+                    self.map.releaseRef(self.index);
+                }
+            }
+
+            pub fn payload(self: *ArcRef) *Item.Payload {
+                std.debug.assert(!self.released);
+                return &self.item.value;
+            }
+        } else unreachable;
 
         const Slot = struct {
             generation: std.atomic.Value(u32),
@@ -394,15 +411,11 @@ pub fn SlotMap(comptime Item: type) type {
         len: std.atomic.Value(u32) = .init(0),
         free_head: std.atomic.Value(u64) = .init(@bitCast(FreeHead{ .index = SENTINEL, .tag = 0 })),
 
-        pub fn init(self: *Self) void {
-            self.* = .{};
-        }
-
         pub fn deinit(self: *Self) void {
             self.slots.deinit();
         }
 
-        pub fn insert(self: *Self, value: Item) !Handle {
+        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !Handle {
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
 
             while (head.index != SENTINEL) {
@@ -418,33 +431,34 @@ pub fn SlotMap(comptime Item: type) type {
                 std.debug.assert(freed_gen % 2 == 0);
                 const used_gen = freed_gen +% 1;
 
-                slot.item = value;
+                if (comptime is_arc) {
+                    slot.item.value = item;
+                    slot.item.refcount.store(1, .release);
+                } else {
+                    slot.item = item;
+                }
+
                 slot.generation.store(used_gen, .release);
                 return .{ .generation = used_gen, .index = head.index };
             }
 
             const index = self.len.fetchAdd(1, .monotonic);
             const slot = try self.slots.get(index);
-            slot.item = value;
+            if (comptime is_arc) {
+                slot.item = .init(item);
+            } else {
+                slot.item = item;
+            }
             slot.generation = .init(1);
             return .{ .generation = 1, .index = index };
         }
 
-        pub fn get(self: *Self, handle: Handle) ?*Item {
-            if (handle.generation % 2 == 0) return null;
-
-            const slot = self.slots.tryGet(handle.index) orelse return null;
-            if (slot.generation.load(.acquire) != handle.generation) return null;
-
-            return &slot.item;
-        }
-
-        pub fn remove(self: *Self, handle: Handle) bool {
-            const slot = self.slots.tryGet(handle.index) orelse return false;
+        fn enqueueFree(self: *Self, handle: Handle) void {
+            const slot = self.slots.tryGet(handle.index) orelse return;
 
             const freed_gen = handle.generation +% 1;
             if (slot.generation.cmpxchgStrong(handle.generation, freed_gen, .release, .monotonic) != null) {
-                return false;
+                return;
             }
 
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
@@ -456,8 +470,83 @@ pub fn SlotMap(comptime Item: type) type {
                     head = @bitCast(actual);
                     continue;
                 }
+
+                break;
+            }
+        }
+
+        fn releaseRef(self: *Self, index: u32) void {
+            const slot = self.slots.tryGet(index) orelse return;
+
+            const prev = slot.item.refcount.fetchSub(1, .release);
+            if (prev == 1) {
+                _ = slot.item.refcount.load(.acquire);
+                defer self.enqueueFree(index);
+
+                const type_info = comptime @typeInfo(Item.Payload);
+                if (type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum" or type_info == .@"opaque") {
+                    if (comptime @hasDecl(Item.Payload, "deinit")) {
+                        slot.item.value.deinit();
+                    }
+                }
+            }
+        }
+
+        inline fn tryAcquire(counter: *std.atomic.Value(u32)) bool {
+            var cur = counter.load(.monotonic);
+            while (true) {
+                if (cur == 0) return false;
+                if (counter.cmpxchgWeak(cur, cur + 1, .acquire, .monotonic)) |actual| {
+                    cur = actual;
+                    continue;
+                }
                 return true;
             }
+        }
+
+        pub fn get(self: *Self, handle: Handle) if (is_arc) ?ArcRef else ?*Item {
+            if (handle.generation % 2 == 0) return null;
+
+            const slot = self.slots.tryGet(handle.index) orelse return null;
+
+            if (comptime is_arc) {
+                if (!tryAcquire(&slot.item.refcount)) return null;
+
+                if (slot.generation.load(.acquire) != handle.generation) {
+                    self.releaseRef(handle.index);
+                    return null;
+                }
+
+                return ArcRef{ .map = self, .index = handle.index, .item = &slot.item };
+            } else {
+                if (slot.generation.load(.acquire) != handle.generation) return null;
+                return &slot.item;
+            }
+        }
+
+        pub fn remove(self: *Self, handle: Handle) void {
+            if (comptime is_arc) {
+                self.releaseRef(handle.index);
+            } else {
+                self.enqueueFree(handle.index);
+            }
+        }
+    };
+}
+
+pub fn Arc(comptime T: type) type {
+    return struct {
+        pub const __arc = true;
+        pub const Payload = T;
+
+        refcount: std.atomic.Value(u32),
+        value: T,
+
+        pub fn init(val: T) @This() {
+            return .{
+                .refcount = .init(1),
+                .value = val,
+            };
         }
     };
 }
