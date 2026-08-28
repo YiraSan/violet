@@ -375,15 +375,20 @@ pub fn SlotMap(comptime Item: type) type {
             released: bool = false,
 
             pub fn release(self: *ArcRef) void {
-                if (!self.released) {
-                    self.released = true;
-                    self.map.releaseRef(self.index);
-                }
+                std.debug.assert(!self.released);
+                self.released = true;
+                self.map.releaseRef(self.index);
             }
 
             pub fn payload(self: *ArcRef) *Item.Payload {
                 std.debug.assert(!self.released);
                 return &self.item.value;
+            }
+
+            pub fn clone(self: *ArcRef) ArcRef {
+                std.debug.assert(!self.released);
+                _ = tryAcquire(&self.item.refcount);
+                return self.*;
             }
         } else unreachable;
 
