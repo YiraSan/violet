@@ -42,3 +42,11 @@ pub inline fn id() u64 {
 
     return ebx >> 24;
 }
+
+pub inline fn syncMem() void {
+    asm volatile ("mfence" ::: .{ .memory = true });
+}
+
+pub inline fn syncStores() void {
+    asm volatile ("sfence" ::: .{ .memory = true });
+}

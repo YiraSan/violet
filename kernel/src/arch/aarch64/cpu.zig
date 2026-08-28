@@ -39,3 +39,11 @@ pub inline fn id() u64 {
 
     return mpidr & 0xff;
 }
+
+pub inline fn syncMem() void {
+    asm volatile ("dsb ish" ::: .{ .memory = true });
+}
+
+pub inline fn syncStores() void {
+    asm volatile ("dsb ishst" ::: .{ .memory = true });
+}

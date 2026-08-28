@@ -35,3 +35,11 @@ pub inline fn pause() void {
 pub inline fn id() u64 {
     @compileError("use info from openSBI !");
 }
+
+pub inline fn syncMem() void {
+    asm volatile ("fence rw, rw" ::: .{ .memory = true });
+}
+
+pub inline fn syncStores() void {
+    asm volatile ("fence w, w" ::: .{ .memory = true });
+}
