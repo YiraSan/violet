@@ -420,7 +420,7 @@ pub fn SlotMap(comptime Item: type) type {
             self.slots.deinit();
         }
 
-        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !Handle {
+        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !struct { handle: Handle, ref: if (is_arc) ArcRef else *Item } {
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
 
             while (head.index != SENTINEL) {
@@ -444,7 +444,10 @@ pub fn SlotMap(comptime Item: type) type {
                 }
 
                 slot.generation.store(used_gen, .release);
-                return .{ .generation = used_gen, .index = head.index };
+                return .{
+                    .handle = .{ .generation = used_gen, .index = head.index },
+                    .ref = if (comptime is_arc) ArcRef{ .map = self, .index = head.index, .item = &slot.item } else &slot.item,
+                };
             }
 
             const index = self.len.fetchAdd(1, .monotonic);
@@ -455,7 +458,10 @@ pub fn SlotMap(comptime Item: type) type {
                 slot.item = item;
             }
             slot.generation = .init(1);
-            return .{ .generation = 1, .index = index };
+            return .{
+                .handle = .{ .generation = 1, .index = index },
+                .ref = if (comptime is_arc) ArcRef{ .map = self, .index = index, .item = &slot.item } else &slot.item,
+            };
         }
 
         fn pushFree(self: *Self, index: u32) void {
@@ -534,7 +540,7 @@ pub fn SlotMap(comptime Item: type) type {
 
         pub fn remove(self: *Self, handle: Handle) void {
             if (comptime is_arc) {
-                self.releaseRef(handle.index);
+                @compileError("ArcRef.release() should be called");
             } else {
                 self.enqueueFree(handle);
             }
