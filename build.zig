@@ -385,6 +385,13 @@ fn concat(b: *std.Build, str1: []const u8, str2: []const u8) ![]const u8 {
     while (str1_it.next()) |opt| try buf_set.insert(opt);
     while (str2_it.next()) |opt| try buf_set.insert(opt);
 
+    var list: std.ArrayList([]const u8) = .empty;
+    defer list.deinit(b.allocator);
+
     var it = buf_set.iterator();
-    return std.mem.join(b.allocator, ",", it.items[0..it.len]);
+    while (it.next()) |opt| {
+        try list.append(b.allocator, opt.*);
+    }
+
+    return std.mem.join(b.allocator, ",", list.items);
 }
