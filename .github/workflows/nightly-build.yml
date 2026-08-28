@@ -29,16 +29,16 @@ jobs:
         run: mkdir -p .zig-cache/tmp ~/.cache/zig/tmp
 
       - name: Generic Build (aarch64)
-        run: zig build -Darch=aarch64 -Doptimize=ReleaseFast
+        run: zig build -Darch=aarch64 -Doptimize=ReleaseSafe
 
       - name: Generic Build (riscv64)
-        run: zig build -Darch=riscv64 -Doptimize=ReleaseFast
+        run: zig build -Darch=riscv64 -Doptimize=ReleaseSafe
 
       - name: Generic Build (x86_64)
-        run: zig build -Darch=x86_64 -Doptimize=ReleaseFast
+        run: zig build -Darch=x86_64 -Doptimize=ReleaseSafe
 
       - name: Raspberry Pi4 Build
-        run: zig build -Dboard=raspberry_pi4 -Doptimize=ReleaseFast
+        run: zig build -Dboard=raspberry_pi4 -Doptimize=ReleaseSafe
 
       - name: Build Changelog
         id: changelog
