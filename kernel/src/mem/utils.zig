@@ -363,7 +363,7 @@ pub fn NodeList(comptime Item: type, comptime node_size: ?usize) type {
 }
 
 pub fn SlotMap(comptime Item: type) type {
-    const is_arc = @hasDecl(Item, "__arc");
+    const is_arc = @hasDecl(Item, "__SlotMap__Arc");
 
     return struct {
         const Self = @This();
@@ -453,26 +453,27 @@ pub fn SlotMap(comptime Item: type) type {
             return .{ .generation = 1, .index = index };
         }
 
-        fn enqueueFree(self: *Self, handle: Handle) void {
-            const slot = self.slots.tryGet(handle.index) orelse return;
-
-            const freed_gen = handle.generation +% 1;
-            if (slot.generation.cmpxchgStrong(handle.generation, freed_gen, .release, .monotonic) != null) {
-                return;
-            }
-
+        fn pushFree(self: *Self, index: u32) void {
+            const slot = self.slots.tryGet(index) orelse unreachable;
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
             while (true) {
                 slot.next_free.store(head.index, .monotonic);
-                const new_head: FreeHead = .{ .index = handle.index, .tag = head.tag +% 1 };
-
+                const new_head: FreeHead = .{ .index = index, .tag = head.tag +% 1 };
                 if (self.free_head.cmpxchgWeak(@bitCast(head), @bitCast(new_head), .release, .acquire)) |actual| {
                     head = @bitCast(actual);
                     continue;
                 }
-
-                break;
+                return;
             }
+        }
+
+        fn enqueueFree(self: *Self, handle: Handle) void {
+            const slot = self.slots.tryGet(handle.index) orelse return;
+            const freed_gen = handle.generation +% 1;
+            if (slot.generation.cmpxchgStrong(handle.generation, freed_gen, .release, .monotonic) != null) {
+                return;
+            }
+            self.pushFree(handle.index);
         }
 
         fn releaseRef(self: *Self, index: u32) void {
@@ -481,7 +482,6 @@ pub fn SlotMap(comptime Item: type) type {
             const prev = slot.item.refcount.fetchSub(1, .release);
             if (prev == 1) {
                 _ = slot.item.refcount.load(.acquire);
-                defer self.enqueueFree(index);
 
                 const type_info = comptime @typeInfo(Item.Payload);
                 if (type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum" or type_info == .@"opaque") {
@@ -489,6 +489,9 @@ pub fn SlotMap(comptime Item: type) type {
                         slot.item.value.deinit();
                     }
                 }
+
+                _ = slot.generation.fetchAdd(1, .release);
+                self.pushFree(index);
             }
         }
 
@@ -528,7 +531,7 @@ pub fn SlotMap(comptime Item: type) type {
             if (comptime is_arc) {
                 self.releaseRef(handle.index);
             } else {
-                self.enqueueFree(handle.index);
+                self.enqueueFree(handle);
             }
         }
     };
@@ -536,7 +539,7 @@ pub fn SlotMap(comptime Item: type) type {
 
 pub fn Arc(comptime T: type) type {
     return struct {
-        pub const __arc = true;
+        pub const __SlotMap__Arc = {};
         pub const Payload = T;
 
         refcount: std.atomic.Value(u32),
