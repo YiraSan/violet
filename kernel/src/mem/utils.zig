@@ -340,6 +340,22 @@ pub fn List(comptime Item: type) type {
             return &entry[item_index];
         }
 
+        pub fn tryGet(self: *@This(), index: usize) ?*Item {
+            const entry_global_index = index / ITEMS_PER_ENTRY;
+            const item_index = index % ITEMS_PER_ENTRY;
+            const node_index = entry_global_index / ENTRIES_PER_NODE;
+            const entry_index = entry_global_index % ENTRIES_PER_NODE;
+
+            var node = self.first_node.load(.acquire) orelse return null;
+            var current_node_index: usize = 0;
+            while (current_node_index != node_index) : (current_node_index += 1) {
+                node = node.next_node.load(.acquire) orelse return null;
+            }
+
+            const entry = node.entries[entry_index].load(.acquire) orelse return null;
+            return &entry[item_index];
+        }
+
         comptime {
             if (@sizeOf(EntryPtr) != 8) @compileError("List.EntryPtr should be 8 .");
             if (@sizeOf(NodePtr) != 8) @compileError("List.NodePtr should be 8 B");
