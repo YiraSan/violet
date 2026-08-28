@@ -148,6 +148,10 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
         var current_addr = entry.base;
         const end_addr = entry.base + entry.length;
 
+        if (current_addr == 0) {
+            current_addr += PAGE_SIZE;
+        }
+
         while (current_addr < end_addr) : (current_addr += PAGE_SIZE) {
             const zone_idx = current_addr / ZONE_SIZE;
             const bit_idx = (current_addr % ZONE_SIZE) / PAGE_SIZE;
