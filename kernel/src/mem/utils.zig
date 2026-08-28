@@ -357,7 +357,7 @@ pub fn NodeList(comptime Item: type, comptime node_size: ?usize) type {
         comptime {
             if (@sizeOf(EntryPtr) != 8) @compileError("NodeList.EntryPtr should be 8 B");
             if (@sizeOf(NodePtr) != 8) @compileError("NodeList.NodePtr should be 8 B");
-            if (@sizeOf(Node) != NODE_SIZE) @compileError(std.fmt.comptimePrint("NodeList.Node should be {} KiB", .{ NODE_SIZE / 1024 }));
+            if (@sizeOf(Node) != NODE_SIZE) @compileError(std.fmt.comptimePrint("NodeList.Node should be {} KiB", .{NODE_SIZE / 1024}));
         }
     };
 }
@@ -549,6 +549,137 @@ pub fn Arc(comptime T: type) type {
             return .{
                 .refcount = .init(1),
                 .value = val,
+            };
+        }
+    };
+}
+
+/// Should be protected with a RwLock.
+pub fn UnrolledList(comptime Item: type, comptime node_size: ?usize) type {
+    const NODE_SIZE = std.mem.alignForward(usize, @max(node_size orelse PAGE_SIZE, 1), PAGE_SIZE);
+    const NODE_PAGECOUNT = NODE_SIZE / PAGE_SIZE;
+
+    if (@sizeOf(Item) == 0) @compileError("Item cannot be zero-sized");
+    if (@sizeOf(Item) > 1 * 1024) @compileError("Item cannot exceed 1 KiB");
+
+    return struct {
+        const Self = @This();
+
+        const NodePtr = ?*Node;
+        const HEADER_SIZE = @sizeOf(NodePtr);
+        const ITEMS_PER_NODE = (NODE_SIZE - HEADER_SIZE) / @sizeOf(Item);
+
+        const Node = struct {
+            next: NodePtr,
+            items: [ITEMS_PER_NODE]Item,
+
+            pub fn create() !*Node {
+                const node_pa = try phys.allocContiguous(NODE_PAGECOUNT);
+                const node = mem.toHhdm(Node, node_pa);
+                node.next = null;
+                return node;
+            }
+
+            pub fn destroy(self: *Node) void {
+                const node_pa = mem.fromHhdm(Node, self);
+                phys.freeContiguous(node_pa, NODE_PAGECOUNT);
+            }
+        };
+
+        first_node: NodePtr = null,
+        last_node: NodePtr = null,
+        len: usize = 0,
+
+        pub fn deinit(self: *Self) void {
+            var current = self.first_node;
+            while (current) |node| {
+                const next = node.next;
+                node.destroy();
+                current = next;
+            }
+            self.first_node = null;
+            self.last_node = null;
+            self.len = 0;
+        }
+
+        pub fn append(self: *Self, item: Item) !void {
+            var target_node: *Node = undefined;
+
+            if (self.last_node) |last| {
+                const item_index = self.len % ITEMS_PER_NODE;
+                if (item_index == 0 and self.len > 0) {
+                    const new_node = try Node.create();
+                    last.next = new_node;
+                    self.last_node = new_node;
+                    target_node = new_node;
+                } else {
+                    target_node = last;
+                }
+            } else {
+                const new_node = try Node.create();
+                self.first_node = new_node;
+                self.last_node = new_node;
+                target_node = new_node;
+            }
+
+            const item_index = self.len % ITEMS_PER_NODE;
+            target_node.items[item_index] = item;
+            self.len += 1;
+        }
+
+        pub fn getPtr(self: *Self, index: usize) ?*Item {
+            if (index >= self.len) return null;
+
+            const node_index = index / ITEMS_PER_NODE;
+            const item_index = index % ITEMS_PER_NODE;
+
+            var current = self.first_node;
+            var current_node_index: usize = 0;
+
+            while (current) |node| {
+                if (current_node_index == node_index) {
+                    return &node.items[item_index];
+                }
+                current = node.next;
+                current_node_index += 1;
+            }
+
+            return null;
+        }
+
+        pub fn get(self: *Self, index: usize) ?Item {
+            const ptr = self.getPtr(index) orelse return null;
+            return ptr.*;
+        }
+
+        pub const Iterator = struct {
+            current_node: NodePtr,
+            current_item_index: usize,
+            items_left: usize,
+
+            pub fn next(self: *Iterator) ?*Item {
+                if (self.items_left == 0) return null;
+
+                const node = self.current_node orelse return null;
+                const ptr = &node.items[self.current_item_index];
+
+                self.current_item_index += 1;
+                self.items_left -= 1;
+
+                if (self.current_item_index == ITEMS_PER_NODE) {
+                    self.current_node = node.next;
+                    self.current_item_index = 0;
+                }
+
+                return ptr;
+            }
+        };
+
+        pub fn iterator(self: *Self) Iterator {
+            return .{
+                .current_node = self.first_node,
+                .current_item_index = 0,
+                .items_left = self.len,
             };
         }
     };
