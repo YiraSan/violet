@@ -124,12 +124,12 @@ fn write(context: *anyopaque, data: []const u8) void {
     const b: *const Bus = @ptrCast(@alignCast(context));
 
     for (data) |byte| {
-        if (byte == '\n') writeByte(b.*, '\r');
-        writeByte(b.*, byte);
+        if (byte == '\n') writeChar(b.*, '\r');
+        writeChar(b.*, byte);
     }
 }
 
-fn writeByte(b: Bus, byte: u8) void {
+fn writeChar(b: Bus, byte: u8) void {
     while (b.readReg(5) & 0x20 == 0) kernel.arch.cpu.pause();
 
     b.writeReg(0, byte);
