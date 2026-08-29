@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) !void {
     kernel_exe.entry = .disabled;
     kernel_exe.lto = .none;
     kernel_exe.pie = false;
-    kernel_exe.link_z_max_page_size = 64 * 1024;
+    kernel_exe.link_z_max_page_size = if (arch == .aarch64) 64 * 1024 else 4 * 1024;
 
     kernel_exe.setLinkerScript(b.path("linker.lds"));
 
