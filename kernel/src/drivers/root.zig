@@ -41,6 +41,7 @@ pub const Driver = enum {
     // serial
     uart_ns16550a,
     uart_pl011,
+    sbi,
 
     pub fn isCompatible(comptime driver: Driver) bool {
         const Module = driver.moduleOf();
@@ -54,6 +55,7 @@ pub const Driver = enum {
         return switch (driver) {
             .uart_ns16550a => @import("serial/uart_ns16550a.zig"),
             .uart_pl011 => @import("serial/uart_pl011.zig"),
+            .sbi => @import("serial/sbi.zig"),
         };
     }
 };

@@ -52,6 +52,7 @@ pub fn build(b: *std.Build) !void {
             else switch (arch) {
                 .x86_64 => "uart_ns16550a",
                 .aarch64 => "uart_pl011",
+                .riscv64 => "sbi",
                 else => "",
             };
 
