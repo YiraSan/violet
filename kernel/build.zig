@@ -106,7 +106,8 @@ fn getFeaturesAdd(arch: std.Target.Cpu.Arch) std.Target.Cpu.Feature.Set {
         .riscv64 => {
             const Feature = std.Target.riscv.Feature;
 
-            _ = Feature;
+            features_add.addFeature(@intFromEnum(Feature.zicsr));
+            features_add.addFeature(@intFromEnum(Feature.zifencei));
         },
         else => unreachable,
     }
