@@ -30,7 +30,7 @@ const mem = kernel.mem;
 
 // --- drivers/serial/sbi.zig --- //
 
-pub const architectures: []const std.Target.Cpu.Arch = &.{ .riscv64 };
+pub const architectures: []const std.Target.Cpu.Arch = &.{.riscv64};
 
 pub fn init(_: ?*const acpi.Xsdt, _: drivers.Stage) !void {
     if (initialized) return;
@@ -57,7 +57,5 @@ inline fn writeChar(c: u8) void {
         :
         : [a7] "{a7}" (@as(usize, 0x01)),
           [a0] "{a0}" (@as(usize, c)),
-        : .{.a0 = true, .a1 = true}
-    );
+        : .{ .a0 = true, .a1 = true });
 }
-
