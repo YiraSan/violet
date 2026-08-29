@@ -30,7 +30,7 @@ pub const GenericTier = enum {
                 .v3 => &std.Target.x86.cpu.x86_64_v3,
                 .v4 => &std.Target.x86.cpu.x86_64_v4,
             },
-            else => std.Target.Cpu.Model.generic(arch),
+            else => std.Target.Cpu.Model.baseline(arch, .{ .tag = .freestanding, .version_range = .{.none={}} }),
         };
     }
 };
