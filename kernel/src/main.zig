@@ -29,7 +29,6 @@ pub const arch = switch (builtin.cpu.arch) {
 pub const boot = @import("boot/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
-pub const serial = @import("serial/root.zig");
 
 // --- main.zig --- //
 
@@ -37,7 +36,7 @@ pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace, return_
     _ = stack_trace;
     _ = return_address;
 
-    serial.print(
+    drivers.serial.print(
         null,
         .err,
         "kernel",
@@ -49,7 +48,7 @@ pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace, return_
 }
 
 pub fn logFn(comptime message_level: std.log.Level, comptime scope: @EnumLiteral(), comptime format: []const u8, args: anytype) void {
-    serial.print(
+    drivers.serial.print(
         null,
         message_level,
         "kernel" ++ if (scope == .default) "" else ":" ++ @tagName(scope),
@@ -68,5 +67,4 @@ comptime {
     _ = boot;
     _ = drivers;
     _ = mem;
-    _ = serial;
 }

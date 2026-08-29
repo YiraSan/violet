@@ -26,8 +26,11 @@ const acpi = drivers.acpi;
 // --- drivers/serial/uart_pl011.zig --- //
 
 pub const architectures: []const std.Target.Cpu.Arch = &.{ .aarch64, .x86_64, .riscv64 };
+pub const discover_stage: ?drivers.Stage = .stage2;
 
-pub fn init(xsdt: *const acpi.Xsdt, stage: drivers.Stage) !void {
-    _ = xsdt;
+pub fn discover(comptime stage: drivers.Stage, xsdt: ?*const acpi.Xsdt, dt: ?void) !void {
     _ = stage;
+    _ = xsdt;
+    _ = dt;
 }
+

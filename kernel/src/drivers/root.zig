@@ -20,6 +20,8 @@ const build_options = @import("build_options");
 
 // --- exports --- //
 
+pub const serial = @import("serial/root.zig");
+
 pub const acpi = @import("acpi.zig");
 
 // --- drivers/root.zig --- //
@@ -41,7 +43,7 @@ pub const Driver = enum {
     // serial
     uart_ns16550a,
     uart_pl011,
-    sbi,
+    legacy_sbi,
 
     pub fn isCompatible(comptime driver: Driver) bool {
         const Module = driver.moduleOf();
@@ -55,7 +57,7 @@ pub const Driver = enum {
         return switch (driver) {
             .uart_ns16550a => @import("serial/uart_ns16550a.zig"),
             .uart_pl011 => @import("serial/uart_pl011.zig"),
-            .sbi => @import("serial/sbi.zig"),
+            .legacy_sbi => @import("serial/legacy_sbi.zig"),
         };
     }
 };
@@ -88,7 +90,8 @@ const all_drivers = blk: {
 
 fn validateDriverModule(comptime Module: type) void {
     if (!@hasDecl(Module, "architectures")) @compileError("driver module is missing `architectures`");
-    if (!@hasDecl(Module, "init")) @compileError("driver module is missing `init`");
+    if (!@hasDecl(Module, "discover_stage")) @compileError("driver module is missing `discover_stage`");
+    if (!@hasDecl(Module, "discover")) @compileError("driver module is missing `discover`");
 }
 
 pub const all_modules: []const type = blk: {
@@ -103,10 +106,12 @@ pub const all_modules: []const type = blk: {
     break :blk list;
 };
 
-pub fn runStage(xsdt: *const acpi.Xsdt, stage: Stage) void {
+pub fn runStage(comptime stage: Stage, xsdt: ?*const acpi.Xsdt, dt: ?void) void {
     inline for (all_modules) |Module| {
-        Module.init(xsdt, stage) catch |err| {
-            std.debug.panic("driver init failed ({s}): {s}", .{ @typeName(Module), @errorName(err) });
+        comptime if (Module.discover_stage) |ds| if (ds != stage) continue;
+
+        Module.discover(stage, xsdt, dt) catch |err| {
+            std.debug.panic("driver '{s}' init at {} failed: {s}", .{ @tagName(stage), @typeName(Module), @errorName(err) });
         };
     }
 }
@@ -115,7 +120,7 @@ pub fn runLocal() void {
     inline for (all_modules) |Module| {
         if (@hasDecl(Module, "initLocal")) {
             Module.initLocal() catch |err| {
-                std.debug.panic("driver local init failed ({s}): {s}", .{ @typeName(Module), @errorName(err) });
+                std.debug.panic("driver '{s}' local init failed: {s}", .{ @typeName(Module), @errorName(err) });
             };
         }
     }

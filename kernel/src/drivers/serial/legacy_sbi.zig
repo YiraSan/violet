@@ -24,26 +24,24 @@ const kernel = @import("root");
 const drivers = kernel.drivers;
 const acpi = drivers.acpi;
 
-const serial = kernel.serial;
-
 const mem = kernel.mem;
 
-// --- drivers/serial/sbi.zig --- //
+// --- drivers/serial/legacy_sbi.zig --- //
 
 pub const architectures: []const std.Target.Cpu.Arch = &.{.riscv64};
+pub const discover_stage: ?drivers.Stage = .stage0;
 
-pub fn init(_: ?*const acpi.Xsdt, _: drivers.Stage) !void {
-    if (initialized) return;
-    initialized = true;
+pub fn discover(comptime stage: drivers.Stage, xsdt: ?*const acpi.Xsdt, dt: ?void) !void {
+    _ = stage;
+    _ = xsdt;
+    _ = dt;
 
-    serial.register(.{
+    drivers.serial.register(.{
         .name = "sbi_console",
         .context = @ptrCast(&sbi_ctx),
         .vtable = .{ .write = write, .read = null },
-    }, 10);
+    }, 1);
 }
-
-var initialized: bool = false;
 
 const SbiContext = struct {};
 var sbi_ctx: SbiContext = .{};

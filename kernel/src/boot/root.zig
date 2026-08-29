@@ -27,7 +27,6 @@ const arch = kernel.arch;
 const cpu = arch.cpu;
 
 const mem = kernel.mem;
-const phys = mem.phys;
 
 const drivers = kernel.drivers;
 const acpi = drivers.acpi;
@@ -41,6 +40,71 @@ export var base_revision: limine.BaseRevision linksection(".limine_requests") = 
 export var hhdm_request: limine.HhdmRequest linksection(".limine_requests") = .{};
 export var memmap_request: limine.MemoryMapRequest linksection(".limine_requests") = .{};
 export var rsdp_request: limine.RsdpRequest linksection(".limine_requests") = .{};
+export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = requested_mode, .max_mode = requested_mode, .min_mode = requested_mode };
+
+export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
+
+var xsdt_pa: ?u64 = null;
+
+inline fn getXsdt() ?*const acpi.Xsdt {
+    if (xsdt_pa) |pa| {
+        return mem.toHhdm(acpi.Xsdt, pa);
+    }
+    return null;
+}
+
+export fn kernel_entry() noreturn {
+    if (!base_revision.isSupported()) {
+        cpu.halt();
+    }
+
+    const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
+    if (pagingmode_response.mode != requested_mode) unreachable;
+
+    mem.hhdm_offset = hhdm_request.response.?.offset;
+
+    xsdt_pa = if (rsdp_request.response) |rsdp_response| blk: {
+        const rsdp: *acpi.Rsdp = @ptrCast(@alignCast(rsdp_response.address));
+        if (!rsdp.isValid()) break :blk null;
+
+        const xsdt = mem.toHhdm(acpi.Xsdt, rsdp.xsdt_address);
+        if (!xsdt.isValid()) break :blk null;
+
+        break :blk rsdp.xsdt_address;
+    } else null;
+
+    drivers.serial.init();
+
+    drivers.runStage(.stage0, getXsdt(), null);
+
+    const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
+    mem.phys.init(memmap_entries);
+
+    drivers.runStage(.stage1, getXsdt(), null);
+
+    if (builtin.mode == .Debug) {
+        if (framebuffer_request.response) |fb_response| {
+            if (fb_response.framebuffer_count > 0) {
+                const framebuffer = fb_response.getFramebuffers()[0];
+                for (0..100) |i| {
+                    const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(framebuffer.address));
+                    fb_ptr[i * (framebuffer.pitch / 4) + i] = 0xffffff;
+                }
+            }
+        }
+    }
+
+    drivers.serial.clear(null);
+    std.log.info("version {s}", .{build_options.version});
+
+    const available_mib = mem.phys.availablePages() * mem.PAGE_SIZE / 1024 / 1024;
+    if (available_mib < 384) std.debug.panic("available memory: {} MiB is under 384 MiB requirement", .{available_mib});
+    std.log.info("available memory: {} MiB", .{available_mib});
+
+    cpu.halt();
+}
+
+// --- //
 
 const requested_mode: limine.PagingMode = switch (builtin.cpu.arch) {
     .aarch64 => switch (build_options.page_levels) {
@@ -61,54 +125,3 @@ const requested_mode: limine.PagingMode = switch (builtin.cpu.arch) {
     },
     else => @panic("arch unsupported"),
 };
-
-export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = requested_mode, .max_mode = requested_mode, .min_mode = requested_mode };
-
-export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
-
-export fn kernel_entry() noreturn {
-    if (!base_revision.isSupported()) {
-        cpu.halt();
-    }
-
-    const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
-    if (pagingmode_response.mode != requested_mode) unreachable;
-
-    mem.hhdm_offset = hhdm_request.response.?.offset;
-
-    const rsdp: *acpi.Rsdp = @ptrCast(@alignCast(rsdp_request.response.?.address));
-    if (!rsdp.isValid()) unreachable;
-
-    const xsdt = mem.toHhdm(acpi.Xsdt, rsdp.xsdt_address);
-    if (!xsdt.isValid()) unreachable;
-
-    kernel.serial.init();
-
-    drivers.runStage(xsdt, .stage0);
-
-    const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
-    phys.init(memmap_entries);
-
-    drivers.runStage(xsdt, .stage1);
-
-    if (builtin.mode == .Debug) {
-        if (framebuffer_request.response) |fb_response| {
-            if (fb_response.framebuffer_count > 0) {
-                const framebuffer = fb_response.getFramebuffers()[0];
-                for (0..100) |i| {
-                    const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(framebuffer.address));
-                    fb_ptr[i * (framebuffer.pitch / 4) + i] = 0xffffff;
-                }
-            }
-        }
-    }
-
-    kernel.serial.clear(null);
-    std.log.info("version {s}", .{build_options.version});
-
-    const available_mib = mem.phys.availablePages() * mem.paging.page_size / 1024 / 1024;
-    if (available_mib < 384) std.debug.panic("available memory: {} MiB is under 384 MiB requirement", .{available_mib});
-    std.log.info("available memory: {} MiB", .{available_mib});
-
-    cpu.halt();
-}

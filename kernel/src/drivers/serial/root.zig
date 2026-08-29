@@ -24,7 +24,7 @@ const kernel = @import("root");
 const mem = kernel.mem;
 const utils = mem.utils;
 
-// --- serial/root.zig --- //
+// --- drivers/serial/root.zig --- //
 
 pub const SerialImpl = struct {
     name: []const u8,
@@ -37,7 +37,7 @@ pub const SerialImpl = struct {
     };
 };
 
-const MAX_SERIALS = 4;
+const MAX_SERIALS = 8;
 const NULL_INDEX: u32 = std.math.maxInt(u32);
 
 const DefaultSlot = packed struct(u64) {
