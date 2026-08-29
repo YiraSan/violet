@@ -34,9 +34,16 @@ pub const serial = @import("serial/root.zig");
 // --- main.zig --- //
 
 pub fn panic(message: []const u8, stack_trace: ?*std.builtin.StackTrace, return_address: ?usize) noreturn {
-    _ = message;
     _ = stack_trace;
     _ = return_address;
+
+    serial.print(
+        null,
+        .err,
+        "kernel",
+        "{s}",
+        .{message},
+    );
 
     arch.cpu.halt();
 }

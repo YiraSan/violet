@@ -180,8 +180,6 @@ pub fn print(impl_index: ?usize, comptime message_level: std.log.Level, scope: [
 
     const impl = &registered[idx];
     const lock = &write_locks[idx];
-    const int_state = lock.acquire(.write, 0);
-    defer lock.release(.write, int_state);
 
     var writer: SerialWriter = undefined;
     writer.init(impl);
@@ -192,6 +190,9 @@ pub fn print(impl_index: ?usize, comptime message_level: std.log.Level, scope: [
         .info => "\x1b[36minfo",
         .debug => "\x1b[90mdebug",
     };
+
+    const int_state = lock.acquire(.write, 0);
+    defer lock.release(.write, int_state);
 
     writer.interface.print(
         "\x1b[35m[{s}] {s}: \x1b[0m" ++ format ++ "\n",
