@@ -55,6 +55,7 @@ pub fn init() void {
     impl_count = .init(0);
     default_slot = .init(@bitCast(DefaultSlot{}));
 }
+
 pub fn register(impl: SerialImpl, priority: usize) void {
     const idx = impl_count.fetchAdd(1, .acq_rel);
 
