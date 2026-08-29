@@ -165,7 +165,7 @@ fn makeImageExe(b: *std.Build) *std.Build.Step.Compile {
 }
 
 fn downloadAndDecompress(b: *std.Build, url: []const u8, out_name: []const u8) std.Build.LazyPath {
-    const download_cmd = b.addSystemCommand(&.{ "curl", "-L", "-o" });
+    const download_cmd = b.addSystemCommand(&.{ "curl", "-sS", "-L", "-o" });
     const bz2_path = download_cmd.addOutputFileArg(b.fmt("{s}.bz2", .{out_name}));
     download_cmd.addArg(url);
 
