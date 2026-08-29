@@ -38,12 +38,15 @@ pub fn init(_: ?*const acpi.Xsdt, _: drivers.Stage) !void {
 
     serial.register(.{
         .name = "sbi_console",
-        .context = @ptrCast(&initialized), // random context
+        .context = @ptrCast(&sbi_ctx),
         .vtable = .{ .write = write, .read = null },
     }, 10);
 }
 
 var initialized: bool = false;
+
+const SbiContext = struct {};
+var sbi_ctx: SbiContext = .{};
 
 fn write(_: *anyopaque, data: []const u8) void {
     for (data) |byte| {
@@ -53,9 +56,13 @@ fn write(_: *anyopaque, data: []const u8) void {
 }
 
 inline fn writeChar(c: u8) void {
+    var error_code: usize = undefined;
+    var return_value: usize = undefined;
+
     asm volatile ("ecall"
-        :
-        : [a7] "{a7}" (@as(usize, 0x01)),
-          [a0] "{a0}" (@as(usize, c)),
-        : .{ .a0 = true, .a1 = true });
+        : [err] "={a0}" (error_code),
+          [ret] "={a1}" (return_value),
+        : [ext] "{a7}" (@as(usize, 0x01)),
+          [arg] "{a0}" (@as(usize, c)),
+        : .{ .memory = true });
 }
