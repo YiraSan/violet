@@ -93,10 +93,12 @@ export fn kernel_entry() noreturn {
 
     if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {
-            const framebuffer = fb_response.getFramebuffers()[0];
-            for (0..100) |i| {
-                const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(framebuffer.address));
-                fb_ptr[i * (framebuffer.pitch / 4) + i] = 0xffffff;
+            if (fb_response.framebuffer_count > 0) {
+                const framebuffer = fb_response.getFramebuffers()[0];
+                for (0..100) |i| {
+                    const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(framebuffer.address));
+                    fb_ptr[i * (framebuffer.pitch / 4) + i] = 0xffffff;
+                }
             }
         }
     }
