@@ -32,18 +32,25 @@ pub inline fn pause() void {
     asm volatile ("yield");
 }
 
-pub inline fn id() u64 {
-    const mpidr = asm volatile ("mrs %[ret], mpidr_el1"
-        : [ret] "=r" (-> u64),
-    );
-
-    return mpidr & 0xff;
-}
-
 pub inline fn syncMem() void {
     asm volatile ("dsb ish" ::: .{ .memory = true });
 }
 
 pub inline fn syncStores() void {
     asm volatile ("dsb ishst" ::: .{ .memory = true });
+}
+
+pub inline fn getPerCpu() u64 {
+    var val: u64 = undefined;
+    asm volatile ("mrs %[v], tpidr_el1"
+        : [v] "=r" (val),
+    );
+    return val;
+}
+
+pub inline fn setPerCpu(val: u64) void {
+    asm volatile ("msr tpidr_el1, %[v]"
+        :
+        : [v] "r" (val),
+    );
 }

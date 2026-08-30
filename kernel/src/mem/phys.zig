@@ -63,7 +63,39 @@ pub fn availablePages() usize {
     return available_pages;
 }
 
-pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
+pub const PhysContext = struct {
+    const CACHE_LEN = PAGE_SIZE / @sizeOf(u64);
+    preheat_cache: *[CACHE_LEN]u64,
+    preheat_len: usize,
+    recycle_cache: *[CACHE_LEN]u64,
+    recycle_len: usize,
+
+    pub fn init(self: *PhysContext) !void {
+        var page: [1]u64 = undefined;
+
+        try _allocNonContiguous(&page);
+        self.preheat_cache = mem.toHhdm([CACHE_LEN]u64, page[0]);
+        self.preheat_len = CACHE_LEN;
+
+        try _allocNonContiguous(&page);
+        self.recycle_cache = mem.toHhdm([CACHE_LEN]u64, page[0]);
+        self.recycle_len = 0;
+
+        try _allocNonContiguous(self.preheat_cache[0..]);
+    }
+
+    pub fn current() ?*PhysContext {
+        if (kernel.cpu.CpuContext.current()) |cpu_context| {
+            @branchHint(.likely);
+            return &cpu_context.phys_context;
+        } else {
+            @branchHint(.cold);
+            return null;
+        }
+    }
+};
+
+pub fn init(memmap_entries: []*limine.MemoryMapEntry) !void {
     var max_phys_addr: u64 = 0;
     for (memmap_entries) |entry| {
         const end_addr = entry.base + entry.length;
@@ -119,7 +151,7 @@ pub fn init(memmap_entries: []*limine.MemoryMapEntry) void {
     }
 
     if (!found_space) {
-        @panic("pmm: not enough contiguous usable memory for metadata arrays!");
+        return error.NotEnoughMemory;
     }
 
     const metadata_virt_base = mem.hhdm_offset + metadata_phys_base;
@@ -225,15 +257,58 @@ inline fn insertZone(zone_idx: u32, count: u16) void {
     bucket_occupation.set(count);
 }
 
-pub fn allocNonContiguous(buffer: []u64) usize {
-    if (buffer.len == 0) return 0;
+pub fn allocNonContiguous(buffer: []u64) !void {
+    if (buffer.len == 0) return;
+
+    if (PhysContext.current()) |phys_context| {
+        @branchHint(.likely);
+
+        var filled: usize = @min(buffer.len, phys_context.recycle_len);
+        if (filled > 0) {
+            const start_idx = phys_context.recycle_len - filled;
+
+            @memcpy(
+                buffer[0..filled],
+                phys_context.recycle_cache[start_idx..phys_context.recycle_len],
+            );
+            phys_context.recycle_len -= filled;
+        }
+
+        while (filled < buffer.len) {
+            if (phys_context.preheat_len == 0) {
+                try _allocNonContiguous(phys_context.preheat_cache[0..]);
+                phys_context.preheat_len = phys_context.preheat_cache.len;
+            }
+
+            const remaining = buffer.len - filled;
+            const delta = @min(remaining, phys_context.preheat_len);
+
+            const preheat_start = phys_context.preheat_len - delta;
+            const new_filled = filled + delta;
+
+            @memcpy(
+                buffer[filled..new_filled],
+                phys_context.preheat_cache[preheat_start..phys_context.preheat_len],
+            );
+
+            phys_context.preheat_len -= delta;
+            filled = new_filled;
+        }
+    } else {
+        @branchHint(.cold);
+        return _allocNonContiguous(buffer);
+    }
+}
+
+fn _allocNonContiguous(buffer: []u64) !void {
+    if (buffer.len == 0) return;
 
     const int_state = global_lock.acquire(.write, 0);
     defer global_lock.release(.write, int_state);
 
     const to_fill = @min(buffer.len, available_pages);
     if (to_fill == 0) {
-        return 0;
+        return Error.OutOfMemory;
     }
 
     std.debug.assert(to_fill <= available_pages);
@@ -266,15 +341,12 @@ pub fn allocNonContiguous(buffer: []u64) usize {
         free_counts[zone_idx] -= @intCast(pages_to_pump);
         insertZone(zone_idx, free_counts[zone_idx]);
     }
-
-    return filled;
 }
 
-pub fn allocPage() !u64 {
+pub inline fn allocPage() !u64 {
     var page: [1]u64 = undefined;
-    const count = allocNonContiguous(&page);
-    if (count == 1) return page[0];
-    return Error.OutOfMemory;
+    try allocNonContiguous(&page);
+    return page[0];
 }
 
 fn findContiguousBits(bitmap: *const ZoneBitSet, count: usize) ?usize {
@@ -510,6 +582,43 @@ pub fn freeContiguous(phys_addr: u64, pages: usize) void {
 pub fn freeNonContiguous(buffer: []u64) void {
     if (buffer.len == 0) return;
 
+    if (PhysContext.current()) |phys_context| {
+        @branchHint(.likely);
+
+        var remaining = buffer;
+
+        while (remaining.len > 0) {
+            const space_in_recycle = phys_context.recycle_cache.len - phys_context.recycle_len;
+
+            if (space_in_recycle > 0) {
+                const chunk = @min(remaining.len, space_in_recycle);
+
+                @memcpy(phys_context.recycle_cache[phys_context.recycle_len .. phys_context.recycle_len + chunk], remaining[0..chunk]);
+
+                phys_context.recycle_len += chunk;
+                remaining = remaining[chunk..];
+            } else {
+                if (phys_context.preheat_len > 0) {
+                    _freeNonContiguous(phys_context.preheat_cache[0..phys_context.preheat_len]);
+                }
+
+                const temp_ptr = phys_context.preheat_cache;
+                phys_context.preheat_cache = phys_context.recycle_cache;
+                phys_context.recycle_cache = temp_ptr;
+
+                phys_context.preheat_len = phys_context.recycle_len;
+                phys_context.recycle_len = 0;
+            }
+        }
+    } else {
+        @branchHint(.cold);
+        _freeNonContiguous(buffer);
+    }
+}
+
+fn _freeNonContiguous(buffer: []u64) void {
+    if (buffer.len == 0) return;
+
     std.mem.sortUnstable(u64, buffer, {}, std.sort.asc(u64));
 
     const int_state = global_lock.acquire(.write, 0);
@@ -551,6 +660,10 @@ pub fn freeNonContiguous(buffer: []u64) void {
     }
 
     available_pages += buffer.len;
+}
+
+pub inline fn freePage(page: u64) void {
+    freeNonContiguous(&.{page});
 }
 
 fn validate() void {

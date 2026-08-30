@@ -32,21 +32,37 @@ pub inline fn pause() void {
     asm volatile ("pause");
 }
 
-pub inline fn id() u64 {
-    var ebx: u32 = undefined;
-
-    asm volatile ("cpuid"
-        : [_] "={ebx}" (ebx),
-        : [leaf] "{eax}" (@as(u32, 1)),
-        : .{ .eax = true, .ecx = true, .edx = true });
-
-    return ebx >> 24;
-}
-
 pub inline fn syncMem() void {
     asm volatile ("mfence" ::: .{ .memory = true });
 }
 
 pub inline fn syncStores() void {
     asm volatile ("sfence" ::: .{ .memory = true });
+}
+
+const IA32_KERNEL_GS_BASE = 0xC0000102;
+
+pub inline fn getPerCpu() u64 {
+    var low: u32 = undefined;
+    var high: u32 = undefined;
+
+    asm volatile ("rdmsr"
+        : [low] "={eax}" (low),
+          [high] "={edx}" (high),
+        : [msr] "{ecx}" (IA32_KERNEL_GS_BASE),
+    );
+
+    return (@as(u64, high) << 32) | low;
+}
+
+pub inline fn setPerCpu(val: u64) void {
+    const low: u32 = @truncate(val);
+    const high: u32 = @truncate(val >> 32);
+
+    asm volatile ("wrmsr"
+        :
+        : [msr] "{ecx}" (IA32_KERNEL_GS_BASE),
+          [low] "{eax}" (low),
+          [high] "{edx}" (high),
+    );
 }

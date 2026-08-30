@@ -32,14 +32,25 @@ pub inline fn pause() void {
     asm volatile ("fence" ::: .{ .memory = true });
 }
 
-pub inline fn id() u64 {
-    @compileError("use info from openSBI !");
-}
-
 pub inline fn syncMem() void {
     asm volatile ("fence rw, rw" ::: .{ .memory = true });
 }
 
 pub inline fn syncStores() void {
     asm volatile ("fence w, w" ::: .{ .memory = true });
+}
+
+pub inline fn getPerCpu() u64 {
+    var val: u64 = undefined;
+    asm volatile ("mv %[v], tp"
+        : [v] "=r" (val),
+    );
+    return val;
+}
+
+pub inline fn setPerCpu(val: u64) void {
+    asm volatile ("mv tp, %[v]"
+        :
+        : [v] "r" (val),
+    );
 }

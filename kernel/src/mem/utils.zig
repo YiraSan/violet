@@ -267,7 +267,7 @@ pub fn NodeList(comptime Item: type, comptime node_size: ?usize) type {
 
                     for (&node.entries) |*entry_ptr| {
                         if (entry_ptr.load(.monotonic)) |entry| {
-                            phys.freeContiguous(mem.fromHhdm(Item, @ptrCast(entry)), 1);
+                            phys.freePage(mem.fromHhdm(Item, @ptrCast(entry)));
                         }
                     }
 
@@ -328,7 +328,7 @@ pub fn NodeList(comptime Item: type, comptime node_size: ?usize) type {
                         if (entry_ptr.cmpxchgStrong(null, new_entry, .acq_rel, .monotonic) == null) {
                             break :blk new_entry;
                         } else {
-                            phys.freeContiguous(new_entry_pa, 1);
+                            phys.freePage(new_entry_pa);
                             continue;
                         }
                     }
@@ -613,11 +613,12 @@ pub fn UnrolledList(comptime Item: type, comptime node_size: ?usize) type {
             self.len = 0;
         }
 
-        pub fn append(self: *Self, item: Item) !void {
+        pub fn append(self: *Self, item: Item) !usize {
             var target_node: *Node = undefined;
 
+            const item_index = self.len % ITEMS_PER_NODE;
+
             if (self.last_node) |last| {
-                const item_index = self.len % ITEMS_PER_NODE;
                 if (item_index == 0 and self.len > 0) {
                     const new_node = try Node.create();
                     last.next = new_node;
@@ -633,9 +634,12 @@ pub fn UnrolledList(comptime Item: type, comptime node_size: ?usize) type {
                 target_node = new_node;
             }
 
-            const item_index = self.len % ITEMS_PER_NODE;
             target_node.items[item_index] = item;
+
+            const inserted_index = self.len;
             self.len += 1;
+
+            return inserted_index;
         }
 
         pub fn getPtr(self: *Self, index: usize) ?*Item {

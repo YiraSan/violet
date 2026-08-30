@@ -24,8 +24,6 @@ const build_options = @import("build_options");
 const kernel = @import("root");
 
 const arch = kernel.arch;
-const cpu = arch.cpu;
-
 const mem = kernel.mem;
 
 const drivers = kernel.drivers;
@@ -41,6 +39,7 @@ export var hhdm_request: limine.HhdmRequest linksection(".limine_requests") = .{
 export var memmap_request: limine.MemoryMapRequest linksection(".limine_requests") = .{};
 export var rsdp_request: limine.RsdpRequest linksection(".limine_requests") = .{};
 export var pagingmode_request: limine.PagingModeRequest linksection(".limine_requests") = .{ .mode = requested_mode, .max_mode = requested_mode, .min_mode = requested_mode };
+export var exec_request: limine.ExecutableAddressRequest linksection(".limine_requests") = .{};
 
 export var framebuffer_request: limine.FramebufferRequest linksection(".limine_requests") = .{};
 
@@ -53,9 +52,9 @@ inline fn getXsdt() ?*const acpi.Xsdt {
     return null;
 }
 
-export fn kernel_entry() noreturn {
+export fn kernel_entry() callconv(.c) noreturn {
     if (!base_revision.isSupported()) {
-        cpu.halt();
+        arch.cpu.halt();
     }
 
     const pagingmode_response: *limine.PagingModeResponse = pagingmode_request.response.?;
@@ -78,7 +77,13 @@ export fn kernel_entry() noreturn {
     drivers.runStage(.stage0, getXsdt(), null);
 
     const memmap_entries: []*limine.MemoryMapEntry = memmap_request.response.?.getEntries();
-    mem.phys.init(memmap_entries);
+    mem.phys.init(memmap_entries) catch |err| {
+        std.debug.panic("mem.phys.init failed: {s}", .{@errorName(err)});
+    };
+
+    kernel.cpu.init() catch |err| {
+        std.debug.panic("cpu.init failed: {s}", .{@errorName(err)});
+    };
 
     drivers.runStage(.stage1, getXsdt(), null);
 
@@ -101,7 +106,7 @@ export fn kernel_entry() noreturn {
     if (available_mib < 384) std.debug.panic("available memory: {} MiB is under 384 MiB requirement", .{available_mib});
     std.log.info("available memory: {} MiB", .{available_mib});
 
-    cpu.halt();
+    arch.cpu.halt();
 }
 
 // --- //
