@@ -71,6 +71,26 @@ pub fn build(b: *std.Build) !void {
     const basalt_mod = basalt_dep.module("basalt");
     kernel_mod.addImport("basalt", basalt_mod);
 
+    {
+        const arch_path = b.fmt("src/arch/{s}/", .{@tagName(arch)});
+        var asm_dir = try b.build_root.handle.openDir(b.graph.io, arch_path, .{ .iterate = true });
+        defer asm_dir.close(b.graph.io);
+
+        var walker = try asm_dir.walk(b.allocator);
+        defer walker.deinit();
+
+        while (try walker.next(b.graph.io)) |entry| {
+            if (entry.kind == .file) {
+                const ext = std.fs.path.extension(entry.basename);
+
+                if (std.mem.eql(u8, ext, ".s")) {
+                    const full_path = try std.fs.path.join(b.allocator, &.{ arch_path, entry.path });
+                    kernel_mod.addAssemblyFile(b.path(full_path));
+                }
+            }
+        }
+    }
+
     const kernel_exe = b.addExecutable(.{
         .name = "kernel",
         .root_module = kernel_mod,
