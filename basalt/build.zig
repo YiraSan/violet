@@ -14,25 +14,6 @@
 
 const std = @import("std");
 
-const Arch = std.Target.Cpu.Arch;
-
-pub const GenericTier = enum {
-    v1,
-    v2,
-    v3,
-
-    pub fn getCpuModel(self: GenericTier, arch: Arch) *const std.Target.Cpu.Model {
-        return switch (arch) {
-            .x86_64 => switch (self) {
-                .v1 => &std.Target.x86.cpu.x86_64_v2,
-                .v2 => &std.Target.x86.cpu.x86_64_v3,
-                .v3 => &std.Target.x86.cpu.x86_64_v4,
-            },
-            else => std.Target.Cpu.Model.baseline(arch, .{ .tag = .freestanding, .version_range = .{ .none = {} } }),
-        };
-    }
-};
-
 pub fn build(b: *std.Build) void {
     const is_module = b.option(bool, "is_module", "is_module") orelse false;
 

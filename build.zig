@@ -20,17 +20,13 @@ const Arch = std.Target.Cpu.Arch;
 pub fn build(b: *std.Build) !void {
     const board = b.option(Board, "board", "The target board");
     const arch = if (board) |bo| bo.getSoC().getArch() else b.option(Arch, "arch", "The target arch") orelse b.graph.host.result.cpu.arch;
-    const tier = b.option(basalt.GenericTier, "tier", "The target tier") orelse .v1;
 
-    const target = b.resolveTargetQuery(.{
-        .cpu_arch = arch,
-        .os_tag = .freestanding,
-        .abi = .none,
-        .cpu_model = .{ .explicit = if (board) |bo|
-            bo.getSoC().getCpuModel()
-        else
-            tier.getCpuModel(arch) },
-    });
+    const target = b.resolveTargetQuery(.{ .cpu_arch = arch, .os_tag = .freestanding, .abi = .none, .cpu_model = .{ .explicit = if (board) |bo|
+        bo.getSoC().getCpuModel()
+    else switch (arch) {
+        .x86_64 => &std.Target.x86.cpu.x86_64_v2,
+        else => std.Target.Cpu.Model.baseline(arch, .{ .tag = .freestanding, .version_range = .{ .none = {} } }),
+    } } });
 
     const optimize = b.standardOptimizeOption(.{});
 
