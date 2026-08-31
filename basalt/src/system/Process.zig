@@ -17,8 +17,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// --- exports --- //
+// --- system/Process.zig --- //
 
-pub const memory = @import("memory/root.zig");
-pub const sync = @import("sync/root.zig");
-pub const system = @import("system/root.zig");
+// ...

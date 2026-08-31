@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// --- dependencies --- //
+// --- imports --- //
 
 const std = @import("std");
 const builtin = @import("builtin");
 
-// --- exports --- //
-
-pub const memory = @import("memory/root.zig");
-pub const sync = @import("sync/root.zig");
-pub const system = @import("system/root.zig");
+// --- sync/root.zig --- //

@@ -16,9 +16,21 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 
 // --- exports --- //
 
-pub const memory = @import("memory/root.zig");
-pub const sync = @import("sync/root.zig");
-pub const system = @import("system/root.zig");
+pub const call = @import("call.zig");
+
+pub const Process = @import("Process.zig");
+pub const Task = @import("Task.zig");
+
+pub const call_conv: std.builtin.CallingConvention = switch (builtin.cpu.arch) {
+    .aarch64 => .{ .aarch64_aapcs = .{} },
+    .riscv64 => .{ .riscv64_lp64 = .{} },
+    // The kernel don't and will never support the redzone. So it has to be disabled.
+    .x86_64 => .{ .x86_64_sysv = .{} },
+    else => unreachable,
+};
+
+pub const is_module = build_options.is_module;
