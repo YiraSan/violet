@@ -30,6 +30,7 @@ pub const boot = @import("boot/root.zig");
 pub const cpu = @import("cpu/root.zig");
 pub const drivers = @import("drivers/root.zig");
 pub const mem = @import("mem/root.zig");
+pub const syscall = @import("syscall/root.zig");
 
 // --- main.zig --- //
 
@@ -69,4 +70,5 @@ comptime {
     _ = cpu;
     _ = drivers;
     _ = mem;
+    _ = syscall;
 }

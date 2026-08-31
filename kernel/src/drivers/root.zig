@@ -20,6 +20,7 @@ const build_options = @import("build_options");
 
 // --- exports --- //
 
+pub const intc = @import("intc/root.zig");
 pub const serial = @import("serial/root.zig");
 
 pub const acpi = @import("acpi.zig");
@@ -31,14 +32,12 @@ pub const Stage = enum {
     ///
     /// For MMIO mapping DO NOT use .stage0 via HHDM but proper MMIO mapping at .stage2+
     stage0,
-    /// Physical memory allocator and CpuContexts are initialized.
+    /// Physical memory allocator, interruptions and CpuContexts are initialized.
     stage1,
     /// The virtual memory manager is fully available.
     stage2,
-    /// Interrupt handler is initialized.
+    /// Interrupt Controller, Scheduler, Syscalls and Timer are initialized.
     stage3,
-    /// Timer is initialized.
-    stage4,
 };
 
 pub const Driver = enum {

@@ -85,7 +85,17 @@ export fn kernel_entry() callconv(.c) noreturn {
         std.debug.panic("cpu.init failed: {s}", .{@errorName(err)});
     };
 
+    arch.interrupts.init() catch |err| {
+        std.debug.panic("arch.interrupts.init failed: {s}", .{@errorName(err)});
+    };
+
     drivers.runStage(.stage1, getXsdt(), null);
+
+    kernel.syscall.init() catch |err| {
+        std.debug.panic("kernel.syscall.init failed: {s}", .{@errorName(err)});
+    };
+
+    drivers.runStage(.stage3, getXsdt(), null);
 
     if (builtin.mode == .Debug) {
         if (framebuffer_request.response) |fb_response| {

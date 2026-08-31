@@ -40,6 +40,7 @@ pub const CpuContext = struct {
     hardware_id: u64,
     processor_id: u64,
 
+    interrupts_context: arch.interrupts.InterruptsContext = undefined,
     phys_context: mem.phys.PhysContext = undefined,
 
     /// Return `null` if CpuContexts are not initialized.
@@ -61,6 +62,7 @@ pub const CpuContext = struct {
         const cpu_context = cpu_contexts.getPtr(index).?;
         cpu_context.index = index;
 
+        try arch.interrupts.InterruptsContext.init(&cpu_context.interrupts_context);
         try mem.phys.PhysContext.init(&cpu_context.phys_context);
 
         return cpu_context;
