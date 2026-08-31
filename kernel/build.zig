@@ -28,48 +28,51 @@ pub fn build(b: *std.Build) !void {
     });
 
     const optimize = b.standardOptimizeOption(.{});
+    if (optimize == .ReleaseFast) @panic("ReleaseFast is forbidden");
 
-    if (optimize == .ReleaseFast) {
-        @panic("ReleaseFast is forbidden");
+    const basalt_dep = b.dependency("basalt", .{ .is_module = true });
+    const basalt_mod = basalt_dep.module("basalt");
+
+    const build_options = b.addOptions();
+    {
+        const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse "";
+        const page_size = b.option(u64, "page_size", "4, 16, 64") orelse 4;
+        const page_levels = b.option(u8, "page_levels", "3, 4, 5") orelse 4;
+
+        build_options.addOption([]const u8, "version", zon.version);
+        build_options.addOption([]const u8, "drivers", drivers);
+        build_options.addOption(u64, "page_size", page_size);
+        build_options.addOption(u8, "page_levels", page_levels);
     }
+
+    const limine_dep = b.dependency("limine", .{ .revision = 6 });
+    const limine_mod = limine_dep.module("limine");
 
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
+        .imports = &.{
+            .{ .name = "basalt", .module = basalt_mod },
+            .{ .name = "build_options", .module = build_options.createModule() },
+            .{ .name = "limine", .module = limine_mod },
+        },
+
         .target = target,
         .optimize = optimize,
+
         .code_model = switch (arch) {
             .aarch64 => .small,
             .riscv64 => .medany,
             .x86_64 => .kernel,
             else => unreachable,
         },
-        .red_zone = false,
+        .link_libc = false,
+        .link_libcpp = false,
         .omit_frame_pointer = false,
+        .pic = false,
+        .red_zone = false,
         .stack_check = false,
         .stack_protector = false,
-        .link_libc = false,
     });
-
-    const drivers = b.option([]const u8, "drivers", "kernel drivers set") orelse "";
-
-    const page_size = b.option(u64, "page_size", "4, 16, 64") orelse 4;
-    const page_levels = b.option(u8, "page_levels", "3, 4, 5") orelse 4;
-
-    const build_options = b.addOptions();
-    build_options.addOption([]const u8, "version", zon.version);
-    build_options.addOption([]const u8, "drivers", drivers);
-    build_options.addOption(u64, "page_size", page_size);
-    build_options.addOption(u8, "page_levels", page_levels);
-    kernel_mod.addImport("build_options", build_options.createModule());
-
-    const limine_dep = b.dependency("limine", .{ .revision = 6 });
-    kernel_mod.addImport("limine", limine_dep.module("limine"));
-
-    const basalt_dep = b.dependency("basalt", .{
-        .is_module = true,
-    });
-    const basalt_mod = basalt_dep.module("basalt");
-    kernel_mod.addImport("basalt", basalt_mod);
 
     {
         const arch_path = b.fmt("src/arch/{s}/", .{@tagName(arch)});
@@ -98,10 +101,11 @@ pub fn build(b: *std.Build) !void {
         .use_lld = true,
     });
 
+    kernel_exe.bundle_compiler_rt = true;
     kernel_exe.entry = .disabled;
+    kernel_exe.link_z_max_page_size = if (arch == .aarch64) 64 * 1024 else 4 * 1024;
     kernel_exe.lto = .none;
     kernel_exe.pie = false;
-    kernel_exe.link_z_max_page_size = if (arch == .aarch64) 64 * 1024 else 4 * 1024;
 
     kernel_exe.setLinkerScript(b.path("linker.lds"));
 
