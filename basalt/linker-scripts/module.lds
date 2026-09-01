@@ -2,21 +2,17 @@ ENTRY(_start)
 
 PHDRS
 {
-    text    PT_LOAD FLAGS((1 << 0) | (1 << 2)) ; /* PF_X | PF_R */
-    rodata  PT_LOAD FLAGS((1 << 2)) ;            /* PF_R */
-    data    PT_LOAD FLAGS((1 << 1) | (1 << 2)) ; /* PF_W | PF_R */
-    dynamic PT_DYNAMIC FLAGS((1 << 2)) ;         /* PF_R */
+    rodata  PT_LOAD  FILEHDR  PHDRS  FLAGS((1 << 2)) ;
+    text    PT_LOAD                  FLAGS((1 << 0) | (1 << 2)) ;
+    data    PT_LOAD                  FLAGS((1 << 1) | (1 << 2)) ;
+    dynamic PT_DYNAMIC               FLAGS((1 << 2)) ;
 }
 
 SECTIONS
 {
     . = 0;
 
-    .text : {
-        *(.text .text.*)
-    } :text
-
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
+    . += SIZEOF_HEADERS;
 
     .rodata : {
         *(.rodata .rodata.*)
@@ -33,9 +29,14 @@ SECTIONS
 
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
+    .text : {
+        *(.text .text.*)
+    } :text
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
     .data : {
         *(.data .data.*)
-
         *(.data.rel.ro .data.rel.ro.*)
         *(.got)
     } :data
@@ -44,6 +45,8 @@ SECTIONS
         *(.bss .bss.*)
         *(COMMON)
     } :data
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     /DISCARD/ : {
         *(.eh_frame) *(.note .note.*) *(.comment) *(.interp)
