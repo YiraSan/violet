@@ -14,56 +14,67 @@
 
 const std = @import("std");
 
+const Arch = std.Target.Cpu.Arch;
+
 pub fn build(b: *std.Build) void {
     const is_module = b.option(bool, "is_module", "is_module") orelse false;
 
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "is_module", is_module);
+
     const basalt_mod = b.addModule("basalt", .{
         .root_source_file = b.path("src/root.zig"),
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options.createModule() },
+        },
     });
 
     basalt_mod.addImport("basalt", basalt_mod);
-
-    const build_options = b.addOptions();
-    build_options.addOption(bool, "is_module", is_module);
-    basalt_mod.addImport("build_options", build_options.createModule());
 }
+
+pub const Target = struct {
+    arch: Arch,
+    is_module: bool,
+};
 
 pub const ExecutableOptions = struct {
     name: []const u8,
-    root_source_file: std.Build.LazyPath,
-    arch: std.Target.Cpu.Arch,
-    optimize: std.builtin.OptimizeMode = .Debug,
-    is_module: bool = false,
+    optimize: std.builtin.OptimizeMode,
+    root_module: *std.Build.Module,
+    target: Target,
 };
+
+pub fn standardTargetOptions(b: *std.Build) Target {
+    const arch = b.option(Arch, "arch", "The target architecture.") orelse b.graph.host.result.cpu.arch;
+    const is_module = b.option(bool, "is_module", "is_module") orelse false;
+
+    return .{
+        .arch = arch,
+        .is_module = is_module,
+    };
+}
 
 pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.Compile {
     const target_query = std.Target.Query{
-        .cpu_arch = options.arch,
+        .cpu_arch = options.target.arch,
         .os_tag = .freestanding,
         .abi = .none,
         .ofmt = .elf,
-        .cpu_model = switch (options.arch) {
-            .x86_64 => &std.Target.x86.cpu.x86_64_v2,
-            else => std.Target.Cpu.Model.baseline(options.arch, .{ .tag = .freestanding, .version_range = .{ .none = {} } }),
+        .cpu_model = switch (options.target.arch) {
+            .x86_64 => .{ .explicit = &std.Target.x86.cpu.x86_64_v2 },
+            else => .{ .explicit = std.Target.Cpu.Model.baseline(options.target.arch, .{ .tag = .freestanding, .version_range = .{ .none = {} } }) },
         },
     };
     const target = b.resolveTargetQuery(target_query);
 
-    const basalt = b.dependency("basalt", .{ .is_module = options.is_module });
+    const basalt = b.dependency("basalt", .{ .is_module = options.target.is_module });
     const basalt_mod = basalt.module("basalt");
-
-    const user_mod = b.createModule(.{
-        .root_source_file = options.root_source_file,
-        .imports = &.{
-            .{ .name = "basalt", .module = basalt_mod },
-        },
-    });
 
     const wrapper_mod = b.createModule(.{
         .root_source_file = basalt.path("src/main.zig"),
         .imports = &.{
             .{ .name = "basalt", .module = basalt_mod },
-            .{ .name = "user", .module = user_mod },
+            .{ .name = "user", .module = options.root_module },
         },
 
         .target = target,
@@ -72,10 +83,10 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
         .link_libc = false,
         .link_libcpp = false,
         .omit_frame_pointer = false,
-        .pic = options.is_module,
+        .pic = options.target.is_module,
         .red_zone = false,
-        .stack_check = true,
-        .stack_protector = true,
+        .stack_check = false,
+        .stack_protector = false,
     });
 
     const exe = b.addExecutable(.{
@@ -87,12 +98,12 @@ pub fn addExecutable(b: *std.Build, options: ExecutableOptions) *std.Build.Step.
 
     exe.entry = .disabled;
     exe.lto = .none;
-    exe.pie = options.is_module;
+    exe.pie = options.target.is_module;
     exe.bundle_compiler_rt = true;
     exe.out_filename = b.fmt("{s}.elf", .{options.name});
-    exe.link_z_max_page_size = if (options.arch == .aarch64) 64 * 1024 else 4 * 1024;
+    exe.link_z_max_page_size = if (options.target.arch == .aarch64) 64 * 1024 else 4 * 1024;
 
-    if (options.is_module) {
+    if (options.target.is_module) {
         exe.pie = true;
         exe.setLinkerScript(basalt.path("linker-scripts/module.lds"));
     } else {

@@ -24,4 +24,6 @@ const user = @import("user");
 
 // --- main.zig --- //
 
-// ...
+export fn _start() callconv(basalt.system.call_conv) noreturn {
+    while (true) {}
+}
