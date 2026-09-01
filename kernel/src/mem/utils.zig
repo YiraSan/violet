@@ -368,7 +368,7 @@ pub fn SlotMap(comptime Item: type) type {
     return struct {
         const Self = @This();
 
-        pub const ArcRef = if (is_arc) struct {
+        pub const ArcRef = struct {
             map: *Self,
             item: *Item,
             index: u32,
@@ -390,7 +390,7 @@ pub fn SlotMap(comptime Item: type) type {
                 _ = tryAcquire(&self.item.refcount);
                 return self.*;
             }
-        } else unreachable;
+        };
 
         const Slot = struct {
             generation: std.atomic.Value(u32),
@@ -420,7 +420,7 @@ pub fn SlotMap(comptime Item: type) type {
             self.slots.deinit();
         }
 
-        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !struct { handle: Handle, ref: if (is_arc) ArcRef else *Item } {
+        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !struct { handle: Handle, ref_ptr: if (is_arc) ArcRef else *Item } {
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
 
             while (head.index != SENTINEL) {
@@ -446,7 +446,7 @@ pub fn SlotMap(comptime Item: type) type {
                 slot.generation.store(used_gen, .release);
                 return .{
                     .handle = .{ .generation = used_gen, .index = head.index },
-                    .ref = if (comptime is_arc) ArcRef{ .map = self, .index = head.index, .item = &slot.item } else &slot.item,
+                    .ref_ptr = if (comptime is_arc) ArcRef{ .map = self, .index = head.index, .item = &slot.item } else &slot.item,
                 };
             }
 
@@ -460,7 +460,7 @@ pub fn SlotMap(comptime Item: type) type {
             slot.generation = .init(1);
             return .{
                 .handle = .{ .generation = 1, .index = index },
-                .ref = if (comptime is_arc) ArcRef{ .map = self, .index = index, .item = &slot.item } else &slot.item,
+                .ref_ptr = if (comptime is_arc) ArcRef{ .map = self, .index = index, .item = &slot.item } else &slot.item,
             };
         }
 
