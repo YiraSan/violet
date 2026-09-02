@@ -30,6 +30,8 @@ const acpi = drivers.acpi;
 const mem = kernel.mem;
 const utils = mem.utils;
 
+const sched = kernel.sched;
+
 // --- cpu/root.zig --- //
 
 var initialized = false;
@@ -42,6 +44,7 @@ pub const CpuContext = struct {
 
     interrupts_context: arch.interrupts.InterruptsContext = undefined,
     phys_context: mem.phys.PhysContext = undefined,
+    sched_context: sched.SchedContext = undefined,
 
     /// Return `null` if CpuContexts are not initialized.
     pub inline fn current() ?*CpuContext {
@@ -64,6 +67,7 @@ pub const CpuContext = struct {
 
         try arch.interrupts.InterruptsContext.init(&cpu_context.interrupts_context);
         try mem.phys.PhysContext.init(&cpu_context.phys_context);
+        try sched.SchedContext.init(&cpu_context.sched_context);
 
         return cpu_context;
     }

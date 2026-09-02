@@ -119,7 +119,7 @@ fn syncHandler(frame: *ReducedFrame, saved_spsr: arch.registers.SPSR_EL1) callco
     switch (esr.ec) {
         .svc_inst_aarch64 => {
             const context = sched.SchedContext.current();
-            const privileged = if (context.current_task) |*task| task.payload().process.payload().privileged else true;
+            const privileged = if (context.current_task) |*task| task.payload().process.payload().isPrivileged() else true;
             if (privileged) {
                 log.err("unexpected svc trapped from a privileged (EL1t) task", .{});
                 arch.cpu.halt();
