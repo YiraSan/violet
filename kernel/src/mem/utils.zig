@@ -380,12 +380,12 @@ pub fn SlotMap(comptime Item: type) type {
                 self.map.releaseRef(self.index);
             }
 
-            pub fn payload(self: *ArcRef) *Item.Payload {
+            pub fn payload(self: *const ArcRef) *Item.Payload {
                 std.debug.assert(!self.released);
                 return &self.item.value;
             }
 
-            pub fn clone(self: *ArcRef) ArcRef {
+            pub fn clone(self: *const ArcRef) ArcRef {
                 std.debug.assert(!self.released);
                 _ = tryAcquire(&self.item.refcount);
                 return self.*;
@@ -420,7 +420,7 @@ pub fn SlotMap(comptime Item: type) type {
             self.slots.deinit();
         }
 
-        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !struct { handle: Handle, ref_ptr: if (is_arc) ArcRef else *Item } {
+        pub fn insert(self: *Self, item: if (is_arc) Item.Payload else Item) !struct { Handle, if (is_arc) ArcRef else *Item } {
             var head: FreeHead = @bitCast(self.free_head.load(.acquire));
 
             while (head.index != SENTINEL) {
@@ -445,8 +445,8 @@ pub fn SlotMap(comptime Item: type) type {
 
                 slot.generation.store(used_gen, .release);
                 return .{
-                    .handle = .{ .generation = used_gen, .index = head.index },
-                    .ref_ptr = if (comptime is_arc) ArcRef{ .map = self, .index = head.index, .item = &slot.item } else &slot.item,
+                    .{ .generation = used_gen, .index = head.index },
+                    if (comptime is_arc) ArcRef{ .map = self, .index = head.index, .item = &slot.item } else &slot.item,
                 };
             }
 
@@ -459,8 +459,8 @@ pub fn SlotMap(comptime Item: type) type {
             }
             slot.generation = .init(1);
             return .{
-                .handle = .{ .generation = 1, .index = index },
-                .ref_ptr = if (comptime is_arc) ArcRef{ .map = self, .index = index, .item = &slot.item } else &slot.item,
+                .{ .generation = 1, .index = index },
+                if (comptime is_arc) ArcRef{ .map = self, .index = index, .item = &slot.item } else &slot.item,
             };
         }
 
