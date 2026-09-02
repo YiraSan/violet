@@ -58,6 +58,8 @@ pub fn build(b: *std.Build) !void {
         });
         const kernel_exe = kernel_dep.artifact("kernel");
 
+        if (optimize == .Debug) b.installArtifact(kernel_exe);
+
         _ = img_root.addCopyFile(kernel_exe.getEmittedBin(), "core/kernel.elf");
     }
 
@@ -82,7 +84,10 @@ pub fn build(b: *std.Build) !void {
     const run_cmd = runCmd(b, arch, violet_img.source);
 
     const run_step = b.step("run", "Boot violetOS in QEMU");
-    if (board == null) run_step.dependOn(&run_cmd.step);
+    if (board == null) {
+        run_step.dependOn(&run_cmd.step);
+        run_step.dependOn(b.getInstallStep());
+    }
 }
 
 fn createImgRoot(b: *std.Build, arch: Arch) *std.Build.Step.WriteFile {
