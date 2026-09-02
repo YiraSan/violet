@@ -20,6 +20,8 @@ const std = @import("std");
 
 const kernel = @import("root");
 
+const arch = kernel.arch;
+
 // --- arch/aarch64/cpu.zig --- //
 
 pub inline fn halt() noreturn {
@@ -33,24 +35,22 @@ pub inline fn pause() void {
 }
 
 pub inline fn syncMem() void {
-    asm volatile ("dsb ish" ::: .{ .memory = true });
+    asm volatile (
+        \\ dsb ish
+        \\ isb
+        ::: .{ .memory = true });
 }
 
 pub inline fn syncStores() void {
-    asm volatile ("dsb ishst" ::: .{ .memory = true });
+    asm volatile (
+        \\ dsb ishst
+        ::: .{ .memory = true });
 }
 
 pub inline fn getPerCpu() u64 {
-    var val: u64 = undefined;
-    asm volatile ("mrs %[v], tpidr_el1"
-        : [v] "=r" (val),
-    );
-    return val;
+    return arch.registers.loadTpidrEl1();
 }
 
 pub inline fn setPerCpu(val: u64) void {
-    asm volatile ("msr tpidr_el1, %[v]"
-        :
-        : [v] "r" (val),
-    );
+    return arch.registers.storeTpidrEl1(val);
 }
