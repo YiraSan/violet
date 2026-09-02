@@ -663,7 +663,8 @@ fn _freeNonContiguous(buffer: []u64) void {
 }
 
 pub inline fn freePage(page: u64) void {
-    freeNonContiguous(&.{page});
+    var buf: [1]u64 = .{page};
+    freeNonContiguous(&buf);
 }
 
 fn validate() void {
