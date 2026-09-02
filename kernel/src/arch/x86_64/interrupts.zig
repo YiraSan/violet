@@ -22,6 +22,50 @@ const kernel = @import("root");
 
 // --- arch/x86_64/interrupts.zig --- //
 
+pub fn init() !void {}
+
+pub const InterruptsContext = struct {
+    pub fn init(self: *InterruptsContext) !void {
+        _ = self;
+    }
+
+    pub fn current() *InterruptsContext {
+        return &kernel.cpu.CpuContext.current().?.interrupts_context;
+    }
+};
+
+pub const ReducedFrame = extern struct {
+    pub fn setArg(self: *ReducedFrame, comptime index: usize, value: u64) void {
+        _ = self;
+        _ = index;
+        _ = value;
+
+        unreachable;
+    }
+
+    pub fn getArg(self: *ReducedFrame, comptime index: usize) u64 {
+        _ = self;
+        _ = index;
+
+        unreachable;
+    }
+};
+
+pub const ExtendedFrame = extern struct {};
+
+pub const InterruptData = struct {
+    pub fn init(data: *InterruptData, privileged: bool) !void {
+        _ = data;
+        _ = privileged;
+    }
+
+    pub fn deinit(data: *InterruptData) void {
+        _ = data;
+    }
+};
+
+// --- //
+
 pub const InterruptState = enum(u1) { disabled = 0, enabled = 1 };
 
 pub inline fn set(new: InterruptState) InterruptState {
