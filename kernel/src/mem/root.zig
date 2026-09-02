@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// --- exports --- //
+
+pub const paging = @import("paging.zig");
 pub const phys = @import("phys.zig");
 pub const utils = @import("utils.zig");
 
-pub const PAGE_SIZE = 4096;
+// --- mem/root.zig --- //
 
+pub var zero_page_pa: u64 = undefined;
 pub var hhdm_offset: u64 = undefined;
 
 pub inline fn toHhdm(comptime T: type, pa: u64) *T {
@@ -25,4 +29,10 @@ pub inline fn toHhdm(comptime T: type, pa: u64) *T {
 
 pub inline fn fromHhdm(comptime T: type, ptr: *T) u64 {
     return @intFromPtr(ptr) - hhdm_offset;
+}
+
+comptime {
+    _ = paging;
+    _ = phys;
+    _ = utils;
 }

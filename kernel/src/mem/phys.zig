@@ -27,7 +27,7 @@ const mem = kernel.mem;
 
 pub const Error = error{OutOfMemory};
 
-const PAGE_SIZE = mem.PAGE_SIZE;
+const PAGE_SIZE = mem.paging.page_size;
 const PAGES_PER_ZONE = 512;
 const ZONE_SIZE = PAGES_PER_ZONE * PAGE_SIZE;
 

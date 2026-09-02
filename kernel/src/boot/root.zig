@@ -112,7 +112,7 @@ export fn kernel_entry() callconv(.c) noreturn {
     drivers.serial.clear(null);
     std.log.info("version {s}", .{build_options.version});
 
-    const available_mib = mem.phys.availablePages() * mem.PAGE_SIZE / 1024 / 1024;
+    const available_mib = mem.phys.availablePages() * mem.paging.page_size / 1024 / 1024;
     if (available_mib < 384) std.debug.panic("available memory: {} MiB is under 384 MiB requirement", .{available_mib});
     std.log.info("available memory: {} MiB", .{available_mib});
 

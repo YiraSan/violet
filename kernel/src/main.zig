@@ -62,6 +62,8 @@ pub fn logFn(comptime message_level: std.log.Level, comptime scope: @EnumLiteral
 pub const std_options: std.Options = .{
     .logFn = logFn,
     .log_level = if (builtin.mode == .Debug) .debug else .info,
+    .page_size_min = mem.paging.page_size,
+    .page_size_max = mem.paging.page_size,
 };
 
 comptime {

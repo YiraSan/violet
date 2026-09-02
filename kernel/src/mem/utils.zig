@@ -29,7 +29,7 @@ const InterruptState = interrupts.InterruptState;
 const mem = kernel.mem;
 const phys = mem.phys;
 
-const PAGE_SIZE = mem.PAGE_SIZE;
+const PAGE_SIZE = mem.paging.page_size;
 
 // --- mem/utils.zig --- //
 
